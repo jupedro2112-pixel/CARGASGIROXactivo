@@ -136,7 +136,11 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   ruleta y el bono de instalación los APLICA EL SERVER solo en la carga (hgcash y
   manual, pisando el bono del agente si hay pendientes; nunca en multicuenta) vía
   `_pendingBonusFor` + `_settlePendingBonuses`. Un flujo de carga nuevo tiene que
-  pasar por ahí.
+  pasar por ahí. **Lotes con regalo (#191, 2026-10-07):** si no hubo bono pendiente ni
+  bonus del agente, la carga (manual y hgcash) suma el % AUTOMÁTICO de un lote vigente
+  (`claimAutoPromoPercent` → bonus de la MISMA operación con tope `_loteBonusAmount` →
+  `settle`/`revert`). Una carga = como mucho UN bono automático. Las fichas de un lote
+  por tiempo se acreditan recién cuando el cliente toca 🎁 RECLAMAR (`/api/gift/claim`).
 - **Ninguna push puede mencionar la RULETA** (2026-09-07): la ruleta diaria no está
   activa; `notificationService.isRouletteText` bloquea el envío en las 5 funciones
   (`blocked:'roulette'`) y el seed del boot migra reglas/plantillas guardadas.

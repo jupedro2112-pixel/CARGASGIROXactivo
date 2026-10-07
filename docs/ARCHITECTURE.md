@@ -5,7 +5,10 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-07** — cambio de clave con "cerrar sesión en los
+> Última actualización: **2026-10-07** — LOTES CON REGALO completos, réplica del gemelo
+> (#191): % AUTOMÁTICO en la carga con tope y franja, audiencia segmento, horas de uso
+> tras canjear, fichas con RECLAMO (§2 NotifBatch/PromoBonus, §5 lotes + hooks en las
+> cargas, §6 panel/PWA, §9). Misma sesión: cambio de clave con "cerrar sesión en los
 > otros dispositivos" conserva la sesión del dueño (§2 User.tokenVersion, §5).
 > Antes: 2026-09-18 — RULETA DIARIA con premios editables (dinero
 > con rollover / bonificación % en la próxima carga / peso) y elegibilidad editable;
@@ -207,10 +210,16 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   `_getActivePromoBonus` SOLO para bonos automáticos — los de LOTE,
   `sourceRuleCode:'lote'`, están EXENTOS porque los configura un agente a mano,
   hasta 200%; con `opts.includeFixed` el endpoint admin también ve regalos de
-  $ fijo → cartel "REGALO PENDIENTE"), **NotifBatch** (lote de notificaciones
+  $ fijo → cartel "REGALO PENDIENTE". **#191:** `autoApply` (el % lo aplica el
+  SISTEMA en la carga), `applyScope first|all`, `applyFromMin/ToMin` (franja
+  diaria en minutos ART), `rolloverX` (null = global/default), `usesCount`,
+  `usesTotalBonus`), **NotifBatch** (lote de notificaciones
   con regalo, 2026-08-14: recipients embebidos con channel/delivery/claimedAt/
   promoBonusId/credited*, modos code/window, giftType percent/fixed, código
-  público con maxClaims, `sendDone` para el motor reanudable — ver §7),
+  público con maxClaims, `sendDone` para el motor reanudable — ver §7. **#191:**
+  `applyMode agent|auto`, `applyScope`, `applyFromMin/ToMin`, `useHours` (horas para
+  usar el bono tras canjear, modo código), `claimRequired` (fichas por tiempo que el
+  cliente RECLAMA con botón), audiencia `segment` con `audienceFilter/Label`),
   **BonusStrategyConfig** + **StrategyEnrollment** (estrategia
   por voto de encuesta — APAGADA), **EncuestaVote/EncuestaFire** (motor encuesta —
   bonos apagados), **InactividadFire** (motor inactivos — APAGADO).
@@ -819,9 +828,25 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   mensaje + `belowMinimum/minAmount`; el status expone `minAmount`/`belowMinimum`
   por período. Editables en la misma card del panel (POST acepta `minimums`
   OPCIONAL: un panel viejo cacheado no los pisa).
-- **Lotes de notificaciones con regalo** (NotifBatch, 2026-08-14): envío masivo
-  (o código público) con regalo. `percent` → PromoBonus `sourceRuleCode:'lote'`
-  (cartel verde, LO APLICA EL AGENTE, exento del cap 30%); `fixed` → fichas
+- **Lotes de notificaciones con regalo** (NotifBatch, 2026-08-14; **#191 réplica
+  completa del gemelo**): envío masivo (o código público) con regalo.
+  `percent` + `applyMode:'agent'` → PromoBonus `sourceRuleCode:'lote'` (cartel verde,
+  LO APLICA EL AGENTE, exento del cap 30%). **`percent` + `applyMode:'auto'`
+  (default del panel) → PromoBonus `autoApply:true`: el SISTEMA lo suma solo en la
+  carga** — `claimAutoPromoPercent(user, usedBy)` (reserva atómica: scope `first`
+  active→used; scope `all` `usesCount++`; respeta la franja `_inDailyWindow` en hora
+  ART) → el % viaja como `bonusAmount` + `bonusMultiplier` (`_loteMultiplierFor`:
+  rollover del lote o default, el global lo pisa) de la MISMA operación de 1girox →
+  `settleAutoPromoPercent` (ROI) o `revertAutoPromoPercent` si la carga o el bono
+  adjunto fallaron. Hooks: `POST /api/admin/deposit` (solo si el agente NO puso bonus y
+  `_pendingBonusFor` no dio nada; la reserva va después de las validaciones del
+  movimiento bancario) y `hgcashAutoCarga` (solo sin bono pendiente y sin `_dupBank`).
+  **Una carga = como mucho UN bono automático** (bono app → % ruleta → lote). Tope
+  #172: `_loteBonusAmount(amount, pct, cfg)` con la regla de `Config['installBonus']`
+  (`capArs`/`excessPct`; `_loteCapTxt` para los textos). Traza en
+  `Transaction.metadata.loteBonus`. **#173:** en modo código el PromoBonus vence a
+  `useHours` del canje; historial con resumen (`usados/activos/vencidos/bonoTotal`) y
+  detalle con `summary` + `outcome`. `fixed` → fichas
   AUTOMÁTICAS por `_creditNotifBatchGift` con **LEDGER DE INTENCIÓN**: la
   Transaction `bonus` (`metadata.source:'notif_batch'`, no cuenta como carga)
   se escribe ANTES de acreditar (status 'pending') y se completa después — da
@@ -829,7 +854,13 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   y resuelve por `duplicate:true` con la reference estable `vip-nbatch-*`) y
   hace que los caps anti-abuso (3 créditos/24h, $300.000/7d por usuario
   cruzando todos los lotes; cuenta pending+completed → no se evaden por
-  concurrencia) no dependan de un write fire-and-forget. Tope pasado →
+  concurrencia) no dependan de un write fire-and-forget. **#177 fichas POR
+  TIEMPO con RECLAMO (`claimRequired`, default salvo tilde "directo"):** el motor NO
+  acredita, solo avisa (`/sys_lote_aviso_reclamo`, push con `giftClaim`); el cliente
+  ve la card dorada (`GET /api/gift/pending`) y toca RECLAMAR (`POST /api/gift/claim
+  {batchId}`: reserva atómica `claimedAt` → `_notifBatchFichasAfterClaim`, el MISMO
+  helper del canje por código; fallo limpio libera la reserva; `/sys_lote_reclamo_
+  cash`). Lo no reclamado antes de `expiresAt` no se paga. Tope pasado →
   bloqueo + alerta `security_alert` (toast rojo en el panel + nota
   admin-only). Guard bono-sobre-bono solo en el PRIMER intento; auto-claim
   v1.7. Envío por motor reanudable (§7), NUNCA en la request; al VENCER el
@@ -838,14 +869,19 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   automáticos al cliente son editables por COMANDOS (`/sys_lote_aviso_*` para
   el bloque del regalo, `/sys_lote_canje_*` para el canje). Canje de códigos: hook
   `_tryClaimNotifBatchCode` al principio de `POST /api/community-code/claim`
-  (null = no es de lote → sigue el welcome code intacto); membresía sin revelar
+  (null = no es de lote → sigue el welcome code intacto) y en `POST /api/gift-code/
+  claim` (#191, solo lotes); membresía sin revelar
   códigos ajenos; público con append atómico + cupo (`$expr $size`); SIN gate
-  de app instalada a propósito. Rollover del fixed validado contra
-  `bonus.multipliers` (⚠️ no `rollover.multipliers`). Endpoints
+  de app instalada a propósito. Rollover del fixed y del % automático validado
+  contra `bonus.multipliers` (⚠️ no `rollover.multipliers`). Audiencias: lista
+  (array o string), inactivos, todos, público y **`segment`** (#191,
+  `_resolveNotifBatchSegment`: sin entrar / sin cargar / cargaron hace poco + mín.
+  cargas + mín. $ + publicista + cupo). Endpoints
   `/api/admin/notif-batches` (+`/preview`, `/:id`): enviar/preview
-  admin+depositor, historial también withdrawer. La PWA canjea desde el modal
-  "🎁 Reclamar Bono con Código" (los estados pending/used/credited del welcome
-  code muestran un input extra para códigos de lote).
+  admin+depositor, historial también withdrawer. La PWA canjea desde el botón 🎁 de
+  la cabecera (modal "🎁 Regalos con código": fichas para RECLAMAR + canje + ℹ️) y desde
+  el modal "🎁 Reclamar Bono con Código" del menú ☰ (los estados pending/used/credited
+  del welcome code muestran un input extra para códigos de lote).
 - **Niveles VIP** (2026-08-03, réplica de Stake): se sube por APOSTADO acumulado de
   por vida (buckets `VipWagerMonth`, ver §2 y el motor en
   `src/services/vipLevelService.js`). Escalera en `src/utils/vipLevels.js`: umbrales
@@ -962,6 +998,13 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   (N = `bonusRollover.x` de `/api/refunds/status`, el efectivo del panel; oculto si el
   global está apagado) + botón que abre `rolloverInfoModal` (explicación del rollover,
   deportes no suma). `VIP.refunds.updateRolloverLabels` / `showRolloverInfo`.
+- **🎁 Regalos con código (#191):** botón `#giftCodeBtn` en `.chat-topbar`
+  (`.gift-topbar-btn`, cableado en app.js) → modal `giftCodeModal` con pestañas Canjear
+  (lista de fichas para RECLAMAR `giftPendingBox` + input → `POST /api/gift-code/claim`)
+  e ℹ️ INFORMACIÓN (app instalada / notis / Telegram). `promobonus.js` pinta además la
+  card dorada `giftClaimCard` del home (`GET /api/gift/pending`, `VIP.promoBonus.claim`
+  → `POST /api/gift/claim` → `VIP.ui.syncBalance`); socket.js la refresca al llegar un
+  mensaje del sistema.
 - Duplicados front/back a mantener sincronizados: mínimo retiro $4.999, bono $5.000,
   `VIP.config.PLATFORM_URL` = `https://1girox.com` (respaldo del SSO; también aparece
   hardcodeada en los mensajes `/sys_deposit*`, `/sys_bonus` y `/sys_welcome` sembrados
@@ -999,9 +1042,16 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   pestaña, y el cache de 30s por pestaña guarda SOLO la página 1 (helper único
   `_setConversationsCache`).
 - **Sección Notificaciones** suma las cards "🎁 Lote con regalo" (formulario +
-  Validar lista + confirm con conteo real + guía "❓ Cómo funciona") y "📤 Lotes
-  enviados" (historial con progreso en vivo y detalle por usuario, cap 400
-  filas). Listener socket `security_alert` → toast rojo.
+  Validar lista + confirm con conteo real + guía "❓ Cómo funciona"; #191 ids
+  `giftBatch*` y funciones `previewGiftBatch` / `sendGiftBatch` / `genGiftBatchCode` /
+  `updateGiftBatch{Mode,Type,Audience}UI` / `updateGiftBatchSegHint`: ⚡ automático o
+  agente, 1ª carga / todas, franja, rollover, horas de uso, bloque "💰 Fichas con
+  RECLAMO" con tilde directo, segmento) y "📤 Lotes
+  enviados" (`loadNotifBatches` / `toggleNotifBatchDetail`: historial con resumen por
+  lote — canjearon / cargaron con el bono / activos / vencidos; fichas acreditados / sin
+  reclamar — progreso en vivo y detalle por usuario, cap 400 filas). Banner del chat
+  `chatPromoBonusBanner` (`loadChatPromoBonus`): verde "BONO VIGENTE" con Marcar usado o
+  celeste "⚡ BONO AUTOMÁTICO" con ✕ Cancelar. Listener socket `security_alert` → toast rojo.
 - **Sección "📊 Datos 2.0"** (cohortes de retención): `GET /api/admin/datos2?days=N`
   (7..90) — camadas por día ART de registro, retención D1/D3/D7/D14/D30 por
   última carga con ELEGIBILIDAD por edad (celda "—" si la camada no cumplió esa
@@ -1132,6 +1182,15 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   muestre al cliente sale de `applyGlobalRollover(...)`, nunca del valor crudo del
   flujo. Un regalo NUEVO tiene que seguir escribiendo Transaction con tipo de regalo
   (base del reembolso en vivo). Test en frío: `node scripts/test-rollover-multicuenta.js`.
+- **Lotes con regalo (#191):** el % automático de un lote NUNCA se suma a otro bono
+  automático ni al bonus del agente (una carga = UN bono automático: bono app → ruleta
+  → lote); se reserva con `claimAutoPromoPercent` DESPUÉS de toda validación que pueda
+  cortar la request y se revierte si la carga o el bono adjunto fallan. Un flujo de
+  carga nuevo tiene que repetir el patrón reserva → crédito en la MISMA operación →
+  settle/revert. Las fichas con RECLAMO no se acreditan al enviar: solo en
+  `POST /api/gift/claim` (reserva atómica `claimedAt`). El marcado genérico del
+  PromoBonus en la carga manual con bonus del agente excluye los lotes auto de "todas
+  las cargas" (`$nor`).
 - **Regalos = bono 0 "regalo directo", NO depósito** (2026-09-07, §4.5): reembolsos,
   ruleta, rakeback, bono VIP y comisiones van por `creditUserBalance` SIN multiplier
   → `/bonus` con `multiplier: 0` (figuran como Bono en el panel de 1girox), con

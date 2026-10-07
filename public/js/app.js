@@ -319,6 +319,10 @@ function setupEventListeners() {
         const appInstallBtn = document.getElementById('appInstallBtn');
         if (appInstallBtn) appInstallBtn.addEventListener('click', VIP.ui.installApp);
 
+        // #191 🎁 Regalos con código / fichas para RECLAMAR (lotes con regalo)
+        const giftCodeBtn = document.getElementById('giftCodeBtn');
+        if (giftCodeBtn) giftCodeBtn.addEventListener('click', () => VIP.ui.openGiftCodeModal());
+
         // Register modal — antes de abrir, adaptar el form al modo "registro rápido"
         // si hay una atribución de pauta activa (link ?p=CODE capturado).
         const registerBtn = document.getElementById('registerBtn');

@@ -109,6 +109,12 @@ VIP.socket = (function () {
                 }
             }
 
+            // #177/#191: un mensaje del sistema puede traer un regalo de fichas para
+            // RECLAMAR (o un bono de lote nuevo) → refrescar las cards del home.
+            if (message.type === 'system') {
+                try { if (VIP.promoBonus && VIP.promoBonus.load) setTimeout(VIP.promoBonus.load, 800); } catch (_) {}
+            }
+
             const tempElements = document.querySelectorAll('[data-temp-id]');
             let tempReplaced = false;
             tempElements.forEach(tempEl => {

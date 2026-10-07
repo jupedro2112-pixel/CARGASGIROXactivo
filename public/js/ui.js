@@ -723,6 +723,106 @@ VIP.ui = (function () {
                window.navigator.standalone === true;
     }
 
+    // =====================================================================
+    // #191 REGALOS CON CÓDIGO (lotes con regalo): modal con fichas para RECLAMAR
+    // (#177, lista de promobonus.js), canje de códigos de lote e ℹ️ información.
+    // =====================================================================
+    function _escGift(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    function openGiftCodeModal() {
+        const r = document.getElementById('giftCodeResult'); if (r) r.innerHTML = '';
+        const i = document.getElementById('giftCodeInput'); if (i) i.value = '';
+        showModal('giftCodeModal');
+        giftCodeShowView('claim');
+        try { if (VIP.promoBonus && VIP.promoBonus.renderPending) VIP.promoBonus.renderPending('giftPendingBox'); } catch (_) {}
+        try { if (VIP.promoBonus && VIP.promoBonus.loadGifts) VIP.promoBonus.loadGifts(); } catch (_) {}
+    }
+    // Dos vistas separadas — canjear / información (de dónde salen los códigos +
+    // Telegram + estado de app y notificaciones con botones para resolverlo).
+    function giftCodeShowView(view) {
+        const claim = document.getElementById('giftCodeBody');
+        const info = document.getElementById('giftInfoBody');
+        const tC = document.getElementById('giftTabClaim');
+        const tI = document.getElementById('giftTabInfo');
+        const on = (btn, color) => { if (!btn) return; btn.style.background = color + '33'; btn.style.opacity = '1'; };
+        const off = (btn) => { if (!btn) return; btn.style.background = 'transparent'; btn.style.opacity = '.6'; };
+        if (view === 'info') {
+            if (claim) claim.classList.add('hidden');
+            if (info) info.classList.remove('hidden');
+            off(tC); on(tI, '#53bdeb');
+            _renderGiftInfo();
+        } else {
+            if (info) info.classList.add('hidden');
+            if (claim) claim.classList.remove('hidden');
+            on(tC, '#d4af37'); off(tI);
+            setTimeout(() => { const i = document.getElementById('giftCodeInput'); if (i) i.focus(); }, 150);
+        }
+    }
+    async function _renderGiftInfo() {
+        // Telegram: misma URL que el ítem del menú (canal del equipo del cliente).
+        const tg = document.getElementById('giftInfoTelegramBtn');
+        if (tg) {
+            const ch = document.getElementById('canalInformativoBtn');
+            let url = (ch && ch.getAttribute('href') && ch.getAttribute('href') !== '#') ? ch.getAttribute('href') : '';
+            if (!url) {
+                try {
+                    const resp = await fetch(`${VIP.config.API_URL}/api/config/community`, { headers: { 'Authorization': `Bearer ${VIP.state.currentToken}` } });
+                    if (resp.ok) { const d = await resp.json(); url = (d && (d.channelUrl || d.url)) || ''; }
+                } catch (_) {}
+            }
+            if (url) { tg.href = url; tg.style.display = 'flex'; } else { tg.style.display = 'none'; }
+        }
+        // Estado real: app instalada (standalone) y permiso de notificaciones.
+        const okChip = '<span style="color:#25d366;">✅ Sí</span>';
+        const appOk = isAppStandalone();
+        const notifOk = ('Notification' in window) && Notification.permission === 'granted';
+        const appEl = document.getElementById('giftInfoAppState');
+        const notEl = document.getElementById('giftInfoNotifState');
+        if (appEl) appEl.innerHTML = appOk ? okChip :
+            '<button type="button" onclick="VIP.ui.installApp()" style="background:rgba(255,80,80,.15);color:#ffb3b3;border:1px solid rgba(255,80,80,.45);border-radius:8px;padding:5px 10px;font-weight:900;font-size:12px;cursor:pointer;">❌ No — Instalar</button>';
+        if (notEl) notEl.innerHTML = notifOk ? okChip :
+            '<button type="button" onclick="VIP.ui.giftInfoEnableNotifs()" style="background:rgba(255,80,80,.15);color:#ffb3b3;border:1px solid rgba(255,80,80,.45);border-radius:8px;padding:5px 10px;font-weight:900;font-size:12px;cursor:pointer;">❌ No — Activar</button>';
+    }
+    function giftInfoEnableNotifs() {
+        // Reusa el flujo del 🔔 de la barra (pide permiso + registra el token FCM).
+        const bell = document.getElementById('notificationBtn');
+        if (bell) bell.click();
+        else if (VIP.notifications && VIP.notifications.requestNotificationPermission) VIP.notifications.requestNotificationPermission();
+        setTimeout(_renderGiftInfo, 2500);
+    }
+    async function claimGiftCode() {
+        const input = document.getElementById('giftCodeInput');
+        const out = document.getElementById('giftCodeResult');
+        const btn = document.getElementById('giftCodeBtnSend');
+        const code = ((input && input.value) || '').trim().toUpperCase();
+        if (!code) { if (out) out.innerHTML = '<span style="color:#ffaa44;">Escribí el código.</span>'; return; }
+        if (btn) btn.disabled = true;
+        if (out) out.innerHTML = '<span style="color:#aaa;">Verificando…</span>';
+        try {
+            const response = await fetch(`${VIP.config.API_URL}/api/gift-code/claim`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${VIP.state.currentToken}` },
+                body: JSON.stringify({ code })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.success) {
+                if (out) out.innerHTML = '<div style="background:rgba(255,80,80,.12);border:1px solid rgba(255,80,80,.4);border-radius:10px;padding:10px;color:#ffb3b3;">' + _escGift(data.error || 'No se pudo canjear el código.') + '</div>';
+                return;
+            }
+            const ok = data.status === 'credited'
+                ? '💰 ¡Listo! Tu regalo ya está <strong>acreditado en tu cuenta</strong>.'
+                : '🎁 ¡Código válido! ' + _escGift(data.message || 'Tu bono quedó activado.');
+            if (out) out.innerHTML = '<div style="background:rgba(37,211,102,.12);border:1px solid rgba(37,211,102,.45);border-radius:10px;padding:10px;color:#9ff5c0;">' + ok + '</div>';
+            if (input) input.value = '';
+            if (data.status === 'credited') { try { syncBalance(); } catch (_) {} }
+            try { if (VIP.chat && VIP.chat.loadMessages) VIP.chat.loadMessages(); } catch (_) {}
+            try { if (VIP.promoBonus && VIP.promoBonus.load) VIP.promoBonus.load(); } catch (_) {}
+        } catch (e) {
+            if (out) out.innerHTML = '<span style="color:#ffb3b3;">Error de conexión. Probá de nuevo.</span>';
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
     return {
         showModal,
         hideModal,
@@ -753,7 +853,12 @@ VIP.ui = (function () {
         installApp,
         showInstallInstructions,
         isAppInstalled,
-        isAppStandalone
+        isAppStandalone,
+        // #191 regalos con código / fichas para RECLAMAR
+        openGiftCodeModal,
+        claimGiftCode,
+        giftCodeShowView,
+        giftInfoEnableNotifs
     };
 
 })();

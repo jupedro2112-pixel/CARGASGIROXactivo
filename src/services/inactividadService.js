@@ -27,7 +27,7 @@ const MAX_VIGENCIA_HORAS = 2;
 // Regalo de reactivación de TICKET ALTO: monto fijo máximo (no es bono %).
 const MAX_REGALO_TICKET_ALTO = 3000;
 // Cargas "de verdad": se excluyen regalos/bonos/devoluciones (no son carga del cliente).
-const GIFT_SOURCES = ['install_bonus', 'welcome_gift', 'payout_refund'];
+const GIFT_SOURCES = ['install_bonus', 'welcome_gift', 'payout_refund', 'notif_batch', 'notif_batch_auto'];
 
 function _diaArt(d) {
   return new Date(d.getTime() - 3 * 3600 * 1000).toISOString().slice(0, 10);

@@ -36,6 +36,19 @@ const promoBonusSchema = new mongoose.Schema({
   sourceRuleId:   { type: String, default: null },
   sourceRuleCode: { type: String, default: null },
   sourceRuleName: { type: String, default: null },
+  // #191 Lotes con regalo — aplicación AUTOMÁTICA del % en la carga (sin cartel):
+  //  autoApply: el sistema lo suma solo (carga manual sin bonus del agente / hgcash).
+  //  applyScope: 'first' = una sola carga (active→used al reservar); 'all' = todas
+  //  las cargas hasta vencer (queda active, se incrementa usesCount).
+  //  applyFromMin/ToMin: franja horaria diaria (minutos del día, hora argentina).
+  //  rolloverX: rollover propio del % automático (null = el global / default de la cuenta).
+  autoApply:    { type: Boolean, default: false },
+  applyScope:   { type: String, enum: ['first', 'all'], default: 'first' },
+  applyFromMin: { type: Number, default: null },
+  applyToMin:   { type: Number, default: null },
+  rolloverX:    { type: Number, default: null },
+  usesCount:    { type: Number, default: 0 },
+  usesTotalBonus: { type: Number, default: 0 },
 
   activatedAt: { type: Date, default: Date.now, index: true },
   expiresAt:   { type: Date, required: true, index: true },

@@ -357,6 +357,25 @@
 .notif-topbar-btn.active { background: rgba(0, 255, 136, 0.22); box-shadow: 0 0 8px rgba(0, 255, 136, 0.45); }
 .notif-topbar-btn.blocked { background: rgba(255, 80, 80, 0.25); }
 
+/* #191 Botón 🎁 Regalos con código (lotes con regalo) — mismo tamaño que la campanita. */
+.gift-topbar-btn {
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(212, 175, 55, 0.22);
+    font-size: 17px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 7px;
+    -webkit-tap-highlight-color: transparent;
+}
+.gift-topbar-btn:active { transform: scale(0.92); }
+body.wa-dark .gift-topbar-btn { background: rgba(212, 175, 55, 0.18); }
+
 /* Botón Fueguito (racha diaria): en la CABECERA del chat, a la derecha —
    fuera de la barra de escribir para que esa quede 100% WhatsApp. */
 .fire-topbar-btn {

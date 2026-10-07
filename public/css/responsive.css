@@ -610,6 +610,7 @@
     .chat-topbar-name { font-size: 14.5px; }
     .theme-topbar-btn { width: 34px; height: 34px; font-size: 15px; }
     .fire-topbar-btn { width: 37px; height: 37px; font-size: 18px; }
+    .gift-topbar-btn, .notif-topbar-btn { width: 34px; height: 34px; font-size: 16px; }
 }
 
 @media (max-height: 640px) {

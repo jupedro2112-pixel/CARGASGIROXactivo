@@ -6,6 +6,93 @@
 >
 > **Última actualización: 2026-10-07**
 
+## Sesión 2026-10-07 — "Cerrar sesión en los otros dispositivos" sin sacar al dueño · Lotes con regalo completos (réplica del gemelo)
+
+### 191. LOTES CON REGALO — réplica del paquete `docs/replicas/lotes-jugaygana` del gemelo AUTOREEMBOLSOS, adaptada a 1girox (% automático en la carga, segmento, horas de uso, fichas con RECLAMO)
+- **Pedido del owner:** el mismo producto que el gemelo (pantallas, reglas y endpoints),
+  portando SOLO lo que faltaba y reescribiendo toda la plata sobre el crédito girox
+  (rollover + reference idempotente). Lo que ya existía acá (#153-#158, 2026-08-14) se
+  conservó: modelos base, motor reanudable con claim atómico y cron 45 s,
+  `_creditNotifBatchGift` con ledger de intención y reference `vip-nbatch-*` (MEJOR
+  que la versión JUGAYGANA del paquete: se mantuvo), canje por
+  `/api/community-code/claim`, audiencias lista/inactivos/todos/público, textos
+  `/sys_lote_*`, cartel verde + Marcar usado, card `promoBonusCard`.
+- **Qué se portó (nuevo acá):**
+  - **% AUTOMÁTICO en la carga** (`applyMode:'auto'`, `applyScope first|all`, franja
+    horaria `applyFromMin/ToMin` en hora AR, `rolloverX` propio): `claimAutoPromoPercent`
+    (reserva atómica: first → `active→used`; all → `usesCount++`) /
+    `revertAutoPromoPercent` / `settleAutoPromoPercent` + `_argMinuteOfDay` /
+    `_inDailyWindow`. **Hooks:** `POST /api/admin/deposit` (solo si el agente NO puso
+    bonus y NO hay bono pendiente de app/ruleta — una carga = como mucho UN bono
+    automático; la reserva va DESPUÉS de las validaciones del movimiento bancario para
+    no dejar nada colgado) y `hgcashAutoCarga` (solo si no hubo bono pendiente ni
+    multicuenta `_dupBank`). **Adaptación girox:** el % viaja como `bonusAmount` +
+    `bonusMultiplier` de la MISMA operación (`_loteMultiplierFor`: rollover del lote vía
+    `applyGlobalRollover`, o el default de la cuenta), nada de segunda llamada; sin
+    rama "ambiguo" (la reference decide): éxito → settle + nota ⚡ + línea "🎁 Incluye
+    tu regalo" al cliente; bono adjunto rechazado / carga fallida / excepción → revert.
+    Traza en `Transaction.metadata.loteBonus` (la 'bonus' aparte sigue con
+    `source:'deposit_bonus'` para no duplicar la base del reembolso en vivo). El marcado
+    genérico de PromoBonus al cargar con bonus del agente EXCLUYE los lotes auto de
+    "todas las cargas".
+  - **#172 tope del % de lote** = regla del bono por instalar la app de ESTE repo
+    (`Config['installBonus']` → `_loteBonusAmount(amount, pct, cfg)` con `capArs` /
+    `excessPct`; `_loteCapTxt`; cache `_installBonusCfgCache`). Ej.: lote 100%, carga
+    $10.000 → $5.000 + $1.000 = $6.000.
+  - **#173** `useHours` (1-168, default 24): en modo código el PromoBonus vence a las
+    useHours del CANJE (`_activateBatchPromoBonus` devuelve `{id, expiresAt}`); el
+    detalle fuerza el vencimiento lazy; historial con resumen por lote (`usados /
+    activos / vencidos / bonoTotal` desde PromoBonus) y detalle con `summary` +
+    `outcome` por destinatario (used / active / expired / cancelled).
+  - **#177 fichas por tiempo con RECLAMO** (`claimRequired`, default salvo tilde
+    `directCredit`): el motor NO acredita, manda el aviso (`/sys_lote_aviso_reclamo`,
+    push con `giftClaim`); `GET /api/gift/pending` + `POST /api/gift/claim {batchId}`
+    (reserva atómica `claimedAt` → `_notifBatchFichasAfterClaim`, helper único
+    compartido con el canje por código; fallo limpio libera la reserva);
+    `/sys_lote_reclamo_cash`. Historial "N acreditados ($X) · sin reclamar / no
+    reclamaron (vencido)".
+  - **Audiencia `segment`** (`_resolveNotifBatchSegment`: sin entrar / sin cargar /
+    cargaron hace poco + mín. cargas + mín. $ + publicista + cupo; `audienceFilter` +
+    `audienceLabel`). La lista pegada acepta array (panel nuevo) o string (viejo).
+  - **Rutas nuevas** (todas después de `const authMiddleware`): `POST /api/gift-code/
+    claim` (solo códigos de lote; el de bienvenida sigue por el menú ☰), `GET /api/gift/
+    pending`, `POST /api/gift/claim`. `GET /api/admin/promo-bonus` expone `autoApply`,
+    `applyScope`, franja, `usesCount`, `rolloverX`, `capTxt`.
+  - **Comandos nuevos** (seed): `/sys_lote_aviso_percent_auto`, `/sys_lote_aviso_reclamo`,
+    `/sys_lote_reclamo_cash`, `/sys_lote_canje_percent_auto`. `{gift}` ahora trae
+    alcance/franja/tope cuando es automático.
+  - **Panel (admin-sw v42):** formulario nuevo completo (ids `giftBatch*`, funciones
+    `previewGiftBatch` / `sendGiftBatch` / `genGiftBatchCode` / `updateGiftBatch*UI` /
+    `loadNotifBatches` / `toggleNotifBatchDetail` — nombres de los onclick del gemelo):
+    ⚡ automático / agente, 1ª carga / todas, franja, rollover, horas de uso, bloque
+    "💰 Fichas con RECLAMO" con tilde directo, segmento, guía ❓ con textos 1girox;
+    historial con resumen por lote y detalle con estados; banner del chat celeste "⚡ BONO
+    AUTOMÁTICO" (con tope y "✕ Cancelar bono") además del verde. Reemplazó las funciones
+    `nb*` viejas.
+  - **PWA (SW v110):** botón 🎁 en la cabecera del chat (`.gift-topbar-btn`), modal
+    "🎁 Regalos con código" (pestañas Canjear / ℹ️ INFORMACIÓN con estado app/notis y
+    link a Telegram; `VIP.ui.openGiftCodeModal / claimGiftCode / giftCodeShowView /
+    giftInfoEnableNotifs`), card dorada `giftClaimCard` "Tenés $X en fichas de regalo —
+    RECLAMAR" en el home y dentro del modal (`promobonus.js`: `loadGifts / renderPending
+    / claim`, refresca saldo con `VIP.ui.syncBalance`), listener en app.js y refresco
+    en socket.js al llegar un mensaje del sistema.
+  - `'notif_batch'` y `'notif_batch_auto'` sumados a las listas `GIFT_SOURCES` /
+    `$nin` de "cargas reales" (server.js, inactividadService, publisherAnalyticsService;
+    bankCloseService ya las tenía).
+- **Decisiones de adaptación:** sin `_alertMoneyAmbiguous` ni `ambiguous:true` (en girox
+  la reference idempotente resuelve el reintento); `_dupBankManual` no existe en la carga
+  manual → tratado como null (sí se respeta `_dupBank` en hgcash); prioridad de bonos
+  automáticos: bono app → % ruleta → lote; textos JUGAYGANA → 1girox; moneda $.
+- **Validado:** `node --check` OK (server.js, NotifBatch.js, PromoBonus.js, 2 servicios,
+  admin.js, admin-sw.js, promobonus.js, ui.js, app.js, socket.js, SW PWA); `check-tdz` ✅;
+  HTML panel 702/702 divs e ids únicos; PWA 429/429. **Back necesita redeploy (siembra
+  los 4 comandos nuevos); panel y PWA, recargar.** PROBAR en vivo: la lista de la §"Prueba
+  en vivo sugerida" del README del paquete (lote +20% ⚡ 1ª carga → carga manual sin
+  bonus → carga + bono + nota ⚡; ídem hgcash; lote 100% con $10.000 → $6.000; franja
+  fuera de hora → sin bono y cartel sigue; lote agente → cartel verde; código con
+  useHours; topes 3/24h; fichas con RECLAMO → card dorada → RECLAMAR → saldo sube;
+  tilde directo → acredita a todos).
+
 ## Sesión 2026-10-07 — "Cerrar sesión en los otros dispositivos" sin sacar al dueño
 
 ### 190. Cambio de clave con "cerrar todas las sesiones": el dispositivo del DUEÑO sigue adentro

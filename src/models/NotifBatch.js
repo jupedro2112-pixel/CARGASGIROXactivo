@@ -44,8 +44,26 @@ const notifBatchSchema = new mongoose.Schema({
   giftType: { type: String, enum: ['percent', 'fixed'], required: true },
   // % (1..200) o $ (1..500000) según giftType.
   amount: { type: Number, required: true, min: 1 },
-  // Solo fichas: rollover del bono auto-acreditado (0 = libre).
+  // Fichas: rollover del bono auto-acreditado (0 = libre). #191: también el % AUTOMÁTICO
+  // (va como bonus_multiplier de la carga). Si el rollover GLOBAL está encendido, lo pisa.
   rolloverX: { type: Number, default: 0, min: 0 },
+  // #191 (portado del gemelo #149/#263): APLICACIÓN del % — 'auto' = el sistema lo suma
+  // SOLO en la carga (manual sin bonus del agente / hgcash), sin cartel que marcar;
+  // 'agent' = flujo viejo (cartel verde + "Marcar usado"). Lotes viejos → 'agent'.
+  applyMode: { type: String, enum: ['agent', 'auto'], default: 'agent' },
+  // 'first' = solo la primera carga; 'all' = TODAS las cargas hasta expiresAt.
+  applyScope: { type: String, enum: ['first', 'all'], default: 'first' },
+  // Franja horaria diaria (minutos del día, hora argentina) del % automático. null = siempre.
+  applyFromMin: { type: Number, default: null },
+  applyToMin: { type: Number, default: null },
+  // #173: en modo 'code' con % — horas que tiene el cliente para USAR el bono DESPUÉS de
+  // canjearlo (default 24). Vencido ese plazo el PromoBonus queda 'expired' aunque el lote
+  // siga vigente para canjear.
+  useHours: { type: Number, default: 24, min: 1 },
+  // #177: FICHAS POR TIEMPO con RECLAMO. true = al enviar NO se acredita a nadie: cada
+  // cliente toca "🎁 RECLAMAR" en la app (card del home + modal 🎁) y recién ahí se
+  // acreditan, mientras el lote esté vigente. false (o lotes viejos) = directo al enviar.
+  claimRequired: { type: Boolean, default: false },
   // Solo mode 'code'.
   code: { type: String, default: null, uppercase: true, trim: true, index: true },
   // Código PÚBLICO (Telegram/redes): cualquiera canjea, con cupo opcional.
@@ -59,9 +77,14 @@ const notifBatchSchema = new mongoose.Schema({
   message: { type: String, default: '', maxlength: 500 },
   sentBy: { type: String, default: null },
   sentByRole: { type: String, default: null },
-  audienceType: { type: String, enum: ['list', 'inactive', 'all', 'public'], required: true },
+  // 'segment' (#191): filtro fino (base sin entrar / sin cargar / cargaron hace poco +
+  // mín. cargas + mín. $ + publicista + cupo) — el filtro exacto en audienceFilter y su
+  // texto legible en audienceLabel.
+  audienceType: { type: String, enum: ['list', 'inactive', 'all', 'public', 'segment'], required: true },
   audienceDays: { type: Number, default: null },
   audienceLimit: { type: Number, default: null },
+  audienceFilter: { type: mongoose.Schema.Types.Mixed, default: null },
+  audienceLabel: { type: String, default: '' },
   // Motor de envío: true cuando no queda ningún recipient pendiente.
   sendDone: { type: Boolean, default: false, index: true },
   recipients: { type: [recipientSchema], default: [] }
