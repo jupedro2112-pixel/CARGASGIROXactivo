@@ -4,7 +4,44 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-09-18**
+> **Última actualización: 2026-10-07**
+
+## Sesión 2026-10-07 — "Cerrar sesión en los otros dispositivos" sin sacar al dueño
+
+### 190. Cambio de clave con "cerrar todas las sesiones": el dispositivo del DUEÑO sigue adentro
+- **Pedido del owner:** cuando un cliente entra por primera vez (link de acceso o
+  primer login) le sale el cartel obligatorio de cambiar la clave, con la opción
+  de cerrar la sesión en todos los dispositivos. Al marcarla, también se le
+  cerraba la sesión a la persona que estaba cambiando la clave. Tiene que cerrar
+  todas MENOS la del dispositivo desde el que se cambió (el "dueño").
+- **Causa:** `closeAllSessions` sube `User.tokenVersion`, y `authMiddleware` /
+  el `authenticate` del socket rechazan cualquier JWT con otro tokenVersion —
+  incluido el del propio dispositivo. El front, sabiendo eso, borraba el token y
+  recargaba para pedir login.
+- **Backend (`server.js`):** helper nuevo `_issueFreshSessionAfterRevoke(user,
+  res)` (justo antes de `POST /api/auth/change-password`): firma un JWT fresco
+  con el tokenVersion YA incrementado (mismo claim y 30 días que el login) y, si
+  es rol de staff, renueva también las cookies httpOnly del panel. Lo usan
+  `POST /api/auth/change-password` y `POST /api/auth/change-password/pending`
+  (modo temporal sin SMS): cuando viene `closeAllSessions`, la respuesta suma
+  `token` (null si no se pudo firmar). Los otros dispositivos conservan el token
+  viejo → siguen rechazados como antes. Sin `closeAllSessions` no cambia nada.
+- **PWA (`auth.js`, SW **v109**):** `_adoptFreshSessionToken(data)` reemplaza
+  `VIP.state.currentToken` + `localStorage.userToken` y re-emite `authenticate`
+  en el socket (el handler es idempotente: mismos rooms/maps) → toast "🔒
+  Cerramos tu sesión en los otros dispositivos. En este seguís adentro." Lo
+  llaman `_commitPasswordChange` (flujo normal y con OTP) y la entrada temporal
+  (`_temporalCloseAllSessions` queda en true SOLO si no vino token). **Fallback:**
+  si la respuesta no trae `token` (back viejo sin redeploy, o error al firmar),
+  se conserva el comportamiento anterior (borrar token + recargar + pedir login),
+  así un front nuevo contra un back viejo no deja al usuario con un token
+  inválido en memoria. Etiqueta del checkbox: "Cerrar la sesión en los otros
+  dispositivos (en este seguís adentro)". El panel admin no usa este flag.
+- **Validado:** `node --check` OK (server.js, auth.js, SW); `check-tdz` ✅.
+  **Back necesita redeploy; la PWA lo toma en la próxima carga.** PROBAR: cliente
+  logueado en 2 celulares → en uno cambia la clave con el checkbox marcado → ese
+  sigue adentro (chat, saldo y socket andan sin recargar) y el otro, al tocar
+  cualquier cosa, vuelve al login; mismo test con "Entrar de forma temporal".
 
 ## Sesión 2026-09-18 — Ruleta diaria con premios editables + bono por instalar con tope y excedente
 

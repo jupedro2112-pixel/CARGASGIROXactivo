@@ -4649,6 +4649,38 @@ async function syncPasswordToJugaygana(user, newPassword, context) {
   return { success: false, attempts: MAX_ATTEMPTS, error: lastError };
 }
 
+// "Cerrar sesión en los otros dispositivos" (cambio de clave con
+// `closeAllSessions`): subir `tokenVersion` invalida TODOS los JWT del usuario,
+// incluido el del dispositivo desde el que el DUEÑO acaba de cambiar la clave.
+// Este helper emite un token fresco con el tokenVersion ya incrementado (mismo
+// claim y vigencia de 30 días que el login) para que ese dispositivo siga
+// adentro; los demás conservan el token viejo y authMiddleware / el socket los
+// rechazan. Si es un rol de staff, también se renuevan las cookies httpOnly del
+// panel (si no, el panel abierto en ese mismo navegador quedaría con cookie
+// vencida). Devuelve el token (o null si no se pudo firmar: el front cae al
+// comportamiento viejo de recargar y pedir login).
+function _issueFreshSessionAfterRevoke(user, res) {
+  try {
+    const token = jwt.sign(
+      { userId: user.id, username: user.username, role: user.role, tokenVersion: user.tokenVersion ?? 0 },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+    if (isAdminRole(user.role)) {
+      const cookieToken = jwt.sign(
+        { userId: user.id, username: user.username, role: user.role, tokenVersion: user.tokenVersion ?? 0 },
+        JWT_SECRET,
+        { expiresIn: '8h' }
+      );
+      res.setHeader('Set-Cookie', buildAdminSessionCookieHeaders(cookieToken));
+    }
+    return token;
+  } catch (e) {
+    logger.warn(`[change-password] no se pudo emitir el token fresco para ${user.username}: ${e.message}`);
+    return null;
+  }
+}
+
 // Cambiar contraseña
 app.post('/api/auth/change-password', authMiddleware, authLimiter, async (req, res) => {
   try {
@@ -4763,18 +4795,27 @@ app.post('/api/auth/change-password', authMiddleware, authLimiter, async (req, r
     // phone, if applicable). Lift the mandatory-change flag so the rest of the
     // API stops returning 403 MUST_CHANGE_PASSWORD on subsequent requests.
     user.mustChangePassword = false;
-    
+
     if (closeAllSessions) {
       user.tokenVersion = (user.tokenVersion || 0) + 1;
     }
-    
+
     await user.save();
 
     await syncPasswordToJugaygana(user, newPassword, 'change-password');
 
+    // "Cerrar sesión en los otros dispositivos": subir tokenVersion invalida
+    // TODOS los JWT emitidos, incluido el del dispositivo desde el que el dueño
+    // acaba de cambiar la clave. Para que a él no se le cierre, se le emite acá
+    // un token fresco con el tokenVersion nuevo (mismo claim y vigencia que el
+    // login) y el front lo reemplaza en silencio. Los demás dispositivos siguen
+    // con el token viejo → authMiddleware/socket los rechazan.
+    const freshSession = closeAllSessions ? _issueFreshSessionAfterRevoke(user, res) : null;
+
     res.json({
       message: 'Contraseña cambiada exitosamente',
       sessionsClosed: closeAllSessions || false,
+      token: freshSession,
       phoneVerified: !!user.phoneVerified,
       phone: user.phone || null
     });
@@ -4900,12 +4941,17 @@ app.post('/api/auth/change-password/pending', authMiddleware, authLimiter, async
 
     await syncPasswordToJugaygana(user, newPassword, 'change-password');
 
+    // Mismo criterio que /api/auth/change-password: el dispositivo del dueño
+    // conserva la sesión con un token fresco; los demás quedan afuera.
+    const freshSession = closeAllSessions ? _issueFreshSessionAfterRevoke(user, res) : null;
+
     res.json({
       message: 'Contraseña cambiada. Entraste en modo temporal.',
       temporaryAccess: true,
       pendingAccessCode: pendingCode,
       phoneVerificationPending: true,
-      sessionsClosed: closeAllSessions || false
+      sessionsClosed: closeAllSessions || false,
+      token: freshSession
     });
   } catch (error) {
     logger.error(`Error en change-password/pending: ${error.message}`);

@@ -957,6 +957,23 @@ VIP.auth = (function () {
         }
     }
 
+    // Tras "cerrar sesión en los otros dispositivos", el back devuelve `token`
+    // (JWT con el tokenVersion nuevo). Se adopta en silencio: estado + localStorage
+    // + re-autenticación del socket. Devuelve true si había token.
+    function _adoptFreshSessionToken(data) {
+        const token = data && typeof data.token === 'string' && data.token;
+        if (!token) return false;
+        VIP.state.currentToken = token;
+        try { localStorage.setItem('userToken', token); } catch (e) { /* storage bloqueado */ }
+        try {
+            if (VIP.state.socket && VIP.state.socket.connected) {
+                VIP.state.socket.emit('authenticate', token);
+            }
+        } catch (e) { /* el socket se re-autentica solo al reconectar */ }
+        VIP.ui.showToast('🔒 Cerramos tu sesión en los otros dispositivos. En este seguís adentro.', 'info');
+        return true;
+    }
+
     async function _commitPasswordChange({ newPassword, closeAllSessions, phone, otpCode, currentPassword, errorDiv }) {
         try {
             const body = { newPassword, closeAllSessions };
@@ -1001,11 +1018,17 @@ VIP.auth = (function () {
                 document.getElementById('closeAllSessions').checked = false;
 
                 if (closeAllSessions) {
-                    VIP.ui.showToast('🔒 Todas las sesiones han sido cerradas. Por favor, vuelve a iniciar sesión.', 'info');
-                    setTimeout(() => {
-                        localStorage.removeItem('userToken');
-                        location.reload();
-                    }, 2000);
+                    // El server subió tokenVersion (cierra los OTROS dispositivos) y
+                    // nos devolvió un token fresco para que ESTE siga adentro.
+                    if (!_adoptFreshSessionToken(data)) {
+                        // Sin token fresco (back viejo o error al firmar): comportamiento
+                        // anterior — salir y pedir login de nuevo.
+                        VIP.ui.showToast('🔒 Todas las sesiones han sido cerradas. Por favor, vuelve a iniciar sesión.', 'info');
+                        setTimeout(() => {
+                            localStorage.removeItem('userToken');
+                            location.reload();
+                        }, 2000);
+                    }
                 }
                 return true;
             }
@@ -1161,7 +1184,10 @@ VIP.auth = (function () {
                 VIP.state.currentUser.phoneVerified = false;
                 VIP.state.currentUser.phoneVerificationPending = true;
             }
-            _temporalCloseAllSessions = !!_vipChangePwdPending.closeAllSessions;
+            // Si pidió cerrar los otros dispositivos y el back mandó token fresco,
+            // este dispositivo sigue adentro; si no vino token, al cerrar el panel
+            // se recarga y pide login (comportamiento viejo).
+            _temporalCloseAllSessions = !!_vipChangePwdPending.closeAllSessions && !_adoptFreshSessionToken(data);
             _vipChangePwdPending = null;
             _stopChangePwdResendCooldown();
 
