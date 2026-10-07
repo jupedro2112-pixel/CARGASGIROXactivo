@@ -5,7 +5,9 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-09-18** — RULETA DIARIA con premios editables (dinero
+> Última actualización: **2026-10-07** — cambio de clave con "cerrar sesión en los
+> otros dispositivos" conserva la sesión del dueño (§2 User.tokenVersion, §5).
+> Antes: 2026-09-18 — RULETA DIARIA con premios editables (dinero
 > con rollover / bonificación % en la próxima carga / peso) y elegibilidad editable;
 > BONO por instalar la app con tope y excedente; sugerencia automática del bono en
 > Depositar (§2 DailyRouletteSpin/User, §5 ruleta y bono instalación, §6 panel, §7).
@@ -95,7 +97,10 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   `findUserByUsernameCI`), `password` (bcrypt vía pre-save), `role`, `phone` +
   **`phoneKey`** (clave normalizada para unicidad — quita país/0/9 AR), `phoneVerified`,
   `phoneVerificationPending` (bloquea SOLO retiros), `mustChangePassword` (bloquea casi
-  todo vía authMiddleware), `tokenVersion` (revocación de sesiones), `isBlocked`/
+  todo vía authMiddleware), `tokenVersion` (revocación de sesiones; ⚠️ al subirlo
+  desde el cambio de clave con `closeAllSessions`, el endpoint devuelve un `token`
+  fresco para que el dispositivo del dueño siga adentro — #190, helper
+  `_issueFreshSessionAfterRevoke`), `isBlocked`/
   `blockReason`. **1girox:** `giroxUserId` (ID numérico del jugador — desde la v1.9 lo
   devuelve el propio `stats` y se persiste "gratis"; ya no bloquea nada, todo va por
   username), `giroxSyncStatus`
@@ -653,6 +658,14 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   PRIMERO (`girox.syncUserToPlatform`); guarda atribución, fbc/fbp, registrationIp.
   Crea ChatStatus solo el flujo público (los usuarios creados por admin/publisher NO —
   evita chats vacíos).
+- **Cambio de clave** (`POST /api/auth/change-password` y `/pending` para el modo
+  temporal sin SMS): el cartel obligatorio del primer ingreso (`mustChangePassword`)
+  y el de Configuración van por acá. Con `closeAllSessions` sube `tokenVersion`
+  (cierra los OTROS dispositivos) y responde `token` fresco con el tokenVersion
+  nuevo (+ cookies del panel si es staff) para que el dispositivo que cambió la
+  clave siga adentro; la PWA lo adopta con `_adoptFreshSessionToken` (estado,
+  localStorage y re-`authenticate` del socket). Sin `token` en la respuesta, el
+  front recarga y pide login (compat con back viejo).
 - **Login**: `POST /api/auth/login` (~L3361). `findUserByUsernameCI` con
   `critical:true` (fallback regex SIEMPRE disponible — nadie queda afuera). Si no existe
   local pero SÍ en 1girox, se crea la cuenta local al vuelo (cubre jugadores que nunca
