@@ -95,6 +95,31 @@
 
 ## Sesión 2026-10-07 — "Cerrar sesión en los otros dispositivos" sin sacar al dueño
 
+### 190b. Reporte del encargado: "al primer ingreso igual me cierra la sesión" — diagnóstico + endurecimiento
+- **Reporte (2026-10-08, captura):** en el cambio de clave obligatorio del primer
+  ingreso, marcar "cerrar sesión en los otros dispositivos" cerró también el
+  dispositivo propio; desde Configuración (después de los primeros pasos) no.
+- **Diagnóstico:** los dos flujos (obligatorio con OTP / omitir / temporal, y
+  voluntario desde Configuración) pasan por la MISMA función
+  (`_commitPasswordChange` → `_adoptFreshSessionToken`) y el mismo endpoint, y en
+  el front nada cierra sesión ante un 401 (los polls leen el token actual en cada
+  llamada; `verifyToken` solo corre al arrancar). El síntoma es EXACTAMENTE el
+  comportamiento anterior a #190 (borrar token + recargar), que es también el
+  fallback cuando la respuesta no trae `token`. Causa más probable: la prueba del
+  primer ingreso corrió con el `auth.js` viejo cacheado (el SW entrega el JS nuevo
+  en la carga SIGUIENTE) y/o con el back sin redeployar; la prueba desde
+  Configuración fue después de una recarga, ya con el código nuevo.
+- **Endurecimiento (auth.js, SW v111):** `verifyToken` solo borra el token guardado
+  si sigue siendo el mismo con el que hizo la consulta (una 401 vieja no pisa el
+  token fresco); `_adoptFreshSessionToken` vuelve a escribir el token fresco a los
+  1,5 s y 5 s por si una llamada en vuelo lo borró, y deja rastro en consola
+  (`[auth] cerrar otros dispositivos: token fresco adoptado` / `… el servidor no
+  devolvió token fresco`).
+- **Cómo verificar en vivo:** con la PWA recargada dos veces (SW v111) y el back
+  deployado, en el primer ingreso marcar el checkbox → la respuesta de
+  `POST /api/auth/change-password` trae `token` y la consola dice "token fresco
+  adoptado"; el otro celular vuelve al login al tocar algo.
+
 ### 190. Cambio de clave con "cerrar todas las sesiones": el dispositivo del DUEÑO sigue adentro
 - **Pedido del owner:** cuando un cliente entra por primera vez (link de acceso o
   primer login) le sale el cartel obligatorio de cambiar la clave, con la opción

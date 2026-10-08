@@ -673,8 +673,10 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   (cierra los OTROS dispositivos) y responde `token` fresco con el tokenVersion
   nuevo (+ cookies del panel si es staff) para que el dispositivo que cambió la
   clave siga adentro; la PWA lo adopta con `_adoptFreshSessionToken` (estado,
-  localStorage y re-`authenticate` del socket). Sin `token` en la respuesta, el
-  front recarga y pide login (compat con back viejo).
+  localStorage y re-`authenticate` del socket, y lo reafirma a los 1,5 s y 5 s). Sin
+  `token` en la respuesta, el front recarga y pide login (compat con back viejo).
+  `verifyToken` (solo al arrancar) nunca borra un token distinto del que usó en su
+  consulta (#190b: una 401 vieja no pisa el fresco).
 - **Login**: `POST /api/auth/login` (~L3361). `findUserByUsernameCI` con
   `critical:true` (fallback regex SIEMPRE disponible — nadie queda afuera). Si no existe
   local pero SÍ en 1girox, se crea la cuenta local al vuelo (cubre jugadores que nunca

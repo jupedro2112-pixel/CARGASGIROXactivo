@@ -437,9 +437,17 @@ VIP.auth = (function () {
     }
 
     async function verifyToken() {
+        // Token con el que se hizo ESTA verificación. Si falla, solo se borra el
+        // token guardado cuando sigue siendo el mismo: un cambio de clave con
+        // "cerrar sesión en los otros dispositivos" (#190) reemplaza el token en el
+        // medio, y una respuesta 401 vieja no tiene que pisar el token fresco.
+        const _tokenUsed = VIP.state.currentToken;
+        const _dropTokenIfSame = () => {
+            try { if (localStorage.getItem('userToken') === _tokenUsed) localStorage.removeItem('userToken'); } catch (e) { /* ignore */ }
+        };
         try {
             const response = await fetch(`${VIP.config.API_URL}/api/auth/verify`, {
-                headers: { 'Authorization': `Bearer ${VIP.state.currentToken}` }
+                headers: { 'Authorization': `Bearer ${_tokenUsed}` }
             });
 
             if (response.ok) {
@@ -501,11 +509,11 @@ VIP.auth = (function () {
                     console.warn('[FCM] Error al re-sincronizar token en verifyToken:', e);
                 });
             } else {
-                localStorage.removeItem('userToken');
+                _dropTokenIfSame();
             }
         } catch (error) {
             console.error('Error verificando token:', error);
-            localStorage.removeItem('userToken');
+            _dropTokenIfSame();
         }
     }
 
@@ -962,9 +970,18 @@ VIP.auth = (function () {
     // + re-autenticación del socket. Devuelve true si había token.
     function _adoptFreshSessionToken(data) {
         const token = data && typeof data.token === 'string' && data.token;
-        if (!token) return false;
+        if (!token) {
+            console.warn('[auth] cerrar otros dispositivos: el servidor no devolvió token fresco (back sin actualizar) — se cierra esta sesión también');
+            return false;
+        }
         VIP.state.currentToken = token;
-        try { localStorage.setItem('userToken', token); } catch (e) { /* storage bloqueado */ }
+        const persist = () => { try { if (localStorage.getItem('userToken') !== token) localStorage.setItem('userToken', token); } catch (e) { /* storage bloqueado */ } };
+        persist();
+        // Red de seguridad contra carreras: si alguna llamada en vuelo con el token
+        // viejo borrara el guardado, se vuelve a escribir el fresco.
+        setTimeout(persist, 1500);
+        setTimeout(persist, 5000);
+        console.info('[auth] cerrar otros dispositivos: token fresco adoptado, esta sesión sigue activa');
         try {
             if (VIP.state.socket && VIP.state.socket.connected) {
                 VIP.state.socket.emit('authenticate', token);
