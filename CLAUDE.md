@@ -70,6 +70,12 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
 
 ## Cosas que NO hay que romper (gotchas)
 
+- **Credenciales de hgcash (#192):** además de SSM, se pueden cargar desde el panel (cifradas
+  en Config con clave derivada de JWT_SECRET; panel > SSM). Cambio de cuenta hgcash = panel →
+  Comandos → Banco automático, sin tocar AWS. No volver a leer `process.env.HGCASH_API_TOKEN`
+  directo: usar `hgcashPay.getToken()` y `_hgcashWebhookSecrets()`. **Reenvío a otras
+  páginas:** también desde el panel (`Config['hgcashFanout']`, hasta 5 URLs; sin config vale
+  `HGCASH_FANOUT_URL`). Un aviso ya reenviado (`X-Forwarded-By`) no se vuelve a reenviar.
 - **JWT_SECRET y otros secrets** se cargan desde AWS SSM en el bootstrap async, NO al
   `require()`. Por eso hay lazy getters en `src/middlewares/auth.js` y rutas.
 - **IDEMPOTENCIA POR `reference` (lo más importante de la plataforma nueva).** Cargas,

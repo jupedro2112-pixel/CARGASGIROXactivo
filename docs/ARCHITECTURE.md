@@ -5,7 +5,8 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-07** — LOTES CON REGALO completos, réplica del gemelo
+> Última actualización: **2026-10-10** — credenciales hgcash y reenvío de avisos desde el
+> panel (#192, §5 auto-carga). Anterior: **2026-10-07** — LOTES CON REGALO completos, réplica del gemelo
 > (#191): % AUTOMÁTICO en la carga con tope y franja, audiencia segmento, horas de uso
 > tras canjear, fichas con RECLAMO (§2 NotifBatch/PromoBonus, §5 lotes + hooks en las
 > cargas, §6 panel/PWA, §9). Misma sesión: cambio de clave con "cerrar sesión en los
@@ -730,8 +731,20 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   índice único de HgcashCharge de nuestro lado y la idempotencia de 1girox del otro) →
   Transaction + mensaje + SLA. Fallo → se BORRA el HgcashCharge y es reintentable hasta
   3 veces (la reference estable impide que el reintento duplique la carga).
-  **Fan-out** (#94): reenvía el webhook crudo+firma a autoreembolsos.com
-  (`HGCASH_FANOUT_URL`, 'off' para apagar).
+  **Credenciales desde el PANEL (#192, réplica del #320 del gemelo):** token de API y
+  secreto del webhook cargables en Comandos → Banco automático → card 🔐, cifrados
+  (AES-256-GCM, clave derivada de `JWT_SECRET`) en `Config['hgcashCredentials']`; cada
+  instancia los carga en memoria a los 8 s y cada 60 s. **Panel > SSM** (`HGCASH_API_TOKEN` /
+  `HGCASH_WEBHOOK_SECRET` quedan de respaldo). El webhook acepta la firma con cualquiera de
+  los dos secretos; `hgcashPay.getToken()` devuelve el vigente (NO leer
+  `process.env.HGCASH_API_TOKEN` directo). Endpoints `GET/POST/DELETE
+  /api/admin/hgcash/credentials` (solo admin general; el POST prueba el token contra
+  `GET /accounts` y limpia el `accountId` cacheado).
+  **Fan-out** (#94 → #192): reenvía el webhook crudo+firma a las OTRAS páginas que
+  comparten la cuenta hgcash. Destinos desde el panel (card 🔁, `Config['hgcashFanout'].urls`,
+  hasta 5, cache 30 s; `GET/POST/DELETE /api/admin/hgcash/fanout`); sin ese Config vale
+  `HGCASH_FANOUT_URL` (default autoreembolsos.com, 'off' para apagar). Un aviso que llega
+  con `X-Forwarded-By` no se vuelve a reenviar, y nunca a la URL propia.
   **BANDEJA DEL BANCO (#183, réplica del #155 del gemelo):** manda el MOVIMIENTO, no
   la foto. Todo entrante `done` termina en un estado: cargado auto (foto matcheó) ·
   **asignado** por un agente desde panel→🏦 Banco (`POST /api/admin/bank/movements/:id/

@@ -4,7 +4,51 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-07**
+> **Última actualización: 2026-10-10**
+
+## Sesión 2026-10-10 — hgcash desde el PANEL: credenciales cifradas + reenvío de avisos a otras páginas (réplica #320/#326 del gemelo)
+
+### 192. Aplicada tal cual `AUTOGIROXcompartido/docs/ESPEC-HGCASH-PANEL.md` (los 6 bloques; acá no había nada de eso)
+- **Pedido del owner:** poder cambiar el **token de API** y el **secreto del webhook** de
+  hgcash desde Comandos (como ya lo hacen PAUTANUEVAsantino, SANTINOGANAMOS, giroxNARDOnuevoo,
+  AUTOREEMBOLSOS y VIPCARGASANTINO). Era el único repo de la familia que no lo tenía: se
+  verificó que no existía ninguna parte (ni `setTokenOverride` ni
+  `/api/admin/hgcash/credentials` ni las cards) y se copió todo desde la espec portable del
+  gemelo (su WORKLOG #320 credenciales y #326 reenvío, 2026-10-06), sin adaptar nada: los
+  helpers que pide (`getConfig`/`setConfig`/`Config.set`, `getHgcashConfig`, `getPublicBaseUrl`,
+  `safeCompare`, `req.rawBody`, `authFetch`/`showToast`/`escapeHtml`/`fmtFechaHoraAR`) ya
+  existían con el mismo nombre.
+- **(1) `src/services/hgcashService.js`:** `setTokenOverride` / `getTokenSource` /
+  `getToken()` (panel > SSM); `getAccounts(withToken)` prueba un token nuevo sin pisar el
+  vigente. Todas las llamadas ya usaban `getToken()`/`_headers()`.
+- **(2) server.js, bloque #320 (antes del fan-out):** `Config['hgcashCredentials']` con
+  token y secreto CIFRADOS (AES-256-GCM, clave = sha256(JWT_SECRET + sal));
+  `_loadHgcashCredentials` a los 8 s del arranque y cada 60 s por instancia;
+  `_hgcashWebhookSecrets()` = panel + SSM. El webhook acepta la firma con CUALQUIERA de los
+  dos (cambio de cuenta sin perder avisos) y loguea el origen de los rechazos (ip, fwdBy, UA,
+  id/monto). Fail-closed en producción sin ningún secreto. ⚠️ Si cambia `JWT_SECRET`, lo
+  guardado no se descifra → se usa SSM y la card lo avisa.
+- **(3) server.js, bloque #326:** el fan-out viejo (una sola `HGCASH_FANOUT_URL`, #94) pasa a
+  destinos desde el panel: `Config['hgcashFanout'].urls` (hasta 5, sólo https, sin
+  localhost/IP privada/credenciales, nunca la URL propia); si ese Config existe manda el
+  panel (lista vacía = no reenviar), si no vale `HGCASH_FANOUT_URL` (default autoreembolsos,
+  `off` apaga). Cache 30 s. Anti-círculo: un aviso que llega con `X-Forwarded-By` no se
+  vuelve a reenviar. Stats por destino en memoria (por instancia).
+- **(4) Endpoints (solo admin general):** `GET/POST/DELETE /api/admin/hgcash/credentials`
+  (el POST prueba el token contra `GET /accounts` de hgcash ANTES de guardar y limpia el
+  `accountId` cacheado para que se resuelva con la cuenta nueva) y
+  `GET/POST/DELETE /api/admin/hgcash/fanout`. `GET /api/admin/hgcash/config` informa
+  `secretConfigured` con panel o SSM.
+- **(5)+(6) Panel:** en Comandos → Banco automático, cards "🔐 Cuenta hgcash conectada (token
+  y secreto)" y "🔁 Reenviar los avisos de hgcash a otras páginas"; `loadHgcashConfig` llama
+  a `loadHgcashCredentials()` y `loadHgcashFanout()`. La línea de estado ya no dice "falta
+  HGCASH_WEBHOOK_SECRET en SSM" sino que apunta a la card. admin-sw **v43**.
+- ⚠️ **Sin tocar nada en el panel el comportamiento NO cambia**: sigue el token/secreto de
+  SSM y el reenvío de `HGCASH_FANOUT_URL`. Guardar una lista vacía de reenvío = no reenviar.
+- **Probado:** `node --check` (server.js, hgcashService.js, admin.js, admin-sw.js), HTML
+  balanceado (711/711 div). **Back necesita redeploy.** PROBAR: panel → Comandos → Banco
+  automático → card 🔐 dice "Token en uso: AWS (SSM)"; pegar token + secreto de la cuenta
+  → "Probar y guardar" → lista la cuenta y pasa a "PANEL"; carga real → el webhook entra.
 
 ## Sesión 2026-10-07 — "Cerrar sesión en los otros dispositivos" sin sacar al dueño · Lotes con regalo completos (réplica del gemelo)
 
