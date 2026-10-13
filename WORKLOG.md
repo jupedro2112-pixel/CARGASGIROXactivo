@@ -6,6 +6,17 @@
 >
 > **Última actualización: 2026-10-10**
 
+## Sesión 2026-10-13
+
+### 193. Webhook hgcash: con secreto en el panel, el de AWS (SSM) deja de valer (réplica PAUTANUEVAsantino #323)
+- Owner: tras cambiar token + secreto a una cuenta hgcash nueva seguían entrando (y auto-cargándose)
+  movimientos de la cuenta VIEJA: la firma se aceptaba con el secreto del panel O el de SSM.
+- `_hgcashWebhookSecrets()`: si hay secreto en el panel → SOLO ese; sin secreto en el panel → el de
+  SSM. Recuadro 🔐 del panel: "el de AWS ya NO se acepta". admin-sw bump.
+- ⚠️ No cubre dos cuentas bajo el MISMO usuario/secreto de hgcash (falta filtro por CBU destino).
+  Recomendado además: borrar la URL del webhook en el dashboard de la cuenta vieja.
+- `node --check` (server.js, admin.js, admin-sw.js). **Back necesita redeploy.**
+
 ## Sesión 2026-10-10 — hgcash desde el PANEL: credenciales cifradas + reenvío de avisos a otras páginas (réplica #320/#326 del gemelo)
 
 ### 192. Aplicada tal cual `AUTOGIROXcompartido/docs/ESPEC-HGCASH-PANEL.md` (los 6 bloques; acá no había nada de eso)

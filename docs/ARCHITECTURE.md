@@ -760,6 +760,10 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   recargar — `_emitHgcashUpdate(kind, movementId)`. `BankMovement.chargeSource/
   transactionId` y `Transaction.metadata.{movementId, origin}` son los vínculos en las
   dos direcciones que el cierre cruza. `hgcashAutoCarga` devuelve `{ok, reason|txId}`.
+- **Webhook hgcash — secreto exclusivo (#193, 2026-10-13):** si hay secreto cargado en el panel,
+  `_hgcashWebhookSecrets()` devuelve SOLO ese: el `HGCASH_WEBHOOK_SECRET` de SSM deja de valer y
+  los avisos de la cuenta hgcash vieja se rechazan. Sin secreto en el panel vale el de SSM. ⚠️ Si
+  las dos cuentas comparten usuario/secreto de hgcash esto no alcanza (no hay filtro por CBU destino).
 - **Bajadas** (#183): `POST /api/admin/bank/sweeps` (admin|withdrawer) → cash-out hgcash a
   un CBU externo (destino guardado en `Config['sweepDestinations']`, CBU o alias resuelto),
   externalID `sweep-<id>`; el webhook de estado (`_handleSweepStatusWebhook`) y el movimiento
