@@ -56,6 +56,10 @@ const notifBatchSchema = new mongoose.Schema({
   // Franja horaria diaria (minutos del día, hora argentina) del % automático. null = siempre.
   applyFromMin: { type: Number, default: null },
   applyToMin: { type: Number, default: null },
+  // #CAP TOPE PROPIO del % de ESTE lote (sólo % automático): el % completo aplica hasta `capARS`
+  // y el excedente de la carga va al `capExcessPct`. null = tope global; capARS 0 = sin tope.
+  capARS: { type: Number, default: null },
+  capExcessPct: { type: Number, default: null },
   // #173: en modo 'code' con % — horas que tiene el cliente para USAR el bono DESPUÉS de
   // canjearlo (default 24). Vencido ese plazo el PromoBonus queda 'expired' aunque el lote
   // siga vigente para canjear.
