@@ -4,7 +4,47 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-15**
+> **Última actualización: 2026-10-16**
+
+## Sesión 2026-10-16
+
+### 195. 📅 CRONOGRAMA: campañas programadas (fecha/hora AR), calendario mensual, tandas, rangos de días/fechas y comparativo semanal (réplica #190 de AUTOREEMBOLSOSjygactivo)
+- **Owner:** "entrar a principio de mes, preparar todas las campañas (bonos, regalos, avisos, activos,
+  inactivos, fechas fuertes), revisar todo y dejar el mes completo programado". Igual en los 7 repos.
+- **Diseño (plataforma 1girox):** CAPA encima de los lotes, sin tocar la mecánica del regalo.
+  `ScheduledCampaign` (`src/models/ScheduledCampaign.js`) guarda el MISMO body que acepta
+  `POST /api/admin/notif-batches` (`payload`) + `parts[]` (tandas: `runAt`, `status`, `usernames`,
+  `batchId`, `count`, `error`). El cuerpo del POST se extrajo a **`_createNotifBatchFromBody(body,
+  user)`** (stub de `res` → `{http, body}`); el endpoint real sólo la llama y el programador la usa
+  tal cual (código, tope, claim, motor de envío: todo vale igual para lo programado).
+- **Programador `_schedTick` (60 s, cada instancia):** claim atómico por tanda (`findOneAndUpdate`
+  posicional `scheduled → sending`), crea el lote, marca `sent` (batchId, code, count) o `error`
+  (texto visible + Telegram si está configurado). Tanda `sending` colgada >15 min → `error`.
+  **Tandas:** la audiencia se resuelve UNA vez al correr la primera y se reparte round-robin en N
+  listas sin repetir (el cupo limita el total); cada tanda sale como lote `audienceType:'list'`. En
+  modo código la 1ª usa el código elegido y las demás generan uno propio. Estado derivado: scheduled
+  | sending | sent | paused | error | cancelled. Reanudar reprograma tandas vencidas a +2 min.
+- **Rangos:** `_resolveNotifBatchSegment`: `audienceDaysMax` ("entre X y Y días") o `dateFrom/dateTo` (AAAA-MM-DD, hora AR, ≤400 días) para las 3 bases: último ingreso, última carga y "cargaron" (= ≥1 carga DENTRO del rango vía `win` de `_notifBatchDepositStats`). Con rango, los que nunca entraron NO entran.
+- **Endpoints** (prefijo `/api/admin/cronograma`, no `campaigns` que es de publicistas): `GET ?month=`,
+  `GET /:id`, `POST` ({name, payload, runAt | parts:[{runAt}]}; estima la audiencia HOY y rechaza
+  si queda vacía), `PUT /:id` (nombre, título, mensaje, notas, fechas de tandas no enviadas), `POST
+  /:id/pause|resume|run-now|duplicate`, `DELETE /:id` (si nada salió se borra; si ya salió una tanda,
+  cancela las pendientes y queda en el historial), `GET /api/admin/cronograma-report?month=`.
+- **Comparativo:** entran TODOS los NotifBatch del mes. Por lote: avisados, les llegó, canjearon,
+  acreditados, usaron el bono, **cargaron en 48 h** (clientes y $ reales), conversión =
+  cargaron/avisados, costo = bono $ + fichas, x = $ cargado / costo. Semanas por día del mes (1–7,
+  8–14, 15–21, 22–28, 29+). Recomendaciones heurísticas (lotes ≥30 destinatarios): REPETIR (top 3),
+  REVISAR (≤ mitad de la mediana), mejor franja horaria, mejor regalo, mejor segmento, mejor vs
+  peor semana.
+- **Panel (admin-sw v46):** en el formulario del lote, bloque "📅 Cuándo sale" (ahora / programar fecha-hora AR,
+  dividir en 1–12 tandas con una hora por tanda; sin tandas para código público) — el botón pasa a
+  "📅 Programar" y manda `{name, payload, parts}` al cronograma. En la audiencia: "hasta Y días
+  (opc.)" y "o entre fechas". Sección nueva **📅 Cronograma**: calendario del mes (chips por tanda
+  por estado, tocar un día filtra), lista con Editar / Pausar-Reanudar / Enviar ahora / Duplicar /
+  Eliminar, "ver lote", tarjeta de edición y "📊 Comparativo del mes".
+- **Validado:** `node --check` OK (server.js, admin.js, admin-sw, modelos), HTML balanceado, rutas
+  después de `authMiddleware` (TDZ). Sin runtime. **PROBAR tras deploy:** programar un lote de prueba
+  a +2 min (1 tanda y 3 tandas), pausar/reanudar, duplicar, borrar; abrir el comparativo del mes.
 
 ## Sesión 2026-10-15
 
