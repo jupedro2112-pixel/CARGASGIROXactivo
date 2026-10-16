@@ -1299,3 +1299,7 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
 - **Rangos de audiencia**: `audienceDaysMax` / `dateFrom`+`dateTo` en `_resolveNotifBatchSegment` (3 bases).
 - **Panel**: sección 📅 Cronograma (calendario, lista con acciones, edición, comparativo semanal) +
   bloque "📅 Cuándo sale" en el formulario del lote.
+- **#196 (réplica #191):** `kind:'push'` en ScheduledCampaign = aviso del compositor, enviado por
+  `notificationRoutes.sendBatchPush` (wrapper de `POST /api/notifications/send-batch`) en chunks;
+  `manual:true` = envío a mano registrado por `setPushLogHook`. El `GET` del cronograma suma lotes
+  enviados a mano y ocurrencias de ScheduledNotif como ítems de sólo lectura.
