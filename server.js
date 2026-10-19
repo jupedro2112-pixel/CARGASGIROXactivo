@@ -515,13 +515,13 @@ girox.setRolloverResolver(async () => {
 // general). `Config['usernamePrefix']` = el prefijo con el que arrancan los
 // usuarios que crea la LANDING (prefijo + nombre + 3 dígitos, ej. g1pedro042) y
 // el que viene precargado (editable) en el alta del panel, del publisher_admin y
-// en el registro de la PWA. Default "g1". Vacío = sin prefijo. Solo letras,
+// en el registro de la PWA. Default VACÍO = sin prefijo (owner 2026-10-19). Solo letras,
 // números y guion bajo, hasta 6 caracteres (el username de 1girox es de 18 máx).
 // Cache de 60 s por instancia. Compat con el gemelo: si no hay Config pero quedó
 // sembrado el comando `/sys_usuario_prefijo`, se lee de ahí.
 const USERNAME_PREFIX_KEY = 'usernamePrefix';
 const USERNAME_PREFIX_COMMAND = '/sys_usuario_prefijo';
-const USERNAME_PREFIX_DEFAULT = 'g1';
+const USERNAME_PREFIX_DEFAULT = ''; // owner 2026-10-19: SIN prefijo por default (el campo queda a completar)
 let _usernamePrefixCache = null; // { at, value }
 function _normUsernamePrefix(raw) {
   const v = String(raw == null ? '' : raw).trim().toLowerCase();
@@ -4219,6 +4219,8 @@ function _sanitizeUsernameBase(name, prefix) {
     .replace(/[^a-z0-9]/g, '');
   const maxBase = Math.max(1, 18 - pre.length - 3);
   if (base.length > maxBase) base = base.slice(0, maxBase);
+  // Nombre sin letras latinas y sin prefijo → no dejar un usuario de solo dígitos.
+  if ((pre + base).length < 3) base = ('gx' + base).slice(0, maxBase);
   return pre + base;
 }
 

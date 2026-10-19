@@ -465,8 +465,8 @@ async function handleLogin(e) {
 }
 
 // #197 (réplica del #328 del gemelo): prefijo de los usuarios nuevos. Se lee del
-// endpoint público /api/config/access al cargar el panel; hasta que llega se usa "g1".
-let USERNAME_PREFIX = 'g1';
+// endpoint público /api/config/access al cargar el panel; hasta que llega, vacío.
+let USERNAME_PREFIX = ''; // default: sin prefijo (owner 2026-10-19)
 async function loadUsernamePrefix() {
     try {
         const r = await fetch(`${API_URL}/api/config/access`, { cache: 'no-store' });
@@ -477,7 +477,7 @@ async function loadUsernamePrefix() {
         ['paNewUsername', 'newUserUsername'].forEach(function (id) {
             const el = document.getElementById(id);
             if (el && (!el.value.trim() || el.value.trim() === 'g1' || el.value.trim() === 'gx')) el.value = USERNAME_PREFIX;
-            if (el) el.placeholder = USERNAME_PREFIX + 'nombre';
+            if (el) el.placeholder = (USERNAME_PREFIX || '') + 'nombre';
         });
     } catch (_) {}
 }
@@ -511,7 +511,7 @@ async function loadUsernamePrefixCard() {
         const j = await r.json();
         const inp = document.getElementById('usernamePrefixInput');
         if (inp) inp.value = j.prefix || '';
-        _applyUsernamePrefix(typeof j.prefix === 'string' ? j.prefix : 'g1');
+        _applyUsernamePrefix(typeof j.prefix === 'string' ? j.prefix : '');
         usernamePrefixPreview();
     } catch (e) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
 }

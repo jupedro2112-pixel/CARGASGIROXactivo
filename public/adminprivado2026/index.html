@@ -734,15 +734,15 @@ document.addEventListener('change', function (ev) {
                         <div class="cbu-form" id="usernamePrefixForm">
                             <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
                                 Con qué letras arranca el nombre de usuario de las cuentas nuevas. Se usa en tres lugares:
-                                <b>la landing</b> (crea el usuario como prefijo + nombre + 3 dígitos, ej. <code><span class="usernamePrefixTxt">g1</span>pedro042</code>),
+                                <b>la landing</b> (crea el usuario como prefijo + nombre + 3 dígitos, ej. <code><span class="usernamePrefixTxt"></span>pedro042</code>),
                                 <b>el alta desde el panel</b> (admin y publicistas: el campo usuario viene precargado con el prefijo y el agente lo completa)
                                 y <b>el registro de la app</b> (el campo arranca con el prefijo; el cliente lo puede borrar).
-                                Solo letras, números y guion bajo, hasta 6 caracteres. Vacío = sin prefijo. Los usuarios ya creados no cambian.
+                                Solo letras, números y guion bajo, hasta 6 caracteres. <b>Por defecto no hay prefijo</b> (el campo queda a completar). Los usuarios ya creados no cambian.
                             </p>
                             <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
                                 <div class="form-group" style="flex:0 0 160px;margin:0;">
                                     <label>Prefijo</label>
-                                    <input type="text" id="usernamePrefixInput" maxlength="6" placeholder="g1" autocomplete="off" oninput="usernamePrefixPreview()" style="width:100%;">
+                                    <input type="text" id="usernamePrefixInput" maxlength="6" placeholder="(sin prefijo)" autocomplete="off" oninput="usernamePrefixPreview()" style="width:100%;">
                                 </div>
                                 <button type="button" class="btn btn-primary" onclick="saveUsernamePrefix()">💾 Guardar prefijo</button>
                             </div>
@@ -3062,8 +3062,8 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                         <div style="display:grid;gap:12px;">
                             <div>
                                 <label style="color:#aaa;font-size:12px;display:block;margin-bottom:4px;">Usuario *</label>
-                                <input type="text" id="paNewUsername" maxlength="30" placeholder="ej: g1hector2" autocomplete="off" style="width:100%;padding:10px;background:#1a1a2e;color:#fff;border:1px solid rgba(212,175,55,0.3);border-radius:6px;box-sizing:border-box;">
-                                <small style="color:#888;font-size:11px;">Completá después del prefijo (<span class="usernamePrefixTxt">g1</span>hector2). Se cambia en Configuración → "Prefijo de los usuarios nuevos". 3-30 caracteres: letras, números, punto, guion o guion bajo.</small>
+                                <input type="text" id="paNewUsername" maxlength="30" placeholder="ej: hector2" autocomplete="off" style="width:100%;padding:10px;background:#1a1a2e;color:#fff;border:1px solid rgba(212,175,55,0.3);border-radius:6px;box-sizing:border-box;">
+                                <small style="color:#888;font-size:11px;">Si hay prefijo configurado viene precargado (<span class="usernamePrefixTxt"></span>hector2); se cambia en Configuración → "Prefijo de los usuarios nuevos". 3-30 caracteres: letras, números, punto, guion o guion bajo.</small>
                             </div>
                             <div>
                                 <label style="color:#aaa;font-size:12px;display:block;margin-bottom:4px;">Contraseña *</label>
@@ -3453,7 +3453,7 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                 <div class="form-group">
                     <label for="newUserUsername">Usuario:</label>
                     <input type="text" id="newUserUsername" placeholder="Nombre de usuario" autocomplete="off">
-                    <small style="color:#888;font-size:11px;">Arranca con el prefijo de los usuarios nuevos (<span class="usernamePrefixTxt">g1</span>…): completalo. Se cambia en Configuración.</small>
+                    <small style="color:#888;font-size:11px;">Si hay prefijo configurado viene precargado (<span class="usernamePrefixTxt"></span>…). Se cambia en Configuración.</small>
                 </div>
                 <div class="form-group">
                     <label for="newUserPassword">Contraseña:</label>

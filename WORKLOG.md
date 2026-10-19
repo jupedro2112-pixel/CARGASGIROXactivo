@@ -12,7 +12,8 @@
 - **Owner:** "sacá del gemelo AUTOGIROXcompartido el Prefijo de los usuarios nuevos, los Webhooks
   salientes y el Rollover GLOBAL y replicalo acá". El **rollover global ya existía** (#184, misma
   card): no se tocó. Se portaron las otras dos.
-- **🔤 Prefijo (`Config['usernamePrefix']`, default `g1`, vacío = sin prefijo, `[a-z0-9_]{0,6}`):**
+- **🔤 Prefijo (`Config['usernamePrefix']`, **default VACÍO = sin prefijo** — owner 2026-10-19: "que el nombre
+  esté a completar, sin uno por default"; el gemelo usa `g1` —, `[a-z0-9_]{0,6}`):**
   `getUsernamePrefix()` (cache 60 s; compat: lee `/sys_usuario_prefijo` si quedara sembrado y no hay
   Config). `GET/POST /api/admin/username-prefix` (solo admin general) y endpoint PÚBLICO
   `GET /api/config/access` → `{ usernamePrefix }` (mismo path que el gemelo para portar parches 1:1;
@@ -23,8 +24,9 @@
   `USERNAME_PREFIX` se carga de `/api/config/access` al abrir el panel; `paNewUsername` (publisher_admin)
   y `newUserUsername` (alta del admin) arrancan con el prefijo, rechazan "prefijo solo" y vuelven al
   prefijo tras crear. **PWA (SW v112):** `registerUsername` ya no trae `value="girox"` fijo: auth.js pide
-  `/api/config/access` al cargar y precarga el prefijo (fallback "girox" si falla). ⚠️ **Cambio de
-  comportamiento al deployar:** la landing y el registro pasan a `g1…` hasta que el owner edite la card.
+  `/api/config/access` al cargar y precarga el prefijo (vacío si no hay o si falla). ⚠️ **Cambio de
+  comportamiento al deployar:** el registro de la app ya no trae "girox" fijo y la landing deja de
+  anteponer "gx" (solo si el nombre queda con menos de 3 letras). Sufijo de la landing: 3 dígitos exactos.
 - **🔗 Webhooks salientes:** copiados tal cual `src/services/outboundWebhookService.js` + modelo
   `OutboundWebhookQueue` del gemelo (ya incluyen #342 detalle del error del receptor, #344 sin username
   en el payload, #346 modo de auth por destino `hmac_ts | hmac_body | bearer | header`; NO se portó el
@@ -49,7 +51,7 @@
 - **Validado:** `node --check` en server.js, metaCapiService, outboundWebhookService, modelo, admin.js,
   admin-sw, auth.js, firebase-messaging-sw; `scripts/check-tdz.js` OK; HTML del panel balanceado
   (776/776 div). Sin runtime (no hay node_modules). **Back necesita deploy.** PROBAR: Configuración →
-  card 🔤 muestra "g1" → cambiarlo y crear un usuario desde el panel (campo precargado) y desde la landing
+  card 🔤 vacía → poner un prefijo y crear un usuario desde el panel (campo precargado) y desde la landing
   (`<prefijo>nombre###`); card 🔗 → "+ Nuevo destino" con una URL de prueba (webhook.site) → "Enviar
   prueba" responde 200 → registrar un usuario y cargarle → llegan `registro` y `primera_carga`.
 

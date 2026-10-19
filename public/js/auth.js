@@ -7,8 +7,9 @@ window.VIP = window.VIP || {};
 VIP.auth = (function () {
 
     // #197: prefijo de los usuarios nuevos (Configuración del panel). Se pide al
-    // arrancar sin sesión; hasta que llega (o si falla) vale "girox" como antes.
-    let _usernamePrefix = 'girox';
+    // arrancar sin sesión; sin prefijo configurado (o si falla) el campo queda VACÍO
+    // a completar (owner 2026-10-19: antes venía "girox" fijo).
+    let _usernamePrefix = '';
     try {
         fetch(VIP.config.API_URL + '/api/config/access', { cache: 'no-store' })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -1478,8 +1479,7 @@ VIP.auth = (function () {
         sendBtn.onclick = handleRegisterDirect;
 
         // El usuario de registro arranca con el PREFIJO de los usuarios nuevos del
-        // panel (#197; antes "girox" fijo); el cliente completa — y lo puede BORRAR
-        // si quiere otro nombre, igual que antes.
+        // panel (#197; antes "girox" fijo). Sin prefijo queda vacío a completar.
         const ru = document.getElementById('registerUsername');
         if (ru && !ru.value.trim()) ru.value = _usernamePrefix;
     }

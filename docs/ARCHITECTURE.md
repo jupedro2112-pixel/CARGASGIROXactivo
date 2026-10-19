@@ -616,7 +616,8 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 `POST /api/landing/signup` (público, sin auth): una landing en un dominio puente
 (`landing/index.html`, archivo suelto — NO en `public/`) pide SOLO un nombre →
 username único derivado (**#197:** PREFIJO del panel `Config['usernamePrefix']`, default
-`g1` + base saneada recortada a 18−prefijo−3 + sufijo de EXACTAMENTE 3 dígitos → `g1pedro042`;
+VACÍO + base saneada recortada a 18−prefijo−3 + sufijo de EXACTAMENTE 3 dígitos → `pedro042`,
+o `g1pedro042` con prefijo `g1`; "gx" solo si quedan menos de 3 caracteres;
 reglas de 1girox + colisión local CI) + PIN de 6 dígitos → se crea en **1girox PRIMERO** (key del
 publicista si la campaña la tiene → `giroxOwnerCampaign`; si no la master; si
 falla, no queda cuenta local huérfana) → `User` con
@@ -932,7 +933,7 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   Endpoints `GET/POST /api/admin/webhooks`, `DELETE /:id`, `POST /:id/test` (solo admin
   general). `fbAdsWebhookService` (destino único por SSM) sigue igual, en paralelo.
 - **Prefijo de los usuarios nuevos (#197, réplica del #328):** `getUsernamePrefix()`
-  (`Config['usernamePrefix']`, default `g1`, cache 60 s). Lo usan la landing (§4.10), el
+  (`Config['usernamePrefix']`, default VACÍO = sin prefijo, cache 60 s). Lo usan la landing (§4.10), el
   panel (altas del admin y del publisher_admin precargan el prefijo y rechazan "prefijo
   solo") y la PWA (`registerUsername`). Público: `GET /api/config/access` →
   `{usernamePrefix}` (mismo path que el gemelo; acá sin interruptores de SMS). Admin:
@@ -1061,7 +1062,7 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   → `POST /api/gift/claim` → `VIP.ui.syncBalance`); socket.js la refresca al llegar un
   mensaje del sistema.
 - **Registro (#197):** `registerUsername` arranca con el prefijo de `/api/config/access`
-  (auth.js lo pide al cargar; fallback "girox" si falla).
+  (auth.js lo pide al cargar; vacío a completar si no hay prefijo o falla).
 - Duplicados front/back a mantener sincronizados: mínimo retiro $4.999, bono $5.000,
   `VIP.config.PLATFORM_URL` = `https://1girox.com` (respaldo del SSO; también aparece
   hardcodeada en los mensajes `/sys_deposit*`, `/sys_bonus` y `/sys_welcome` sembrados
