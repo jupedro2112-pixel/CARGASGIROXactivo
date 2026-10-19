@@ -5,8 +5,10 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-10** — credenciales hgcash y reenvío de avisos desde el
-> panel (#192, §5 auto-carga). Anterior: **2026-10-07** — LOTES CON REGALO completos, réplica del gemelo
+> Última actualización: **2026-10-19** — PREFIJO de los usuarios nuevos y WEBHOOKS SALIENTES a
+> publicistas, réplica del gemelo AUTOGIROXcompartido (#197; §2 Config/OutboundWebhookQueue, §4.10
+> landing, §5 webhooks, §6 panel/PWA, §7 worker, §9). Anterior: **2026-10-10** — credenciales hgcash y
+> reenvío de avisos desde el panel (#192, §5 auto-carga). Anterior: **2026-10-07** — LOTES CON REGALO completos, réplica del gemelo
 > (#191): % AUTOMÁTICO en la carga con tope y franja, audiencia segmento, horas de uso
 > tras canjear, fichas con RECLAMO (§2 NotifBatch/PromoBonus, §5 lotes + hooks en las
 > cargas, §6 panel/PWA, §9). Misma sesión: cambio de clave con "cerrar sesión en los
@@ -240,7 +242,10 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   **FbAdsWebhookQueue** (cola de reintentos al sistema externo fb-ads),
   **RefundClaim** (índice único userId+type+periodKey contra doble cobro),
   **FireStreak** (racha fueguito + premios pendientes), **Config** (key/value: cbu,
-  hgcash, refundPercents, fireMilestones, flags de migración one-shot, etc.),
+  hgcash, refundPercents, fireMilestones, `usernamePrefix` (#197), `outboundWebhooks`
+  (#197, destinos con secreto cifrado), flags de migración one-shot, etc.),
+  **OutboundWebhookQueue** (#197: cola persistente de webhooks salientes no entregados;
+  `destId`, `payload` exacto que se firma, `attempts`, `nextRetryAt`),
   **Command** (comandos `/...` y mensajes automáticos `/sys_*`, `isSystem:true`).
 
 ## 3. Ciclo de request / autenticación / roles
@@ -610,8 +615,9 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 
 `POST /api/landing/signup` (público, sin auth): una landing en un dominio puente
 (`landing/index.html`, archivo suelto — NO en `public/`) pide SOLO un nombre →
-username único derivado (base saneada + sufijo aleatorio, reglas de 1girox +
-colisión local CI) + PIN de 6 dígitos → se crea en **1girox PRIMERO** (key del
+username único derivado (**#197:** PREFIJO del panel `Config['usernamePrefix']`, default
+`g1` + base saneada recortada a 18−prefijo−3 + sufijo de EXACTAMENTE 3 dígitos → `g1pedro042`;
+reglas de 1girox + colisión local CI) + PIN de 6 dígitos → se crea en **1girox PRIMERO** (key del
 publicista si la campaña la tiene → `giroxOwnerCampaign`; si no la master; si
 falla, no queda cuenta local huérfana) → `User` con
 `acquisitionSource:'landing'` (valor del enum) y `phoneVerificationPending`
@@ -901,6 +907,36 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   la cabecera (modal "🎁 Regalos con código": fichas para RECLAMAR + canje + ℹ️) y desde
   el modal "🎁 Reclamar Bono con Código" del menú ☰ (los estados pending/used/credited
   del welcome code muestran un input extra para códigos de lote).
+- **Webhooks SALIENTES a publicistas (#197, réplica del #334/#346 del gemelo):**
+  `src/services/outboundWebhookService.js` (configurado desde server.js con
+  `getDestinations` = `_getOutboundWebhooks()`, `resolveScope` =
+  `metaCapi.resolveEventScope`, `publicBaseUrl`). Destinos en
+  `Config['outboundWebhooks'].destinations[]`: `{id, name, url, secretEnc (cifrado con
+  `_credEncrypt`, clave de #192), enabled, scope 'all'|'publishers', publishers[],
+  events {registro, primera_carga, carga, retiro}, fields {atribucion, contacto},
+  auth {mode hmac_ts|hmac_body|bearer|header, header, prefix}}`. Registro y primera
+  carga van siempre; cargas, retiros, atribución y contacto son opcionales por destino.
+  Alcance: `resolveEventScope` → publicista de `acquisitionCampaign` o
+  `giroxOwnerCampaign` (acá no existe `lastTouchCampaign`). **Aviso:** POST JSON con
+  `X-Webhook-Event/Id/Timestamp/Signature` (HMAC-SHA256 hex de `"{ts}.{body}"`) + lo que
+  pida el `auth.mode`; body `event, event_id (estable: <evento>_<userId>_<txId|payoutId|reg>),
+  sent_at, site, test, user{id, created_at, campaign, publisher, influencer, source, channel}`
+  (**sin username**, #344), `amount, currency, first_deposit, transaction_id, occurred_at,
+  attribution?, contact?`. **Entrega:** fire-and-forget, 3 reintentos inmediatos (1/4/16 s),
+  después `OutboundWebhookQueue` cada 5 min hasta 10 intentos (worker al boot junto al de
+  fb-ads); 4xx salvo 408/429 no se reintenta. **Hooks:** los 3 registros, `/api/admin/deposit`
+  (`carga` + `firstDeposit` vía `_isFirstDeposit(user.id)` = exactamente 1 depósito real →
+  `primera_carga`), `hgcashAutoCarga`, `/api/movements/deposit` (`{unrecorded:true}` porque
+  no escribe Transaction) y `notifyPayoutPaid` (`retiro`). Un flujo de carga/registro NUEVO
+  tiene que llamar `outboundWebhook.notify(...)` al lado de su `fbAdsWebhook.notify`.
+  Endpoints `GET/POST /api/admin/webhooks`, `DELETE /:id`, `POST /:id/test` (solo admin
+  general). `fbAdsWebhookService` (destino único por SSM) sigue igual, en paralelo.
+- **Prefijo de los usuarios nuevos (#197, réplica del #328):** `getUsernamePrefix()`
+  (`Config['usernamePrefix']`, default `g1`, cache 60 s). Lo usan la landing (§4.10), el
+  panel (altas del admin y del publisher_admin precargan el prefijo y rechazan "prefijo
+  solo") y la PWA (`registerUsername`). Público: `GET /api/config/access` →
+  `{usernamePrefix}` (mismo path que el gemelo; acá sin interruptores de SMS). Admin:
+  `GET/POST /api/admin/username-prefix`.
 - **Niveles VIP** (2026-08-03, réplica de Stake): se sube por APOSTADO acumulado de
   por vida (buckets `VipWagerMonth`, ver §2 y el motor en
   `src/services/vipLevelService.js`). Escalera en `src/utils/vipLevels.js`: umbrales
@@ -1024,6 +1060,8 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   card dorada `giftClaimCard` del home (`GET /api/gift/pending`, `VIP.promoBonus.claim`
   → `POST /api/gift/claim` → `VIP.ui.syncBalance`); socket.js la refresca al llegar un
   mensaje del sistema.
+- **Registro (#197):** `registerUsername` arranca con el prefijo de `/api/config/access`
+  (auth.js lo pide al cargar; fallback "girox" si falla).
 - Duplicados front/back a mantener sincronizados: mínimo retiro $4.999, bono $5.000,
   `VIP.config.PLATFORM_URL` = `https://1girox.com` (respaldo del SSO; también aparece
   hardcodeada en los mensajes `/sys_deposit*`, `/sys_bonus` y `/sys_welcome` sembrados
@@ -1092,6 +1130,11 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   app"**: pct / tope / % excedente con ejemplo. **Modal Depositar:** bloque de bonos
   pendientes que pre-carga "Monto de Bonificación" (`renderDepositPendingBonus`, usa
   `window._chatUserInfo` del chat abierto).
+- **Config → "🔤 Prefijo de los usuarios nuevos"** (#197, solo admin general): input + ejemplo
+  en vivo; `USERNAME_PREFIX` global de admin.js (de `/api/config/access`), `.usernamePrefixTxt`
+  en los hints de las altas. **Config → "🔗 Webhooks salientes"** (#197): lista con último
+  resultado / en cola, editor (`webhookEdit/Save/Delete/Test/CopyFormat/GenSecret`,
+  `whAuthMode`), publicistas de `Campaign.distinct('publisher')`, formato completo plegado.
 - **Config → "🎯 Rollover GLOBAL de bonos"** (solo admin general, #184): switch + botones
   x0/x2/x3/x5/x10 (los no permitidos por la plataforma en gris con ⚠️), hint con el
   efectivo y aviso de `snapped`. Banner "POSIBLE MULTICUENTA" del chat: señales 📱 ☎️
@@ -1132,6 +1175,7 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
 | `_runDailyCloseTick` (cierre diario del banco, #183) | 5 min (corre 1×/día desde las 00:05 ART) | activo | claim `Config['dailyclose_last']` + DailyClose único por dateKey |
 | `_processNotifBatchQueue` (lotes con regalo) | 45 s (+ setImmediate al crear un lote) | activo | claim atómico por recipient (`findOneAndUpdate` posicional a 'sending'; un 'sending' colgado >10 min se re-reclama solo) + reference `vip-nbatch-*` — reanudable tras deploy y multi-instancia safe |
 | `fbAdsWebhook.startWorker` | 5 min | activo | nextRetryAt |
+| `outboundWebhook.startWorker` (webhooks salientes, #197) | 5 min (1er tick al minuto) | activo | `OutboundWebhookQueue.nextRetryAt` + `event_id` estable (el receptor dedupe por `X-Webhook-Id`) |
 | Limpieza mensajes >3d | 6 h | activo (red de seguridad del TTL) | deleteMany |
 
 Migraciones one-shot: patrón flag en Config (`migration_*_done`) en `initializeData()`.
@@ -1266,6 +1310,11 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `_emitHgcashUpdate(kind, movementId)` con movementId para que la bandeja se actualice en vivo.
   Nombres de modelos/endpoints/funciones del panel = los del gemelo AUTOREEMBOLSOS (#155):
   no renombrar, así los parches se portan 1:1.
+- **Webhooks salientes (#197):** un flujo nuevo de registro o carga tiene que llamar
+  `outboundWebhook.notify(...)` (fire-and-forget) al lado de su `fbAdsWebhook.notify`; el
+  `event_id` sale del id de la Transaction/payout (estable entre reintentos). El payload NO
+  lleva username a propósito (#344 del gemelo). El secreto se cifra con la clave de #192: si
+  cambia `JWT_SECRET`, los destinos quedan `decryptError` y hay que recargar el secreto.
 - **`Campaign.hasGiroxKey` es un espejo** de `giroxApiKey` (que es `select:false`):
   cualquier camino que escriba o limpie la key TIENE que actualizar el booleano, o el
   panel muestra el badge equivocado.

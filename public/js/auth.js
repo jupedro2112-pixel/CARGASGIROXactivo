@@ -6,6 +6,22 @@ window.VIP = window.VIP || {};
 
 VIP.auth = (function () {
 
+    // #197: prefijo de los usuarios nuevos (Configuración del panel). Se pide al
+    // arrancar sin sesión; hasta que llega (o si falla) vale "girox" como antes.
+    let _usernamePrefix = 'girox';
+    try {
+        fetch(VIP.config.API_URL + '/api/config/access', { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) {
+                if (j && typeof j.usernamePrefix === 'string') {
+                    const prev = _usernamePrefix;
+                    _usernamePrefix = j.usernamePrefix;
+                    const ru = document.getElementById('registerUsername');
+                    if (ru && (!ru.value.trim() || ru.value.trim() === prev)) ru.value = _usernamePrefix;
+                }
+            }).catch(function () {});
+    } catch (_) {}
+
     // Aplica Advanced Matching al pixel cuando el backend devolvió los hashes
     // (data.user.metaMatching). Idempotente: si se llama varias veces con el
     // mismo matching no duplica eventos. Nunca rompe la UI.
@@ -1461,10 +1477,11 @@ VIP.auth = (function () {
         resetRegisterOtp();
         sendBtn.onclick = handleRegisterDirect;
 
-        // El usuario de registro arranca con "girox" (antes "VIP"); el cliente
-        // completa — y lo puede BORRAR si quiere otro nombre, igual que antes.
+        // El usuario de registro arranca con el PREFIJO de los usuarios nuevos del
+        // panel (#197; antes "girox" fijo); el cliente completa — y lo puede BORRAR
+        // si quiere otro nombre, igual que antes.
         const ru = document.getElementById('registerUsername');
-        if (ru && !ru.value.trim()) ru.value = 'girox';
+        if (ru && !ru.value.trim()) ru.value = _usernamePrefix;
     }
 
     // ============================================

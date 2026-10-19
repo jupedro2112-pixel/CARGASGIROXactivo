@@ -47,6 +47,50 @@ function _capiDestinations() {
   return dests;
 }
 
+// ---- Resolución del "dueño" de un evento (publicista + campaña) — #197 (réplica
+// del #334 del gemelo AUTOGIROXcompartido). Lo usan los WEBHOOKS SALIENTES para
+// decidir qué destino recibe cada aviso. Lookup lazy (los modelos ya están
+// registrados por el server) con cache corto para no pegarle a Mongo en cada
+// evento. Orden para el usuario: campaña de alta → campaña dueña de la key.
+// (`lastTouchCampaign` queda primero por compatibilidad con el gemelo: en este
+// repo el campo no existe y el select lo ignora.)
+const _campaignPubCache = new Map(); // code → { publisher, ts }
+const CAMPAIGN_CACHE_MS = 5 * 60 * 1000;
+async function _publisherOfCampaign(code) {
+  const c = String(code || '').trim().toUpperCase();
+  if (!c) return null;
+  const hit = _campaignPubCache.get(c);
+  if (hit && Date.now() - hit.ts < CAMPAIGN_CACHE_MS) return hit.publisher;
+  let publisher = null;
+  try {
+    const Campaign = require('../models/Campaign');
+    const doc = await Campaign.findOne({ code: c }).select('publisher').lean();
+    publisher = doc && doc.publisher ? String(doc.publisher) : null;
+  } catch (_) {}
+  _campaignPubCache.set(c, { publisher, ts: Date.now() });
+  return publisher;
+}
+// Devuelve { publisher, campaignCode } o null. Acepta opts.publisher /
+// opts.campaignCode explícitos (evita el lookup) o resuelve por el usuario
+// (`userInfo.externalId` = User.id).
+async function resolveEventScope(userInfo, opts) {
+  const o = opts || {};
+  if (o.publisher || o.campaignCode) {
+    const publisher = o.publisher || await _publisherOfCampaign(o.campaignCode);
+    return { publisher: publisher || null, campaignCode: o.campaignCode || null };
+  }
+  const userId = userInfo && userInfo.externalId != null ? String(userInfo.externalId) : null;
+  if (!userId) return null;
+  try {
+    const User = require('../models/User');
+    const u = await User.findOne({ id: userId }).select('lastTouchCampaign acquisitionCampaign giroxOwnerCampaign').lean();
+    if (!u) return null;
+    const code = u.lastTouchCampaign || u.acquisitionCampaign || u.giroxOwnerCampaign || null;
+    if (!code) return null;
+    return { publisher: await _publisherOfCampaign(code), campaignCode: code };
+  } catch (_) { return null; }
+}
+
 function isConfigured() {
   return _capiDestinations().length > 0;
 }
@@ -301,5 +345,6 @@ module.exports = {
   track,
   buildAdvancedMatching,
   valueCategory,
-  destinationsSummary
+  destinationsSummary,
+  resolveEventScope // #197 webhooks salientes
 };

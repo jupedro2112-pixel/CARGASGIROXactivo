@@ -191,6 +191,12 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   acoplada a `USERS_LIST_FIELDS` del backend (columna nueva ⇒ sumar campo al select).
   Detalle completo de trampas en `docs/ARCHITECTURE.md` §7.
 
+- **Webhooks salientes y prefijo (#197, réplica del gemelo AUTOGIROXcompartido):** todo flujo
+  NUEVO de registro o carga llama `outboundWebhook.notify('registro'|'carga', user, {...})` al lado
+  de su `fbAdsWebhook.notify` (fire-and-forget). El username de la landing y las altas del panel
+  salen de `getUsernamePrefix()` (`Config['usernamePrefix']`): no hardcodear "gx"/"g1"/"girox".
+  `GET /api/config/access` es público y lo piden el panel y la PWA al arrancar.
+
 - **Lotes y Cronograma (#195):** el POST `/api/admin/notif-batches` es un wrapper de
   `_createNotifBatchFromBody(body, user)`; cualquier validación/efecto nuevo del lote va en esa
   función (así lo heredan las campañas programadas). Las rutas del cronograma son

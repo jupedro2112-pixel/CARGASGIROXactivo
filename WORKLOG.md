@@ -4,7 +4,54 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-16**
+> **Última actualización: 2026-10-19**
+
+## Sesión 2026-10-19
+
+### 197. Prefijo de los usuarios nuevos + Webhooks salientes a publicistas (réplica #328 y #334/#342-#346 de AUTOGIROXcompartido)
+- **Owner:** "sacá del gemelo AUTOGIROXcompartido el Prefijo de los usuarios nuevos, los Webhooks
+  salientes y el Rollover GLOBAL y replicalo acá". El **rollover global ya existía** (#184, misma
+  card): no se tocó. Se portaron las otras dos.
+- **🔤 Prefijo (`Config['usernamePrefix']`, default `g1`, vacío = sin prefijo, `[a-z0-9_]{0,6}`):**
+  `getUsernamePrefix()` (cache 60 s; compat: lee `/sys_usuario_prefijo` si quedara sembrado y no hay
+  Config). `GET/POST /api/admin/username-prefix` (solo admin general) y endpoint PÚBLICO
+  `GET /api/config/access` → `{ usernamePrefix }` (mismo path que el gemelo para portar parches 1:1;
+  acá no hay interruptores de SMS/registro, solo lleva el prefijo). **Landing:** `_sanitizeUsernameBase(name,
+  prefix)` + `_deriveUniqueUsername(name)` = prefijo + nombre saneado + **3 dígitos exactos** (`g1pedro042`;
+  antes "gx" solo si quedaba corto y sufijo 100-999999 sin padding); la base se recorta a 18 − prefijo − 3.
+  **Panel (admin-sw v48):** card en Configuración arriba del rollover global (input + ejemplo en vivo);
+  `USERNAME_PREFIX` se carga de `/api/config/access` al abrir el panel; `paNewUsername` (publisher_admin)
+  y `newUserUsername` (alta del admin) arrancan con el prefijo, rechazan "prefijo solo" y vuelven al
+  prefijo tras crear. **PWA (SW v112):** `registerUsername` ya no trae `value="girox"` fijo: auth.js pide
+  `/api/config/access` al cargar y precarga el prefijo (fallback "girox" si falla). ⚠️ **Cambio de
+  comportamiento al deployar:** la landing y el registro pasan a `g1…` hasta que el owner edite la card.
+- **🔗 Webhooks salientes:** copiados tal cual `src/services/outboundWebhookService.js` + modelo
+  `OutboundWebhookQueue` del gemelo (ya incluyen #342 detalle del error del receptor, #344 sin username
+  en el payload, #346 modo de auth por destino `hmac_ts | hmac_body | bearer | header`; NO se portó el
+  formato PulWin #347 porque el gemelo lo quitó en #349). `metaCapi.resolveEventScope(userInfo, opts)`
+  (+ `_publisherOfCampaign` con cache 5 min) agregado a `metaCapiService` — acá no hay
+  `lastTouchCampaign`: resuelve por `acquisitionCampaign → giroxOwnerCampaign`. Destinos en
+  `Config['outboundWebhooks'].destinations[]` con el secreto cifrado por `_credEncrypt` (clave de
+  #192); helpers `_normalizeOutboundDest / _getOutboundWebhooks / _saveOutboundWebhooks /
+  _outboundDestPublic` al lado del fan-out de hgcash. Endpoints `GET/POST /api/admin/webhooks`,
+  `DELETE /:id`, `POST /:id/test` (solo admin general; el POST exige `_credKey()`).
+  **Hooks** (fire-and-forget, al lado de cada `fbAdsWebhook.notify`): los 3 registros (`registro`),
+  carga manual `/api/admin/deposit` (`carga` con `firstDeposit` = `_isFirstDeposit(user.id)` → el
+  destino lo recibe como `primera_carga`, `transactionId = _depTxId`), **auto-carga hgcash** (antes de
+  `_emitHgcashUpdate('cargado')`, `transactionId = txId`), `/api/movements/deposit` (este flujo NO
+  escribe Transaction → `_isFirstDeposit(id, {unrecorded:true})` = sin depósitos previos) y
+  `notifyPayoutPaid` (`retiro`). `_isFirstDeposit` es nuevo acá (excluye `payout_refund`). Worker
+  `outboundWebhook.startWorker()` junto al de fb-ads (cada 5 min, hasta 10 intentos; 4xx salvo 408/429
+  no se reintenta). **Panel:** card "🔗 Webhooks salientes" con lista (último resultado / en cola),
+  editor (nombre, URL https, secreto con "generar al azar", modo de auth, TODOS o publicistas de
+  `Campaign.distinct('publisher')`, cargas/retiros/atribución/contacto opcionales, activo), "Enviar
+  prueba", "📋 Copiar formato para pasarle" y el formato completo plegado (uso interno).
+- **Validado:** `node --check` en server.js, metaCapiService, outboundWebhookService, modelo, admin.js,
+  admin-sw, auth.js, firebase-messaging-sw; `scripts/check-tdz.js` OK; HTML del panel balanceado
+  (776/776 div). Sin runtime (no hay node_modules). **Back necesita deploy.** PROBAR: Configuración →
+  card 🔤 muestra "g1" → cambiarlo y crear un usuario desde el panel (campo precargado) y desde la landing
+  (`<prefijo>nombre###`); card 🔗 → "+ Nuevo destino" con una URL de prueba (webhook.site) → "Enviar
+  prueba" responde 200 → registrar un usuario y cargarle → llegan `registro` y `primera_carga`.
 
 ## Sesión 2026-10-16
 

@@ -34,7 +34,7 @@ try {
 // ============================================
 // CONFIGURACIÓN DE CACHÉ
 // ============================================
-const CACHE_VERSION = 'v111'; // v111: #190b verifyToken no pisa el token fresco tras 'cerrar otros dispositivos' // v110: botón 🎁 en la barra + modal Regalos con código + card RECLAMAR fichas de lote (#191) // v109: 'cerrar sesión en los otros dispositivos' ya no saca al dueño (token fresco, #190) // v108: ruleta con premios editables (+% próxima carga, celda bloqueada con cargas faltantes) + regla del bono por instalar con tope (#188) // v107: nota de rollover en los avisos de reembolso en vivo y ruleta (#186) // v106: rollover xN de todos los bonos en Información del Servicio + modal ¿Qué es el rollover? (#185)
+const CACHE_VERSION = 'v112'; // v112: el registro precarga el prefijo de usuarios nuevos del panel (#197) // v111: #190b verifyToken no pisa el token fresco tras 'cerrar otros dispositivos' // v110: botón 🎁 en la barra + modal Regalos con código + card RECLAMAR fichas de lote (#191) // v109: 'cerrar sesión en los otros dispositivos' ya no saca al dueño (token fresco, #190) // v108: ruleta con premios editables (+% próxima carga, celda bloqueada con cargas faltantes) + regla del bono por instalar con tope (#188) // v107: nota de rollover en los avisos de reembolso en vivo y ruleta (#186) // v106: rollover xN de todos los bonos en Información del Servicio + modal ¿Qué es el rollover? (#185)
 const CACHE_NAME = 'sala-juegos-fcm-' + CACHE_VERSION;
 
 // Logs por-fetch del SW (corren en CADA request). Apagados por default;

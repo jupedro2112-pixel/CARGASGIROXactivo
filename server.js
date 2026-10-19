@@ -507,6 +507,66 @@ girox.setRolloverResolver(async () => {
   const g = await getGlobalBonusRollover();
   return g.enabled ? g.effective : null;
 });
+
+// ============================================
+// PREFIJO de los usuarios nuevos (#197, réplica del #328 del gemelo AUTOGIROXcompartido)
+// ============================================
+// Card "🔤 Prefijo de los usuarios nuevos" (panel → Configuración, solo admin
+// general). `Config['usernamePrefix']` = el prefijo con el que arrancan los
+// usuarios que crea la LANDING (prefijo + nombre + 3 dígitos, ej. g1pedro042) y
+// el que viene precargado (editable) en el alta del panel, del publisher_admin y
+// en el registro de la PWA. Default "g1". Vacío = sin prefijo. Solo letras,
+// números y guion bajo, hasta 6 caracteres (el username de 1girox es de 18 máx).
+// Cache de 60 s por instancia. Compat con el gemelo: si no hay Config pero quedó
+// sembrado el comando `/sys_usuario_prefijo`, se lee de ahí.
+const USERNAME_PREFIX_KEY = 'usernamePrefix';
+const USERNAME_PREFIX_COMMAND = '/sys_usuario_prefijo';
+const USERNAME_PREFIX_DEFAULT = 'g1';
+let _usernamePrefixCache = null; // { at, value }
+function _normUsernamePrefix(raw) {
+  const v = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!/^[a-z0-9_]{0,6}$/.test(v)) return null; // inválido → default
+  return v;
+}
+async function getUsernamePrefix() {
+  const now = Date.now();
+  if (_usernamePrefixCache && (now - _usernamePrefixCache.at) < 60000) return _usernamePrefixCache.value;
+  let value = USERNAME_PREFIX_DEFAULT;
+  try {
+    const saved = await getConfig(USERNAME_PREFIX_KEY, null);
+    if (typeof saved === 'string') {
+      const n = _normUsernamePrefix(saved);
+      if (n !== null) value = n;
+    } else {
+      const cmd = await Command.findOne({ name: USERNAME_PREFIX_COMMAND, isActive: true }).lean();
+      const n = cmd ? _normUsernamePrefix(cmd.response) : null;
+      if (n !== null) value = n;
+    }
+  } catch (_) {}
+  _usernamePrefixCache = { at: now, value };
+  return value;
+}
+
+// ¿Es la PRIMERA carga real del cliente (FTD)? Se llama DESPUÉS de crear el
+// Transaction del depósito, así que la primera carga = exactamente 1 depósito
+// real. Excluye devoluciones de retiro (payout_refund), que no son cargas
+// genuinas. Lo usan los webhooks salientes (#197): el destino recibe 'carga' con
+// firstDeposit como 'primera_carga'. `opts.unrecorded` = el flujo que llama NO
+// escribe Transaction (self-service): entonces FTD = ningún depósito previo.
+// Ante error → false (no marcar FTD de más).
+async function _isFirstDeposit(userId, opts) {
+  try {
+    const n = await Transaction.countDocuments({
+      userId: String(userId),
+      type: 'deposit',
+      'metadata.source': { $ne: 'payout_refund' }
+    });
+    return opts && opts.unrecorded ? n === 0 : n === 1;
+  } catch (e) {
+    logger.warn(`[webhooks] _isFirstDeposit falló: ${e.message}`);
+    return false;
+  }
+}
 // #186 Nota del ROLLOVER para los mensajes automáticos al cliente cuando se le
 // acredita un bono (carga con bonus, Bonificación, reembolsos, rakeback, nivel
 // VIP, código de bienvenida, lotes, fueguito, reembolso en vivo, ruleta).
@@ -591,6 +651,16 @@ const publisherAnalytics = require('./src/services/publisherAnalyticsService');
 const refunds = require('./models/refunds');
 const metaCapi = require('./src/services/metaCapiService');
 const fbAdsWebhook = require('./src/services/fbAdsWebhookService');
+// #197 (réplica del #334 del gemelo AUTOGIROXcompartido): webhooks SALIENTES
+// configurables desde el panel (registro / primera carga / carga / retiro) a uno,
+// varios o todos los publicistas. En PARALELO al pixel de Meta y a fb-ads.
+const outboundWebhook = require('./src/services/outboundWebhookService');
+const OutboundWebhookQueue = require('./src/models/OutboundWebhookQueue');
+outboundWebhook.configure({
+  getDestinations: () => _getOutboundWebhooks(),
+  resolveScope: (userInfo, opts) => metaCapi.resolveEventScope(userInfo, opts),
+  publicBaseUrl: () => getPublicBaseUrl()
+});
 
 // Valida y normaliza un valor de cookie _fbc / _fbp de Meta antes de
 // persistirlo o reenviarlo a Conversions API. El formato real es
@@ -2078,6 +2148,8 @@ async function ensureHgcashAccountIdSaved(accountId) {
 // Avisa al cliente (y a los admins) que su retiro fue pagado. El texto es editable
 // desde COMANDOS (/sys_payout_paid); si se vacía ese comando, no se envía nada.
 async function notifyPayoutPaid(payout) {
+  // #197: aviso saliente 'retiro' (solo a los destinos que lo pidieron).
+  try { if (payout && payout.userId) outboundWebhook.notify('retiro', { id: payout.userId }, { amount: Number(payout.amount), payoutId: payout.id, occurredAt: payout.paidAt || new Date() }); } catch (_) {}
   try {
     const content = await renderSystemCommand(
       '/sys_payout_paid',
@@ -2562,6 +2634,11 @@ async function hgcashAutoCarga({ movement, comprobante, mode, assign = null }) {
     await _emitAdminOnlyChatNote(user.id, user.username, assign
       ? `🏦 ✅ CARGA ASIGNADA desde la bandeja del banco por ${agentLabel} — ${dataDesc}. Acreditado.${_hgBonusNote}`
       : `🏦 ✅ CARGA AUTOMÁTICA hgcash — ${dataDesc}. Acreditado.${_hgBonusNote}`);
+    // #197: webhook saliente 'carga' (primera_carga si es el FTD). Fire-and-forget.
+    try {
+      const _hgFTD = await _isFirstDeposit(user.id);
+      outboundWebhook.notify('carga', user, { amount: Number(amount), firstDeposit: _hgFTD, transactionId: txId });
+    } catch (_) {}
     _emitHgcashUpdate('cargado', movement.movementId);
     logger.info(`[hgcash] ${assign ? 'carga asignada por ' + agentLabel : 'auto-carga'} OK user=${user.username} amount=$${amount} movement=${movement.movementId}${result.duplicate ? ' (duplicate: la plataforma ya la tenía)' : ''}`);
     return { ok: true, txId };
@@ -2778,6 +2855,77 @@ function _normalizeFanoutUrl(raw) {
   p.hash = '';
   return p.toString();
 }
+// ===== #197 Webhooks salientes (Config['outboundWebhooks']) — réplica del #334/#346 del gemelo =====
+// Lista de destinos; el secreto se guarda cifrado (misma clave que las credenciales
+// de hgcash, #192: _credEncrypt/_credDecrypt) y se descifra sólo en memoria para firmar.
+const OUTBOUND_WEBHOOKS_KEY = 'outboundWebhooks';
+const OUTBOUND_WEBHOOKS_MAX = 10;
+const OUTBOUND_WEBHOOKS_TTL_MS = 60 * 1000;
+let _outboundWebhooksCache = null;
+function _normalizeOutboundDest(d, cur) {
+  const c = cur || {};
+  const events = d.events && typeof d.events === 'object' ? d.events : (c.events || {});
+  const fields = d.fields && typeof d.fields === 'object' ? d.fields : (c.fields || {});
+  const url = d.url !== undefined ? String(d.url || '').trim() : (c.url || '');
+  return {
+    id: c.id || d.id || ('wh_' + crypto.randomBytes(5).toString('hex')),
+    name: d.name !== undefined ? String(d.name || '').trim().slice(0, 60) : (c.name || ''),
+    url,
+    secretEnc: (typeof d.secret === 'string' && d.secret.trim()) ? _credEncrypt(d.secret.trim()) : (c.secretEnc || null),
+    enabled: typeof d.enabled === 'boolean' ? d.enabled : (c.enabled !== false),
+    scope: d.scope === 'publishers' ? 'publishers' : (d.scope === 'all' ? 'all' : (c.scope || 'all')),
+    publishers: Array.isArray(d.publishers) ? d.publishers.map((p) => String(p || '').trim()).filter(Boolean).slice(0, 50) : (c.publishers || []),
+    events: {
+      registro: events.registro !== false,           // siempre por defecto
+      primera_carga: events.primera_carga !== false, // siempre por defecto
+      carga: events.carga === true,                  // OPCIONAL
+      retiro: events.retiro === true                 // OPCIONAL
+    },
+    fields: { atribucion: fields.atribucion === true, contacto: fields.contacto === true }, // OPCIONALES
+    // Cómo se autentica el aviso ante el receptor. Siempre van los headers
+    // X-Webhook-*; `auth` agrega lo que pide cada plataforma:
+    //   hmac_ts   (default) X-Webhook-Signature = HMAC(ts.body)  — nuestro esquema
+    //   hmac_body <header> = <prefix>HMAC-SHA256 hex del body solo (estilo GitHub/Shopify)
+    //   bearer    Authorization: Bearer <secreto>
+    //   header    <header>: <secreto>  (API key fija)
+    auth: (() => {
+      const a = d.auth && typeof d.auth === 'object' ? d.auth : (c.auth || {});
+      const mode = ['hmac_ts', 'hmac_body', 'bearer', 'header'].includes(a.mode) ? a.mode : 'hmac_ts';
+      const header = String(a.header || '').trim().replace(/[^A-Za-z0-9-]/g, '').slice(0, 60);
+      const prefix = String(a.prefix || '').trim().slice(0, 20);
+      return { mode, header: header || null, prefix: prefix || null };
+    })(),
+    createdAt: c.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+async function _getOutboundWebhooks(opts) {
+  const now = Date.now();
+  if (!(opts && opts.fresh) && _outboundWebhooksCache && (now - _outboundWebhooksCache.at) < OUTBOUND_WEBHOOKS_TTL_MS) return _outboundWebhooksCache.value;
+  const raw = await getConfig(OUTBOUND_WEBHOOKS_KEY, null);
+  const list = raw && Array.isArray(raw.destinations) ? raw.destinations : [];
+  const value = list.map((d) => {
+    let secret = null, decryptError = false;
+    if (d.secretEnc) { try { secret = _credDecrypt(d.secretEnc); } catch (_) { decryptError = true; } }
+    return Object.assign({}, d, { secret, decryptError });
+  });
+  _outboundWebhooksCache = { at: now, value };
+  return value;
+}
+async function _saveOutboundWebhooks(list, by) {
+  const clean = list.map((d) => { const o = Object.assign({}, d); delete o.secret; delete o.decryptError; return o; });
+  await Config.set(OUTBOUND_WEBHOOKS_KEY, { destinations: clean }, by);
+  _outboundWebhooksCache = null;
+}
+function _outboundDestPublic(d, stats, pending) {
+  const o = Object.assign({}, d);
+  delete o.secretEnc; delete o.secret;
+  o.hasSecret = !!d.secretEnc;
+  o.stats = stats || null;
+  o.pending = pending || 0;
+  return o;
+}
+
 async function _getHgcashFanout(opts) {
   const now = Date.now();
   if (!(opts && opts.fresh) && _hgcashFanoutCache && (now - _hgcashFanoutCache.at) < HGCASH_FANOUT_TTL_MS) {
@@ -3259,6 +3407,33 @@ const publisherAdminMiddleware = (req, res, next) => {
   }
   next();
 };
+
+// #197: estado público que la PWA y el panel piden al arrancar (sin sesión).
+// Mismo path que en el gemelo (`/api/config/access`) para que los parches se
+// porten 1:1; acá por ahora solo lleva el prefijo de los usuarios nuevos.
+app.get('/api/config/access', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try { res.json({ usernamePrefix: await getUsernamePrefix() }); }
+  catch (_) { res.json({ usernamePrefix: USERNAME_PREFIX_DEFAULT }); }
+});
+
+// Panel → Configuración → "🔤 Prefijo de los usuarios nuevos" (solo admin general, #197).
+app.get('/api/admin/username-prefix', authMiddleware, adminMiddleware, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+  _usernamePrefixCache = null;
+  res.json({ prefix: await getUsernamePrefix(), default: USERNAME_PREFIX_DEFAULT });
+});
+app.post('/api/admin/username-prefix', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const n = _normUsernamePrefix(req.body && req.body.prefix);
+    if (n === null) return res.status(400).json({ error: 'Solo letras, números y guion bajo, hasta 6 caracteres (o vacío = sin prefijo).' });
+    await Config.set(USERNAME_PREFIX_KEY, n, req.user.username);
+    _usernamePrefixCache = null;
+    logger.info(`[usuario-prefijo] ${req.user.username} lo cambió a "${n}"`);
+    res.json({ success: true, prefix: n, default: USERNAME_PREFIX_DEFAULT });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
 
 // ============================================
 // RUTAS DE AUTENTICACIÓN
@@ -3809,6 +3984,7 @@ app.post('/api/auth/register', authLimiter, registerIpLimiter, async (req, res) 
 
     // Webhook a fb-ads: conversión clave del embudo. Fire-and-forget.
     fbAdsWebhook.notify('CompleteRegistration', newUser);
+    try { outboundWebhook.notify('registro', newUser); } catch (_) {} // #197
 
     res.status(201).json({
       message: 'Usuario creado exitosamente',
@@ -3990,6 +4166,7 @@ app.post('/api/auth/register-quick', authLimiter, registerIpLimiter, async (req,
 
     // Webhook a fb-ads: conversión clave del embudo. Fire-and-forget.
     fbAdsWebhook.notify('CompleteRegistration', newUser);
+    try { outboundWebhook.notify('registro', newUser); } catch (_) {} // #197
 
     res.status(201).json({
       message: 'Cuenta creada. Ya podes ingresar a jugar — para retirar tendrás que verificar un teléfono.',
@@ -4031,28 +4208,33 @@ app.post('/api/auth/register-quick', authLimiter, registerIpLimiter, async (req,
 // phoneVerified) — y no se le avisa al cliente al principio.
 
 // Base de username a partir del nombre real: sin acentos (NFD), minúsculas,
-// solo [a-z0-9], máx 12 chars (deja lugar al sufijo numérico), prefijo "gx" si
-// queda demasiado corto.
-function _sanitizeUsernameBase(name) {
+// solo [a-z0-9], con el PREFIJO del panel adelante (#197, réplica del #328 del
+// gemelo; antes "gx" fijo solo si quedaba corto). prefijo + base + sufijo (3) =
+// 18 máx (límite de 1girox).
+function _sanitizeUsernameBase(name, prefix) {
+  const pre = typeof prefix === 'string' ? prefix : USERNAME_PREFIX_DEFAULT;
   let base = String(name || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // saca acentos/diacríticos
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-    .slice(0, 12);
-  if (base.length < 3) base = ('gx' + base).slice(0, 12);
-  return base;
+    .replace(/[^a-z0-9]/g, '');
+  const maxBase = Math.max(1, 18 - pre.length - 3);
+  if (base.length > maxBase) base = base.slice(0, maxBase);
+  return pre + base;
 }
 
-// Deriva un username ÚNICO: hasta 12 intentos de base + sufijo aleatorio,
-// validando las reglas de 1girox y la colisión local case-insensitive.
-async function _deriveUniqueUsername(base) {
+// Deriva un username ÚNICO: prefijo + base + sufijo de EXACTAMENTE 3 dígitos
+// (000-999 → "007", "042"), hasta 12 intentos validando las reglas de 1girox y la
+// colisión local case-insensitive.
+async function _deriveUniqueUsername(name) {
+  const base = _sanitizeUsernameBase(name, await getUsernamePrefix());
   for (let attempt = 0; attempt < 12; attempt++) {
-    const candidate = (base + String(crypto.randomInt(100, 999999))).slice(0, 18);
+    const suffix = String(crypto.randomInt(0, 1000)).padStart(3, '0');
+    const candidate = base + suffix;
     if (!girox.validateUsername(candidate).valid) continue;
     const collision = await findUserByUsernameCI(candidate, { lean: true });
     if (!collision) return candidate;
   }
-  return null;
+  return null; // con sólo 1000 sufijos por nombre puede agotarse si el nombre es muy común
 }
 
 app.post('/api/landing/signup', landingIpLimiter, async (req, res) => {
@@ -4077,8 +4259,7 @@ app.post('/api/landing/signup', landingIpLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Código de campaña inválido o inactivo.' });
     }
 
-    const base = _sanitizeUsernameBase(cleanName);
-    const username = await _deriveUniqueUsername(base);
+    const username = await _deriveUniqueUsername(cleanName);
     if (!username) {
       return res.status(500).json({ error: 'No pudimos generar tu usuario. Probá de nuevo.' });
     }
@@ -4173,6 +4354,7 @@ app.post('/api/landing/signup', landingIpLimiter, async (req, res) => {
       { req }
     );
     fbAdsWebhook.notify('CompleteRegistration', newUser);
+    try { outboundWebhook.notify('registro', newUser); } catch (_) {} // #197
 
     // Link de acceso de un solo uso + ir=casino: la PWA abre el casino directo
     // al loguear. (El canje NO fuerza cambio de clave para cuentas de landing:
@@ -9392,6 +9574,11 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
 
       // Webhook a fb-ads: conversión Purchase para aprendizaje por anuncio.
       fbAdsWebhook.notify('Purchase', user, { value: parseFloat(amount), currency: 'ARS' });
+      // #197: webhook saliente 'carga' / 'primera_carga' (el Transaction del depósito ya existe).
+      try {
+        const _isFTD = await _isFirstDeposit(user.id);
+        outboundWebhook.notify('carga', user, { amount: parseFloat(amount), firstDeposit: _isFTD, transactionId: _depTxId });
+      } catch (_) {}
 
       logger.info(
         `[deposit] OK admin=${req.user?.username} user=${user.username} amount=$${amount} ` +
@@ -11180,6 +11367,9 @@ app.post('/api/movements/deposit', authMiddleware, depositorMiddleware, async (r
         );
         // Webhook a fb-ads: conversión Purchase para aprendizaje por anuncio.
         fbAdsWebhook.notify('Purchase', u, { value: parseFloat(amount), currency: 'ARS' });
+        // #197: webhook saliente. Este flujo NO escribe Transaction → FTD = sin depósitos previos.
+        const _isFTD = await _isFirstDeposit(req.user.userId, { unrecorded: true });
+        outboundWebhook.notify('carga', u, { amount: parseFloat(amount), firstDeposit: _isFTD, transactionId: _selfDepTxId });
       } catch (e) { /* tracking nunca bloquea */ }
 
       res.json({
@@ -16530,6 +16720,61 @@ app.delete('/api/admin/hgcash/fanout', authMiddleware, adminMiddleware, async (r
     _hgcashFanoutCache = null;
     logger.info(`[hgcash-fanout] ${req.user.username} borró la config del panel (vuelve a HGCASH_FANOUT_URL)`);
     res.json(Object.assign({ success: true }, await _hgcashFanoutPayload()));
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+
+// #197 Webhooks salientes — CRUD desde el panel (solo admin general).
+app.get('/api/admin/webhooks', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const list = await _getOutboundWebhooks({ fresh: true });
+    const out = [];
+    for (const d of list) out.push(_outboundDestPublic(d, outboundWebhook.getStats(d.id), await outboundWebhook.pendingCount(d.id)));
+    let publishers = [];
+    try { publishers = (await Campaign.distinct('publisher')).map((p) => String(p || '').trim()).filter(Boolean).sort(); } catch (_) {}
+    res.json({ destinations: out, publishers, max: OUTBOUND_WEBHOOKS_MAX });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/webhooks', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    if (!_credKey()) return res.status(503).json({ error: 'No se puede cifrar ahora (falta JWT_SECRET).' });
+    const b = req.body || {};
+    const list = await _getOutboundWebhooks({ fresh: true });
+    const idx = b.id ? list.findIndex((d) => d.id === b.id) : -1;
+    const cur = idx >= 0 ? list[idx] : null;
+    if (!cur && list.length >= OUTBOUND_WEBHOOKS_MAX) return res.status(400).json({ error: `Máximo ${OUTBOUND_WEBHOOKS_MAX} destinos` });
+    const next = _normalizeOutboundDest(b, cur);
+    if (!/^https:\/\/[^\s]+$/i.test(next.url)) return res.status(400).json({ error: 'La URL tiene que empezar con https://' });
+    if (!next.name) return res.status(400).json({ error: 'Poné un nombre (ej: el publicista o el sistema que recibe)' });
+    if (!next.secretEnc) return res.status(400).json({ error: 'Falta el secreto: con él el receptor comprueba que el aviso es tuyo' });
+    if (next.scope === 'publishers' && !next.publishers.length) return res.status(400).json({ error: 'Elegí al menos un publicista, o marcá TODOS' });
+    if (idx >= 0) list[idx] = next; else list.push(next);
+    await _saveOutboundWebhooks(list, req.user.username);
+    logger.info(`[webhooks] ${req.user.username} ${cur ? 'editó' : 'creó'} destino ${next.name} (${next.id}) scope=${next.scope}`);
+    res.json({ success: true, destination: _outboundDestPublic(next) });
+  } catch (e) { logger.error(`[webhooks] guardar: ${e.message}`); res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.delete('/api/admin/webhooks/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const list = await _getOutboundWebhooks({ fresh: true });
+    const next = list.filter((d) => d.id !== req.params.id);
+    if (next.length === list.length) return res.status(404).json({ error: 'No existe' });
+    await _saveOutboundWebhooks(next, req.user.username);
+    try { await OutboundWebhookQueue.deleteMany({ destId: req.params.id }); } catch (_) {}
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/webhooks/:id/test', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const list = await _getOutboundWebhooks({ fresh: true });
+    const d = list.find((x) => x.id === req.params.id);
+    if (!d) return res.status(404).json({ error: 'No existe' });
+    if (d.decryptError) return res.status(400).json({ error: 'El secreto guardado no se pudo leer (¿cambió JWT_SECRET?). Volvé a cargarlo.' });
+    const r = await outboundWebhook.sendTest(d);
+    res.json({ ok: r.ok, status: r.status || null, error: r.error || null, payload: r.payload });
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
 
@@ -22782,6 +23027,7 @@ if (process.env.VERCEL) {
     logger.info('Data initialized for Vercel');
     // Worker periódico que reprocesa la cola de webhooks a fb-ads.
     fbAdsWebhook.startWorker();
+    outboundWebhook.startWorker(); // #197 cola de webhooks salientes
   });
   
   module.exports = app;
@@ -22832,6 +23078,7 @@ if (process.env.VERCEL) {
     await setupRedisAdapter();
     // Worker periódico que reprocesa la cola de webhooks a fb-ads.
     fbAdsWebhook.startWorker();
+    outboundWebhook.startWorker(); // #197 cola de webhooks salientes
     server.listen(PORT, () => {
       logger.info(`Server started on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
     });
