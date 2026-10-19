@@ -83,14 +83,16 @@ VIP.auth = (function () {
         }, 1200);
     }
 
-    // Muestra/oculta el cartel de atención del home. Visible para todo usuario
-    // con el teléfono sin verificar — el retiro exige verificación por SMS.
+    // Cartel "¡Atención! Verificá tu teléfono" del home: APAGADO (#200, owner
+    // 2026-10-19: "es muy molesto para el usuario"). Antes se mostraba a todo
+    // usuario con phoneVerified !== true (= todos los que entran por landing).
+    // El SMS se sigue exigiendo al RETIRAR (withdraw.js lo pide ahí mismo), así
+    // que no hace falta empujarlo desde el inicio. Se deja la función (la llaman
+    // login/verifyToken/verificación) forzando oculto; para volver a encenderlo,
+    // restaurar la condición `user.phoneVerified !== true`.
     function refreshVerifyPhoneBanner() {
         const banner = document.getElementById('verifyPhoneBanner');
-        if (!banner) return;
-        const user = VIP.state.currentUser;
-        const needsVerify = user && (!user.role || user.role === 'user') && user.phoneVerified !== true;
-        banner.style.display = needsVerify ? '' : 'none';
+        if (banner) banner.style.display = 'none';
     }
 
     // Registro directo: solo usuario + contraseña, sin SMS. Si hay una pauta

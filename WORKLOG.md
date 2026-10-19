@@ -8,6 +8,14 @@
 
 ## Sesión 2026-10-19
 
+### 200. Cartel "¡Atención! Verificá tu teléfono" del inicio: APAGADO
+- **Owner:** "chequeá si este cartel aparece; si aparece sacalo, es muy molesto para el usuario".
+  Aparecía: `refreshVerifyPhoneBanner` lo mostraba a todo usuario con `phoneVerified !== true`, o sea
+  a TODOS los que entran por landing (el alta por landing no pide SMS).
+- Ahora la función lo fuerza oculto siempre (markup `#verifyPhoneBanner` se conserva comentado para
+  poder volver a encenderlo restaurando la condición). El SMS se sigue exigiendo al RETIRAR, desde el
+  propio flujo de retiro. SW `v116`.
+
 ### 199. Menú del inicio de la PWA: 3 modos y SIEMPRE arranca en "solo reembolsos"
 - **Owner:** "que siempre aparezca con el menú cerrado (la primera vez son muchas cosas), que
   arranque cerrado con solo reembolsos, y que se pueda cambiar entre menú completo, menú cerrado

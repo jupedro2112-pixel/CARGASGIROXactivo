@@ -612,6 +612,8 @@
         <!-- Cartel de atención: cuenta sin teléfono verificado. Visible para
              todo usuario con phoneVerified !== true. VIP.auth.refreshVerifyPhoneBanner()
              lo muestra/oculta. Empuja a verificar el teléfono porque el retiro lo exige. -->
+        <!-- #200: APAGADO (owner 2026-10-19, molestaba). refreshVerifyPhoneBanner()
+             lo deja siempre oculto; el markup queda por si se vuelve a encender. -->
         <div id="verifyPhoneBanner" style="display:none; background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%); color: #1a0033; padding: 12px 16px; border-radius: 12px; margin: 8px 12px; box-shadow: 0 4px 15px rgba(212,175,55,0.45); border: 1px solid rgba(255,255,255,0.25);">
             <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                 <span style="font-size: 22px;">⚠️</span>

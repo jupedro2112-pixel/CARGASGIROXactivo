@@ -1082,8 +1082,9 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   mode-closed` (CSS en index.html) elegidos desde la barra `#homePanelToggle` (3 botones
   `.hpt-seg[data-mode]`, app.js `applyHomePanel`). **Siempre arranca en `refunds`** (solo la fila
   de reembolsos, sin tarjeta de usuario ni casino/saldo ni banners); NO se persiste. `closed`
-  esconde todo el panel (quedan RETIRAR + chat). El cartel de verificar teléfono solo se ve en
-  `full`. `VIP.ui.setHomePanelMode(mode)` por si otra parte necesita abrirlo.
+  esconde todo el panel (quedan RETIRAR + chat). `VIP.ui.setHomePanelMode(mode)` por si otra parte
+  necesita abrirlo. El cartel "¡Atención! Verificá tu teléfono" (`#verifyPhoneBanner`) está
+  **APAGADO** desde #200 (`refreshVerifyPhoneBanner` lo fuerza oculto; el SMS se exige al retirar).
 - **Información del Servicio** (#185): la tarjeta "Bonos en tus cargas" (infoModal) y el
   pie del grid del adServiceModal muestran "Todos los bonos y regalos tienen rollover xN"
   (N = `bonusRollover.x` de `/api/refunds/status`, el efectivo del panel; oculto si el
