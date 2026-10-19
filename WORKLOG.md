@@ -48,6 +48,8 @@
   editor (nombre, URL https, secreto con "generar al azar", modo de auth, TODOS o publicistas de
   `Campaign.distinct('publisher')`, cargas/retiros/atribución/contacto opcionales, activo), "Enviar
   prueba", "📋 Copiar formato para pasarle" y el formato completo plegado (uso interno).
+- **Espec portable:** `docs/ESPEC-WEBHOOKS-SALIENTES.md` (código completo + anclas + prompt para Claude)
+  generada desde los archivos reales de este repo, para pasarla a otros repos 1girox de la familia.
 - **Validado:** `node --check` en server.js, metaCapiService, outboundWebhookService, modelo, admin.js,
   admin-sw, auth.js, firebase-messaging-sw; `scripts/check-tdz.js` OK; HTML del panel balanceado
   (776/776 div). Sin runtime (no hay node_modules). **Back necesita deploy.** PROBAR: Configuración →
