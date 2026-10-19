@@ -57,6 +57,11 @@
   `enterCasino()` (SSO de siempre; acá no hay SSO adelantado en el canje). `ir=casino` sigue
   igual. SW `v114`. No se portó el "#309 ¿seguís con tu cuenta vieja?" (acá no existe
   `access-link/discard`).
+- **Fix `vercel.json` (mismo día):** la landing en Vercel (giroxgrupo.com) daba **404 NOT_FOUND** en
+  `/pulsemartin`: el `routes` del gemelo tiene el filtro "solo Argentina" + `handle: filesystem`
+  pero NINGUNA regla que mande `/CODIGO` a `index.html` (solo andaba `/?p=CODIGO`). Se agregó
+  `{ "src": "/(.*)", "dest": "/index.html" }` después del filesystem. ⚠️ El gemelo
+  PAUTANUEVAsantino tiene el mismo bug si usa links `/CODIGO`. Hay que redeployar la landing.
 - **Deploy:** (1) EB con este commit; (2) subir la carpeta `landing/` a Vercel (o al host que sea)
   con su dominio; (3) crear la campaña en el panel y probar `https://<landing>/<CODIGO>` → tiene que
   crear el usuario, redirigir a cargas1girox.com con el recuadro usuario+clave y, al tocar ENTRAR,
