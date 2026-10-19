@@ -52,8 +52,8 @@ function _capiDestinations() {
 // decidir qué destino recibe cada aviso. Lookup lazy (los modelos ya están
 // registrados por el server) con cache corto para no pegarle a Mongo en cada
 // evento. Orden para el usuario: campaña de alta → campaña dueña de la key.
-// (`lastTouchCampaign` queda primero por compatibilidad con el gemelo: en este
-// repo el campo no existe y el select lo ignora.)
+// (`lastTouchCampaign` = campaña del ÚLTIMO clic, la setea `POST /api/landing/touch`
+// desde #198; antes el campo no existía y el select lo ignoraba.)
 const _campaignPubCache = new Map(); // code → { publisher, ts }
 const CAMPAIGN_CACHE_MS = 5 * 60 * 1000;
 async function _publisherOfCampaign(code) {
@@ -89,6 +89,33 @@ async function resolveEventScope(userInfo, opts) {
     if (!code) return null;
     return { publisher: await _publisherOfCampaign(code), campaignCode: code };
   } catch (_) { return null; }
+}
+
+// ---- Pixel IDs para el NAVEGADOR de la landing externa (#198, réplica del gemelo).
+// El pixel propio (META_PIXEL_ID) NUNCA va al navegador de la landing: recibe
+// registro/compra por CAPI. Van solo los pixels de partners `META_PIXEL_ID_2..9`
+// que estén ASIGNADOS con `META_PIXEL_PUBLISHER_i` (coma-separado: nombres de
+// publicista y/o códigos de campaña; `*` = todas las campañas). Sin asignar → no
+// se expone. `META_PIXEL_CAPIONLY_i=1` lo deja solo en CAPI (invisible en la landing).
+function _parsePixelScope(raw) {
+  return String(raw || '').split(',').map((x) => x.trim()).filter(Boolean);
+}
+async function pixelIdsForCampaign(campaignCode) {
+  const code = String(campaignCode || '').trim().toUpperCase();
+  if (!code) return [];
+  const publisher = await _publisherOfCampaign(code);
+  const pubLower = publisher ? String(publisher).trim().toLowerCase() : null;
+  const ids = [];
+  for (let i = 2; i <= 9; i++) {
+    const pid = String(process.env['META_PIXEL_ID_' + i] || '').trim();
+    if (!pid) continue;
+    if (/^(1|true|on|yes)$/i.test(String(process.env['META_PIXEL_CAPIONLY_' + i] || ''))) continue;
+    const scope = _parsePixelScope(process.env['META_PIXEL_PUBLISHER_' + i]);
+    if (!scope.length) continue;
+    const ok = scope.some((s) => s === '*' || s.toUpperCase() === code || (pubLower && s.toLowerCase() === pubLower));
+    if (ok) ids.push(pid);
+  }
+  return ids;
 }
 
 function isConfigured() {
@@ -346,5 +373,6 @@ module.exports = {
   buildAdvancedMatching,
   valueCategory,
   destinationsSummary,
-  resolveEventScope // #197 webhooks salientes
+  resolveEventScope, // #197 webhooks salientes
+  pixelIdsForCampaign // #198 pixel del navegador de la landing
 };

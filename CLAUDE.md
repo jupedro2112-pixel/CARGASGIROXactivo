@@ -197,6 +197,12 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   salen de `getUsernamePrefix()` (`Config['usernamePrefix']`): no hardcodear "gx"/"g1"/"girox".
   `GET /api/config/access` es público y lo piden el panel y la PWA al arrancar.
 
+- **Landing externa (#198):** `landing/` es la landing de PAUTANUEVAsantino apuntando a
+  `https://cargas1girox.com` (NUNCA vipcargas.com: Cloudflare le mete challenge al preflight y la
+  landing muestra "Sin conexión"). Todo endpoint que la landing llame cross-origin va en
+  `LANDING_OPEN_CORS_PATHS`. El alta devuelve `accessUrl` con `ir=creds` (recuadro usuario+clave
+  en la PWA) y `metaEventId`; `ir=casino` es legacy.
+
 - **Lotes y Cronograma (#195):** el POST `/api/admin/notif-batches` es un wrapper de
   `_createNotifBatchFromBody(body, user)`; cualquier validación/efecto nuevo del lote va en esa
   función (así lo heredan las campañas programadas). Las rutas del cronograma son

@@ -1,0 +1,12 @@
+{
+  "routes": [
+    {
+      "src": "/(.*)",
+      "missing": [
+        { "type": "header", "key": "x-vercel-ip-country", "value": "AR" }
+      ],
+      "dest": "/blank.html"
+    },
+    { "handle": "filesystem" }
+  ]
+}

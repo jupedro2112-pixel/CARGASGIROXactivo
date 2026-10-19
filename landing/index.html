@@ -1,250 +1,503 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>CARGAS 1GIROX — Jugá ahora</title>
-<meta name="description" content="Creá tu cuenta en segundos y empezá a jugar. Acreditación al instante y retiros rápidos.">
-<!--
-  LANDING PUENTE de conversión (archivo suelto — NO va en public/).
-  Se sube al dominio puente (Vercel / Cloudflare Pages / dominio final).
-
-  CONFIG (constantes de abajo):
-    API_BASE_DEFAULT  backend de producción (se puede pisar con ?api=https://otro)
-    CAMPAIGN_CODE     código fijo de campaña; vacío = tomar de ?p= / ?campaign= / path
-    BONUS_BIG/SUB     texto del banner de bono.
-                      ⚠️ Deben ser la oferta REAL: mostrarle a Meta algo distinto
-                      de lo que ve el usuario es cloaking → baneo de dominio,
-                      pixel y cuenta publicitaria.
--->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CARGAS 1GIROX</title>
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
   body {
-    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-    background:#0d0d1a; color:#fff; min-height:100vh;
-    display:flex; flex-direction:column; align-items:center;
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    background:
+      radial-gradient(1100px 560px at 50% -14%, #17281b 0%, rgba(8,11,8,0) 60%),
+      #080b08;
+    color: #f3f5f1; min-height: 100%;
+    display: flex; flex-direction: column; align-items: center;
+    -webkit-font-smoothing: antialiased;
   }
-  .wrap { width:100%; max-width:420px; padding:18px 16px 40px; }
-  .bonus {
-    background:linear-gradient(135deg,#d4af37,#f5d76e);
-    color:#1a1a2e; border-radius:14px; padding:18px 16px; text-align:center;
-    box-shadow:0 6px 24px rgba(212,175,55,0.35); margin-bottom:18px;
+  a { color: inherit; }
+
+  /* Header */
+  .top {
+    width: 100%; max-width: 460px; display: flex; align-items: center;
+    justify-content: space-between; padding: 16px 20px calc(4px + env(safe-area-inset-top,0px));
   }
-  .bonus .big { font-size:26px; font-weight:900; letter-spacing:0.5px; }
-  .bonus .sub { font-size:14px; font-weight:600; margin-top:4px; }
-  h1 { font-size:22px; text-align:center; margin-bottom:6px; color:#f5d76e; }
-  .pitch { text-align:center; color:#cfcfe0; font-size:14.5px; line-height:1.5; margin-bottom:18px; }
-  .card {
-    background:#16162a; border:1px solid rgba(212,175,55,0.25);
-    border-radius:14px; padding:18px 16px; margin-bottom:16px;
+  .logo { font-size: 22px; font-weight: 900; letter-spacing: 1px; }
+  .logo .g { color: #e3bd48; } .logo .x { color: #25d366; }
+  .plus18 {
+    font-size: 11px; font-weight: 800; color: #cbd8cb;
+    border: 1px solid rgba(255,255,255,0.22); border-radius: 999px; padding: 3px 9px;
   }
-  label { display:block; font-size:13px; color:#aaa; margin-bottom:6px; }
-  input[type=text] {
-    width:100%; padding:14px 12px; font-size:17px; border-radius:10px;
-    border:1px solid rgba(212,175,55,0.4); background:#0d0d1a; color:#fff; outline:none;
+
+  main {
+    width: 100%; max-width: 460px; flex: 1;
+    padding: 8px 20px calc(28px + env(safe-area-inset-bottom,0px));
+    display: flex; flex-direction: column;
   }
-  input[type=text]:focus { border-color:#f5d76e; }
-  .btn {
-    display:block; width:100%; margin-top:14px; padding:16px; font-size:17px;
-    font-weight:800; border:none; border-radius:12px; cursor:pointer;
-    background:linear-gradient(135deg,#00c853,#00e676); color:#062812;
-    box-shadow:0 5px 18px rgba(0,200,83,0.35);
+
+  /* Banner de bono */
+  .promo {
+    margin-top: 12px; border-radius: 18px; overflow: hidden;
+    border: 1px solid rgba(212,175,55,0.3);
+    background:
+      linear-gradient(160deg, rgba(227,189,72,0.14), rgba(15,122,61,0.10)),
+      #0e140e;
+    padding: 22px 20px; text-align: center;
   }
-  .btn:disabled { opacity:0.6; cursor:default; }
-  .err { color:#ff7b7b; font-size:13px; margin-top:10px; display:none; text-align:center; }
-  .sellos { display:flex; justify-content:space-between; gap:8px; margin-bottom:16px; }
-  .sello {
-    flex:1; background:#16162a; border:1px solid rgba(255,255,255,0.08);
-    border-radius:10px; padding:10px 6px; text-align:center; font-size:11.5px; color:#cfcfe0;
+  .promo .eyebrow {
+    font-size: 12px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+    color: #7bd39b;
   }
-  .sello .ico { font-size:20px; display:block; margin-bottom:4px; }
-  .legal { text-align:center; color:#666; font-size:11px; line-height:1.5; margin-top:8px; }
+  .promo .big {
+    font-size: 62px; font-weight: 900; line-height: 1; letter-spacing: -1px;
+    color: #e3bd48; text-shadow: 0 4px 30px rgba(227,189,72,0.28); margin: 6px 0 2px;
+  }
+  .promo .sub { font-size: 15px; font-weight: 800; color: #f3f5f1; letter-spacing: .5px; }
+
+  /* Copy */
+  .pitch { text-align: center; color: #a7b7a8; font-size: 14.5px; line-height: 1.5; margin: 20px 4px 16px; }
+
+  /* Form */
+  .qname { text-align: center; font-size: 14px; font-weight: 800; color: #eaf2ea; margin-bottom: 10px; }
+  input {
+    width: 100%; padding: 16px 18px; font-size: 17px; color: #fff; text-align: center;
+    background: #0a0f0a; border: 1px solid rgba(255,255,255,0.15); border-radius: 14px; outline: none;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  input::placeholder { color: #667766; }
+  input:focus { border-color: #25d366; box-shadow: 0 0 0 3px rgba(37,211,102,0.16); }
+  .cta {
+    width: 100%; margin-top: 12px; padding: 17px; font-size: 17px; font-weight: 900; letter-spacing: .4px;
+    color: #05230f; background: linear-gradient(135deg, #2ce06e, #0f9a4b);
+    border: none; border-radius: 14px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 9px;
+    transition: transform .12s, filter .2s;
+  }
+  .cta:hover { filter: brightness(1.06); }
+  .cta:active { transform: scale(0.99); }
+  .cta:disabled { filter: saturate(.5) brightness(.85); cursor: default; }
+  .hint { text-align: center; font-size: 12px; color: #6b786c; margin-top: 9px; }
+  .msg { text-align: center; font-size: 13px; min-height: 16px; margin-top: 8px; }
+  .msg.err { color: #ff9090; }
+
+  .spin {
+    width: 17px; height: 17px; border-radius: 50%;
+    border: 2px solid rgba(5,35,15,0.35); border-top-color: #05230f;
+    animation: rot .7s linear infinite;
+  }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  /* Trust */
+  .trust {
+    display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;
+    margin-top: 22px; font-size: 12.5px; color: #8fa090;
+  }
+  .trust span { display: inline-flex; align-items: center; gap: 6px; }
+  .trust .d { width: 5px; height: 5px; border-radius: 50%; background: #25d366; }
+  .legal { text-align: center; font-size: 11px; color: #5d6a5e; line-height: 1.6; margin-top: 24px; }
+
   /* Pantalla de credenciales */
-  .creds { display:none; }
-  .creds .dato {
-    background:#0d0d1a; border:1px dashed rgba(212,175,55,0.5); border-radius:10px;
-    padding:12px; text-align:center; margin-top:10px;
+  .done { display: none; text-align: center; margin-top: 24px; }
+  .done.on { display: block; animation: fade .4s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .done h2 { font-size: 22px; font-weight: 900; margin-bottom: 4px; }
+  .done h2 .em { color: #25d366; }
+  .done .p { color: #a7b7a8; font-size: 14px; margin-bottom: 20px; }
+  .cred {
+    background: #0e140e; border: 1px solid rgba(212,175,55,0.3); border-radius: 14px;
+    padding: 16px; display: grid; gap: 12px; text-align: left; margin-bottom: 8px;
   }
-  .creds .dato .k { font-size:12px; color:#888; }
-  .creds .dato .v { font-size:24px; font-weight:900; color:#f5d76e; letter-spacing:1px; font-family:monospace; }
-  .warn { color:#ffb74d; font-size:13px; text-align:center; margin-top:10px; }
+  .cred .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .cred .k { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #8fa090; text-transform: uppercase; }
+  .cred .v { font-size: 20px; font-weight: 900; color: #f3f5f1; font-family: "Courier New", monospace; letter-spacing: 1px; }
+  .cred .v.gold { color: #e3bd48; }
+  .save-note { font-size: 12px; color: #e3bd48; margin-bottom: 16px; }
+
   /* Popup de enganche */
-  #hookPop {
-    display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75);
-    z-index:99; align-items:center; justify-content:center; padding:20px;
+  .pop {
+    position: fixed; inset: 0; background: rgba(4,6,4,0.72);
+    display: none; align-items: center; justify-content: center; padding: 24px; z-index: 50;
   }
-  #hookPop .box {
-    background:#16162a; border:1px solid #d4af37; border-radius:16px;
-    padding:22px 18px; max-width:340px; text-align:center;
+  .pop.on { display: flex; animation: fade .25s ease; }
+  .pop .box {
+    width: 100%; max-width: 360px; background: #10160f; border: 1px solid rgba(212,175,55,0.35);
+    border-radius: 20px; padding: 26px 22px; text-align: center; box-shadow: 0 24px 70px rgba(0,0,0,0.6);
   }
-  #hookPop .box h2 { color:#f5d76e; font-size:20px; margin-bottom:8px; }
-  #hookPop .box p { color:#cfcfe0; font-size:14px; margin-bottom:14px; }
+  .pop h3 { font-size: 20px; font-weight: 900; margin-bottom: 6px; }
+  .pop p { color: #a7b7a8; font-size: 14px; line-height: 1.5; margin-bottom: 18px; }
+  .pop .later {
+    display: inline-block; margin-top: 12px; font-size: 13px; color: #8fa090;
+    text-decoration: underline; cursor: pointer; background: none; border: none;
+  }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } .done.on, .pop.on { animation: none; } }
 </style>
 </head>
 <body>
-<div class="wrap">
-
-  <div class="bonus">
-    <div class="big" id="bonusBig"></div>
-    <div class="sub" id="bonusSub"></div>
+  <div class="top">
+    <div class="logo"><span class="g">1</span><span class="x">GIROX</span></div>
+    <div class="plus18">+18</div>
   </div>
 
-  <h1>🎰 CARGAS 1GIROX</h1>
-  <p class="pitch">Creá tu cuenta <strong>en segundos</strong> y empezá a jugar ya mismo. Sin vueltas: solo decinos tu nombre.</p>
+  <main>
+    <!-- Pantalla 1: bono + form -->
+    <section id="scForm">
+      <div class="promo">
+        <div class="eyebrow">Bono de bienvenida</div>
+        <div class="big" id="bonusBig">100%</div>
+        <div class="sub" id="bonusSub">EN TU PRIMERA CARGA</div>
+      </div>
 
-  <div class="sellos">
-    <div class="sello"><span class="ico">⚡</span>Acreditación al instante</div>
-    <div class="sello"><span class="ico">💸</span>Retiros rápidos</div>
-    <div class="sello"><span class="ico">🎧</span>Soporte 24/7</div>
+      <p class="pitch">Creá tu cuenta en un click y entrá a jugar. Sin formularios, sin esperas.</p>
+
+      <form id="form" autocomplete="off">
+        <div class="qname">¿Cuál es tu nombre?</div>
+        <input id="name" type="text" placeholder="Ej: Juan" maxlength="40" required>
+        <button class="cta" id="cta" type="submit"><span id="ctaLabel">CREAR MI CUENTA</span></button>
+        <div class="hint">Con tu nombre generamos tu usuario al instante.</div>
+        <div class="msg" id="msg" role="status" aria-live="polite"></div>
+      </form>
+
+      <div class="trust">
+        <span><i class="d"></i>Acreditación al instante</span>
+        <span><i class="d"></i>Retiros rápidos</span>
+        <span><i class="d"></i>Soporte 24/7</span>
+      </div>
+
+      <p class="legal">
+        Bono sujeto a términos: aplica sobre la primera carga. Solo nuevos jugadores.<br>
+        +18 · Jugá con responsabilidad.
+      </p>
+    </section>
+
+    <!-- Pantalla 2: credenciales -->
+    <section class="done" id="scDone">
+      <h2>¡Listo! <span class="em">Tu cuenta está creada</span></h2>
+      <p class="p">Anotá tus datos y entrá a jugar.</p>
+      <div class="cred">
+        <div class="row"><span class="k">Usuario</span><span class="v" id="outUser">—</span></div>
+        <div class="row"><span class="k">Clave</span><span class="v gold" id="outPass">—</span></div>
+      </div>
+      <div class="save-note">📌 Guardá tu usuario y clave para volver a entrar cuando quieras.</div>
+      <button class="cta" id="enterBtn" type="button">ENTRAR A MI CUENTA →</button>
+    </section>
+  </main>
+
+  <!-- Popup de enganche -->
+  <div class="pop" id="pop">
+    <div class="box">
+      <h3>¡Esperá! 🎁 Tu bono te espera</h3>
+      <p>Creá tu cuenta ahora y activá tu bono de bienvenida. Tarda menos de un minuto.</p>
+      <button class="cta" id="popCta" type="button">CREAR MI CUENTA</button>
+      <button class="later" id="popLater" type="button">seguir mirando</button>
+    </div>
   </div>
-
-  <!-- FORM -->
-  <div class="card" id="formCard">
-    <label for="nameInput">¿Cómo te llamás?</label>
-    <input type="text" id="nameInput" maxlength="60" autocomplete="name" placeholder="Tu nombre">
-    <button class="btn" id="goBtn" onclick="crearCuenta()">🎁 CREAR MI CUENTA GRATIS</button>
-    <div class="err" id="errMsg"></div>
-  </div>
-
-  <!-- CREDENCIALES -->
-  <div class="card creds" id="credsCard">
-    <h2 style="text-align:center;color:#00e676;font-size:19px;">✅ ¡Tu cuenta está lista!</h2>
-    <div class="dato"><div class="k">TU USUARIO</div><div class="v" id="credUser"></div></div>
-    <div class="dato"><div class="k">TU CLAVE</div><div class="v" id="credPass"></div></div>
-    <p class="warn">📌 Sacale captura o anotalos: con esto entrás desde cualquier dispositivo.</p>
-    <button class="btn" id="enterBtn" onclick="entrar()">🎰 ENTRAR A MI CUENTA</button>
-  </div>
-
-  <p class="legal">Juego para mayores de 18 años (+18). Jugá con responsabilidad.<br>Al crear la cuenta aceptás los términos y condiciones del servicio.</p>
-</div>
-
-<!-- Popup de enganche (una sola vez: intento de salida o 12s) -->
-<div id="hookPop">
-  <div class="box">
-    <h2>🎁 ¡Tu bono te espera!</h2>
-    <p>Creá tu cuenta gratis en segundos y jugá con tu regalo de bienvenida.</p>
-    <button class="btn" onclick="cerrarHook()">¡LO QUIERO!</button>
-  </div>
-</div>
 
 <script>
-// ============================================================
-// CONFIG
-// ============================================================
-var API_BASE_DEFAULT = 'https://cargas1girox.com'; // backend de producción
-var CAMPAIGN_CODE = ''; // fijo, o vacío = tomar de ?p= / ?campaign= / path
-// ⚠️ Oferta REAL (ver nota de cloaking arriba).
-var BONUS_BIG = '🎁 BONO DE BIENVENIDA';
-var BONUS_SUB = 'Creá tu cuenta gratis y empezá a jugar';
+(function () {
+  // ==== CONFIGURAR ====
+  var API_BASE_DEFAULT = 'https://cargas1girox.com'; // ⚠️ backend de CARGAS 1GIROX (este repo, PUBLIC_BASE_URL). NO es vipcargas.com (ese tiene challenge de Cloudflare y rompe el CORS) ni picaroja.com (otra página).
+  var CAMPAIGN_CODE = '';                            // fijo, o vacío = tomar de la URL
+  var BONUS_BIG = '100%';                             // ⚠️ tu oferta REAL
+  var BONUS_SUB = 'EN TU PRIMERA CARGA';
+  // ====================
 
-// Override para pruebas: ?api=https://otro-backend pisa API_BASE sin editar el archivo.
-var qs = new URLSearchParams(location.search);
-var API_BASE = (qs.get('api') || API_BASE_DEFAULT).replace(/\/+$/, '');
-
-document.getElementById('bonusBig').textContent = BONUS_BIG;
-document.getElementById('bonusSub').textContent = BONUS_SUB;
-
-function campaignCode() {
-  if (CAMPAIGN_CODE) return CAMPAIGN_CODE;
-  var fromQs = qs.get('p') || qs.get('campaign');
-  if (fromQs) return fromQs.toUpperCase();
-  // Último recurso: primer segmento del path (/CODIGO)
-  var seg = location.pathname.split('/').filter(Boolean)[0];
-  return seg ? seg.toUpperCase() : '';
-}
-
-function getCookie(name) {
-  var m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
-  return m ? decodeURIComponent(m[1]) : null;
-}
-// _fbc: cookie de Meta, o derivada del fbclid de la URL si la cookie no está.
-function fbcValue() {
-  var c = getCookie('_fbc');
-  if (c) return c;
-  var fbclid = qs.get('fbclid');
-  return fbclid ? 'fb.1.' + Date.now() + '.' + fbclid : null;
-}
-
-var accessUrl = null;
-var creado = false;
-
-async function crearCuenta() {
-  var name = (document.getElementById('nameInput').value || '').trim();
-  var errEl = document.getElementById('errMsg');
-  errEl.style.display = 'none';
-  if (name.length < 2) {
-    errEl.textContent = 'Escribí tu nombre para crear la cuenta.';
-    errEl.style.display = 'block';
-    return;
-  }
-  var code = campaignCode();
-  if (!code) {
-    errEl.textContent = 'Link incompleto: falta el código de campaña. Volvé a entrar desde el anuncio.';
-    errEl.style.display = 'block';
-    return;
-  }
-  var btn = document.getElementById('goBtn');
-  btn.disabled = true;
-  btn.textContent = 'Creando tu cuenta…';
+  // Override del backend por URL (para PROBAR contra otro entorno sin editar el
+  // archivo): agregá ?api=https://tuapp.onrender.com a la URL. Sin ese parámetro
+  // usa el backend de producción. Solo se acepta https://.
+  var API_BASE = API_BASE_DEFAULT;
   try {
-    var r = await fetch(API_BASE + '/api/landing/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: name,
-        campaignCode: code,
-        landingUrl: location.href.slice(0, 2000),
-        fbc: fbcValue(),
-        fbp: getCookie('_fbp')
-      })
-    });
-    var data = await r.json().catch(function () { return {}; });
-    if (!r.ok || !data.success) {
-      errEl.textContent = data.error || 'No pudimos crear tu cuenta. Probá de nuevo.';
-      errEl.style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = '🎁 CREAR MI CUENTA GRATIS';
-      return;
+    var _apiOverride = new URLSearchParams(location.search).get('api');
+    if (_apiOverride && /^https:\/\//.test(_apiOverride)) {
+      API_BASE = _apiOverride.replace(/\/+$/, '');
     }
-    creado = true;
-    accessUrl = data.accessUrl;
-    document.getElementById('credUser').textContent = data.username;
-    document.getElementById('credPass').textContent = data.password;
-    document.getElementById('formCard').style.display = 'none';
-    document.getElementById('credsCard').style.display = 'block';
-    window.scrollTo(0, 0);
-  } catch (e) {
-    errEl.textContent = 'Error de conexión. Revisá tu internet y probá de nuevo.';
-    errEl.style.display = 'block';
-    btn.disabled = false;
-    btn.textContent = '🎁 CREAR MI CUENTA GRATIS';
+  } catch (e) {}
+
+  document.getElementById('bonusBig').textContent = BONUS_BIG;
+  document.getElementById('bonusSub').textContent = BONUS_SUB;
+
+  // PIXEL DEL NAVEGADOR de Meta (owner 2026-08-26). Antes la landing NO tenía
+  // pixel → el asistente de Meta decía "no se encontraron píxeles" y el _fbp real
+  // no se creaba (se generaba uno sintético). Ahora se carga fbevents.js y se
+  // inicializan los Pixel IDs que sirve el backend desde SSM (propio + partners):
+  // genera el _fbp REAL, dispara PageView y permite DEDUP navegador+CAPI del
+  // CompleteRegistration (con el mismo event_id `reg_<id>`).
+  // ============================================================
+  // ESCAPE del navegador EMBEBIDO de Instagram/Facebook/TikTok (#260).
+  // Los anuncios abren la landing DENTRO de la app (webview): la cuenta queda
+  // "presa" ahí (sin instalar la PWA, sin notificaciones, y al cerrar IG la
+  // pierden). Android: se puede saltar a Chrome con un intent:// (automático +
+  // botón). iPhone: no hay salto programático confiable → botón x-safari- +
+  // instrucciones del menú ⋯. SIEMPRE se preserva la URL completa (código de
+  // campaña + fbclid) para no perder la atribución. "Seguir acá" queda como
+  // salida chica para no perder la conversión si el escape falla.
+  (function escapeInAppBrowser() {
+    var ua = navigator.userAgent || '';
+    if (!/Instagram|FBAN|FBAV|FB_IAB|FBAG|TikTok|musical_ly|Bytedance/i.test(ua)) return;
+    var isAndroid = /Android/i.test(ua);
+    var full = location.href;
+    var tail = location.host + location.pathname + location.search;
+    var intentUrl = 'intent://' + tail + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(full) + ';end';
+    var safariUrl = 'x-safari-https://' + tail;
+    function mount() {
+      if (document.getElementById('iabEscape')) return;
+      var ov = document.createElement('div');
+      ov.id = 'iabEscape';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:radial-gradient(120% 90% at 50% 0%,#0d1f14 0%,#060d09 60%);' +
+        'display:flex;flex-direction:column;align-items:center;justify-content:center;padding:26px 22px;text-align:center;box-sizing:border-box;';
+      ov.innerHTML =
+        '<div style="font-size:40px;line-height:1;">🌐</div>' +
+        '<div style="font-size:20px;font-weight:900;color:#fff;margin:10px 0 6px;">Abrí la página en tu navegador</div>' +
+        '<div style="font-size:13.5px;color:#b9c4bd;line-height:1.5;max-width:340px;">Estás dentro de ' + (/TikTok|musical_ly|Bytedance/i.test(ua) ? 'TikTok' : (/Instagram/i.test(ua) ? 'Instagram' : 'Facebook')) + '. ' +
+          'Para que tu cuenta te quede <b style="color:#fff;">guardada</b> y puedas volver cuando quieras, abrila en ' + (isAndroid ? 'Chrome' : 'Safari') + '.</div>' +
+        (isAndroid
+          ? '<a href="' + intentUrl + '" style="display:block;width:100%;max-width:340px;margin-top:18px;background:linear-gradient(135deg,#26e07f,#0f9d58);' +
+            'color:#00301a;border-radius:14px;padding:16px;font-size:17px;font-weight:900;text-decoration:none;">🚀 ABRIR EN CHROME</a>'
+          : '<div style="margin-top:16px;background:rgba(38,224,127,0.10);border:1.5px solid #26e07f88;border-radius:14px;padding:14px 16px;max-width:340px;">' +
+              '<div style="font-size:15px;color:#fff;font-weight:900;line-height:1.6;text-align:left;">' +
+              '1️⃣ Tocá los <b style="color:#26e07f;">⋯</b> arriba a la derecha ↗️<br>' +
+              '2️⃣ Elegí <b style="color:#26e07f;">"Abrir en el navegador externo"</b></div></div>' +
+            '<div style="margin-top:10px;font-size:12px;color:#8fd7ae;max-width:340px;line-height:1.45;">🔒 Así tu usuario queda <b style="color:#fff;">guardado en tu celular</b> y no lo perdés al cerrar Instagram.</div>' +
+            '<button type="button" id="iabCopy" style="width:100%;max-width:340px;margin-top:12px;background:rgba(255,255,255,0.10);' +
+              'color:#fff;border:1px solid rgba(255,255,255,0.22);border-radius:12px;padding:12px;font-size:13.5px;font-weight:800;cursor:pointer;">📋 TOCÁ ACÁ y el link se copia solo → pegalo en Safari</button>') +
+        '<button type="button" id="iabStay" style="margin-top:16px;background:none;border:none;color:#7c8781;font-size:12px;text-decoration:underline;cursor:pointer;">Seguir acá de todos modos</button>';
+      document.body.appendChild(ov);
+      var stay = document.getElementById('iabStay');
+      if (stay) stay.onclick = function () { try { ov.parentNode.removeChild(ov); } catch (e) {} };
+      // iPhone: flecha animada hacia el menú ⋯ (arriba a la derecha) — es el
+      // ÚNICO camino confiable en el webview de IG iOS (x-safari- está
+      // bloqueado en las versiones nuevas; el botón "no hacía nada").
+      if (!isAndroid) {
+        var arrow = document.createElement('div');
+        arrow.textContent = '👆';
+        arrow.style.cssText = 'position:absolute;top:10px;right:18px;font-size:34px;animation:iabB 1s ease-in-out infinite;';
+        var st = document.createElement('style');
+        st.textContent = '@keyframes iabB{0%,100%{transform:translateY(0)}50%{transform:translateY(10px)}}';
+        ov.appendChild(st); ov.appendChild(arrow);
+        var cp = document.getElementById('iabCopy');
+        if (cp) cp.onclick = function () {
+          var done = function () { cp.textContent = '✅ Link copiado — abrí Safari y pegalo'; };
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(full).then(done).catch(function () {}); return; }
+          } catch (e) {}
+          try {
+            var ta = document.createElement('textarea');
+            ta.value = full; ta.style.cssText = 'position:fixed;opacity:0;';
+            document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done();
+          } catch (e) {}
+        };
+        // Intento silencioso del scheme por si esta versión del webview lo permite.
+        setTimeout(function () { try { location.href = safariUrl; } catch (e) {} }, 500);
+      }
+      // Android: intento AUTOMÁTICO una vez (si el webview lo permite, salta
+      // solo a Chrome con la MISMA URL; si no, queda el botón).
+      if (isAndroid) setTimeout(function () { try { location.href = intentUrl; } catch (e) {} }, 350);
+    }
+    if (document.body) mount();
+    else document.addEventListener('DOMContentLoaded', mount);
+  })();
+
+  (function loadMetaPixel() {
+    // Qué pixel carga la landing lo decide el backend según la campaña del
+    // visitante (/api/meta-pixel-id?c=CODIGO): SOLO el pixel del publicista de esa
+    // campaña. Sin código → NINGÚN pixel (ni siquiera se carga fbevents.js). El
+    // pixel propio no va al navegador; recibe registro/compra por CAPI (2026-08-28).
+    // Si el fetch falla, tampoco se carga nada (el _fbp sintético cubre el signup).
+    var _inited = false;
+    function initPixels(ids) {
+      if (_inited || !ids || !ids.length) return;
+      _inited = true;
+      window.__giroxPixelIds = ids;
+      try {
+        !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
+      } catch (e) { return; }
+      ids.forEach(function (id) { try { fbq('init', id); } catch (e) {} });
+      try { fbq('track', 'PageView'); } catch (e) {}
+    }
+    try {
+      var _pixCampaign = '';
+      try { _pixCampaign = resolveCampaign() || ''; } catch (e) {}
+      if (!_pixCampaign) return; // sin campaña → sin pixel
+      fetch(API_BASE + '/api/meta-pixel-id?c=' + encodeURIComponent(_pixCampaign))
+        .then(function (r) { return r.json(); })
+        .then(function (d) { initPixels(d && d.pixelIds ? d.pixelIds : []); })
+        .catch(function () {});
+    } catch (e) {}
+  })();
+
+  function resolveCampaign() {
+    if (CAMPAIGN_CODE) return CAMPAIGN_CODE;
+    var q = new URLSearchParams(location.search);
+    var c = q.get('p') || q.get('campaign');
+    if (c) return c;
+    var seg = location.pathname.replace(/^\/+/, '').split('/')[0];
+    if (seg && /^[A-Za-z0-9_-]{3,40}$/.test(seg)) return seg;
+    return '';
   }
-}
+  function utmFromUrl() {
+    var q = new URLSearchParams(location.search);
+    return { source: q.get('utm_source'), medium: q.get('utm_medium'),
+             campaign: q.get('utm_campaign'), content: q.get('utm_content'), term: q.get('utm_term') };
+  }
+  function cookie(n) { var m = document.cookie.match(new RegExp('(?:^|; )' + n + '=([^;]*)')); return m ? decodeURIComponent(m[1]) : null; }
 
-function entrar() {
-  if (accessUrl) location.href = accessUrl;
-}
+  // ATRIBUCIÓN DE PAUTA: la cookie _fbc la crea el pixel de navegador, pero puede
+  // NO haber cargado aún cuando el cliente se registra (fetch async del Pixel ID).
+  // Fallback: sin esto, el click del anuncio (?fbclid=...) se PERDÍA y la
+  // conversión no se atribuía a la campaña. Se
+  // construye el fbc a mano con el formato oficial (fb.1.<timestamp>.<fbclid>)
+  // y el backend lo persiste en el usuario → TODOS los eventos del embudo
+  // (registro, carga, retiro) viajan atribuidos al anuncio que trajo al lead.
+  function fbcFromUrl() {
+    var existing = cookie('_fbc');
+    if (existing) return existing;
+    try {
+      var id = new URLSearchParams(location.search).get('fbclid');
+      if (id) return 'fb.1.' + Date.now() + '.' + id;
+    } catch (e) {}
+    return null;
+  }
 
-// ── Popup de enganche: una sola vez, al intento de salida o a los 12s ──
-var hookShown = false;
-function mostrarHook() {
-  if (hookShown || creado) return;
-  hookShown = true;
-  document.getElementById('hookPop').style.display = 'flex';
-}
-function cerrarHook() {
-  document.getElementById('hookPop').style.display = 'none';
-  var inp = document.getElementById('nameInput');
-  if (inp) inp.focus();
-}
-document.addEventListener('mouseout', function (e) {
-  if (!e.relatedTarget && e.clientY <= 0) mostrarHook();
-});
-setTimeout(mostrarHook, 12000);
+  // fbp: identificador de navegador que crea el pixel de Meta. Ahora el pixel se
+  // carga (loadMetaPixel), pero el fetch del Pixel ID es async y puede no haber
+  // creado la cookie _fbp cuando el cliente se registra. Fallback: si _fbp no
+  // está todavía, se genera uno válido
+  // (fb.1.<timestamp>.<random>) y se PERSISTE en la cookie, así se reusa el MISMO
+  // valor siempre — y el pixel de la PWA lo reutiliza al entrar, correlacionándolo
+  // con el navegador. Mismo criterio que fbcFromUrl(). owner 2026-08-25.
+  function fbpFromCookieOrGen() {
+    var existing = cookie('_fbp');
+    if (existing) return existing;
+    try {
+      var v = 'fb.1.' + Date.now() + '.' + (Math.floor(1e9 + Math.random() * 9e9));
+      document.cookie = '_fbp=' + v + '; path=/; max-age=' + (90 * 24 * 3600) + '; SameSite=Lax';
+      return v;
+    } catch (e) { return null; }
+  }
 
-document.getElementById('nameInput').addEventListener('keydown', function (e) {
-  if (e.key === 'Enter') { e.preventDefault(); crearCuenta(); }
-});
+  var form = document.getElementById('form');
+  var nameEl = document.getElementById('name');
+  var cta = document.getElementById('cta');
+  var ctaLabel = document.getElementById('ctaLabel');
+  var msg = document.getElementById('msg');
+  var scForm = document.getElementById('scForm');
+  var scDone = document.getElementById('scDone');
+  var enterBtn = document.getElementById('enterBtn');
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var name = nameEl.value.trim();
+    var campaign = resolveCampaign();
+    msg.className = 'msg'; msg.textContent = '';
+    if (name.length < 2) { msg.className = 'msg err'; msg.textContent = 'Escribí tu nombre.'; return; }
+    if (!campaign) { msg.className = 'msg err'; msg.textContent = 'Link inválido: falta el código de campaña.'; return; }
+
+    cta.disabled = true;
+    ctaLabel.textContent = 'Creando tu cuenta';
+    var sp = document.createElement('span'); sp.className = 'spin'; cta.appendChild(sp);
+
+    fetch(API_BASE + '/api/landing/signup', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, campaignCode: campaign, utm: utmFromUrl(),
+        fbc: fbcFromUrl(), fbp: fbpFromCookieOrGen(), landingUrl: location.href })
+    })
+    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+    .then(function (res) {
+      if (res.ok && res.d && res.d.accessUrl) {
+        // FLUJO SOLAPADO (owner 2026-08-19): la landing NO muestra más las
+        // credenciales — redirige YA a la PWA, que muestra el recuadro de
+        // usuario+clave apenas carga (`ir=creds`) mientras por atrás canjea el
+        // link, conecta el chat y deja el SSO listo. Al tocar "ENTRAR AL
+        // CASINO" 1girox abre al instante: la espera se solapa con la lectura.
+        // Las credenciales viajan en el FRAGMENTO (#lc=...) — el fragmento no
+        // llega al servidor ni queda en logs; la PWA lo lee y limpia la URL.
+        var dest = res.d.accessUrl || res.d.enterUrl;
+        try {
+          dest += '#lc=' + encodeURIComponent((res.d.username || '') + ':' + (res.d.password || ''));
+        } catch (e) {}
+        // DEDUP (pedido del partner Pulse, 2026-08-22): recordar en ESTE
+        // dispositivo que ya se registró → si vuelve a la landing NO crea otra
+        // cuenta ni dispara otro evento de registro a Meta.
+        try { localStorage.setItem('girox_signed', res.d.username || '1'); } catch (e) {}
+        // Registro en el NAVEGADOR con el MISMO event_id que la CAPI (reg_<id>)
+        // → Meta DEDUPLICA browser+server. fbq usa sendBeacon: sobrevive a la
+        // redirección de abajo (owner 2026-08-26).
+        try {
+          if (window.fbq && res.d.metaEventId) {
+            fbq('track', 'CompleteRegistration', { content_name: 'signup_landing' }, { eventID: res.d.metaEventId });
+          }
+        } catch (e) {}
+        ctaLabel.textContent = 'Entrando';
+        window.location.href = dest;
+      } else {
+        cta.disabled = false; sp.remove(); ctaLabel.textContent = 'CREAR MI CUENTA';
+        msg.className = 'msg err';
+        msg.textContent = (res.d && res.d.error) || 'No pudimos crear tu cuenta. Probá de nuevo.';
+      }
+    })
+    .catch(function () {
+      cta.disabled = false; sp.remove(); ctaLabel.textContent = 'CREAR MI CUENTA';
+      msg.className = 'msg err'; msg.textContent = 'Sin conexión. Probá de nuevo.';
+    });
+  });
+
+  // Popup de enganche: al intento de salida (desktop) o a los 12s (mobile), una sola vez.
+  var pop = document.getElementById('pop');
+  var popShown = false;
+  function showPop() {
+    if (popShown || scDone.classList.contains('on')) return;
+    popShown = true; pop.classList.add('on');
+  }
+  document.addEventListener('mouseout', function (e) { if (!e.relatedTarget && e.clientY <= 0) showPop(); });
+  setTimeout(showPop, 12000);
+  document.getElementById('popCta').onclick = function () { pop.classList.remove('on'); nameEl.focus(); };
+  document.getElementById('popLater').onclick = function () { pop.classList.remove('on'); };
+  pop.addEventListener('click', function (e) { if (e.target === pop) pop.classList.remove('on'); });
+
+  // DEDUP al VOLVER (pedido del partner): si en este dispositivo ya se creó una
+  // cuenta, NO se muestra el form de registro → no se crea otra cuenta ni se
+  // dispara otro evento a Meta. Se ofrece ENTRAR a la cuenta existente.
+  (function () {
+    var signed = null;
+    try { signed = localStorage.getItem('girox_signed'); } catch (e) {}
+    if (!signed) return;
+
+    // LAST-TOUCH (owner 2026-08-22): si el jugador YA registrado vuelve por OTRA
+    // campaña/anuncio (viene con fbclid nuevo), actualizamos su atribución de
+    // Meta al último clic → la próxima carga se acredita a ESA campaña. No crea
+    // cuenta ni dispara registro. Solo si hay fbclid (o sea, vino de un anuncio).
+    try {
+      var _hasClick = new URLSearchParams(location.search).get('fbclid');
+      if (_hasClick && signed && signed !== '1') {
+        fetch(API_BASE + '/api/landing/touch', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: signed, campaignCode: resolveCampaign(),
+            fbc: fbcFromUrl(), fbp: fbpFromCookieOrGen(), landingUrl: location.href
+          })
+        }).catch(function () {});
+      }
+    } catch (e) {}
+
+    if (scForm) scForm.style.display = 'none';
+    var box = document.createElement('section');
+    box.className = 'done on';
+    box.innerHTML =
+      '<h2>Ya tenés tu cuenta <span class="em">✅</span></h2>' +
+      '<p class="p">En este dispositivo ya creaste una cuenta' +
+        (signed && signed !== '1' ? ' (<b>' + signed.replace(/[<>&]/g, '') + '</b>)' : '') + '.</p>' +
+      '<button class="cta" id="reenterBtn" type="button">ENTRAR A MI CUENTA →</button>';
+    scForm.parentNode.insertBefore(box, scForm);
+    document.getElementById('reenterBtn').onclick = function () {
+      // A la PWA (misma página del casino): si la sesión sigue viva entra
+      // directo; si no, ahí inicia sesión con su usuario/clave. NO re-registra.
+      window.location.href = API_BASE;
+    };
+    // Sin "crear otra cuenta" (owner 2026-08-22): contradecía el dedup pedido
+    // por el partner. Una cuenta por dispositivo → solo ENTRAR.
+  })();
+})();
 </script>
 </body>
 </html>

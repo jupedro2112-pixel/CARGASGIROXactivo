@@ -867,13 +867,17 @@ if (!process.env.ALLOWED_ORIGINS && process.env.NODE_ENV === 'production') {
 // host nuevo. Es seguro: endpoint público, sin credenciales (no manda cookies —
 // SIN Allow-Credentials), protegido por código de campaña + límite por IP.
 // Se refleja el Origin (no '*') y se corta el preflight acá mismo.
+// #198: también `/api/meta-pixel-id` (Pixel IDs públicos para el pixel del navegador de la
+// landing) y `/api/landing/touch` (last-touch) — los llama la landing cross-origin; sin esta
+// excepción el fetch se bloqueaba en silencio (mismo fix #247 del gemelo).
+const LANDING_OPEN_CORS_PATHS = new Set(['/api/landing/signup', '/api/meta-pixel-id', '/api/landing/touch']);
 app.use((req, res, next) => {
-  if (req.path === '/api/landing/signup') {
+  if (LANDING_OPEN_CORS_PATHS.has(req.path)) {
     const origin = req.headers.origin;
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
-      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     }
     if (req.method === 'OPTIONS') return res.status(204).end();
@@ -892,7 +896,7 @@ const _strictCors = cors({
   exposedHeaders: ['X-Total-Count', 'X-RateLimit-Remaining']
 });
 app.use((req, res, next) => {
-  if (req.path === '/api/landing/signup') return next();
+  if (LANDING_OPEN_CORS_PATHS.has(req.path)) return next();
   return _strictCors(req, res, next);
 });
 app.use('/api/', generalLimiter);
@@ -4353,22 +4357,91 @@ app.post('/api/landing/signup', landingIpLimiter, async (req, res) => {
         utm_source: newUser.acquisitionUtm?.source || null,
         utm_campaign: newUser.acquisitionUtm?.campaign || null
       },
-      { req }
+      // #198: event_id FIJO `reg_<id>` — la landing dispara el CompleteRegistration del
+      // navegador con el MISMO id (metaEventId de la respuesta) y Meta deduplica.
+      { req, eventId: 'reg_' + newUser.id }
     );
     fbAdsWebhook.notify('CompleteRegistration', newUser);
     try { outboundWebhook.notify('registro', newUser); } catch (_) {} // #197
 
-    // Link de acceso de un solo uso + ir=casino: la PWA abre el casino directo
-    // al loguear. (El canje NO fuerza cambio de clave para cuentas de landing:
-    // el cliente YA vio usuario+PIN en pantalla.)
-    const accessUrl = (await issueAccessLinkFor(newUser.id)) + '&ir=casino';
+    // Link de acceso de un solo uso + `ir=creds` (#198, flujo solapado del gemelo): la
+    // landing NO muestra más usuario+clave — redirige YA a la PWA con las credenciales
+    // en el FRAGMENTO (#lc=user:pass, nunca llega al server) y la PWA muestra el
+    // recuadro apenas carga mientras por atrás canjea el link; el casino abre al
+    // tocar ENTRAR. (El canje NO fuerza cambio de clave para cuentas de landing.)
+    // `ir=casino` sigue soportado por la PWA para landings viejas.
+    const accessUrl = (await issueAccessLinkFor(newUser.id)) + '&ir=creds';
+
+    // Credenciales al CHAT del cliente (#198): como la landing ya no las deja en
+    // pantalla, quedan en el chat de soporte para cuando las necesite (si el mensaje
+    // expira por el TTL de 3 días, soporte se las regenera).
+    try {
+      await Message.create({
+        id: uuidv4(),
+        senderId: 'system', senderUsername: 'Sistema', senderRole: 'system',
+        receiverId: newUser.id, receiverRole: 'user',
+        content: `🎉 ¡Tu cuenta está creada!\n\n👤 Usuario: ${username}\n🔑 Clave: ${password}\n\n📌 Guardalos para volver a entrar cuando quieras desde ${getPublicBaseUrl()}`,
+        type: 'system', timestamp: new Date(), read: false
+      });
+    } catch (credMsgErr) {
+      logger.warn(`[landing-signup] no se pudo dejar las credenciales en el chat de ${username}: ${credMsgErr.message}`);
+    }
 
     logger.info(`[landing-signup] ${username} creado (campaña ${normalizedCode}${ownerCampaign ? ', key publicista' : ''})`);
-    res.status(201).json({ success: true, accessUrl, username, password });
+    // metaEventId = el MISMO event_id que usó la CAPI (reg_<id>).
+    res.status(201).json({ success: true, accessUrl, username, password, metaEventId: 'reg_' + newUser.id });
   } catch (error) {
     // Stack a stdout: el winston va solo a archivo y los 500 eran invisibles en EB.
     console.error('[landing-signup] error:', error && error.stack ? error.stack : error);
     res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// PIXEL DEL NAVEGADOR de la landing externa (#198, réplica del gemelo 2026-08-26): la
+// landing pregunta qué Pixel IDs cargar según la campaña del visitante. Público, con
+// CORS reflejado (LANDING_OPEN_CORS_PATHS). El pixel PROPIO nunca va al navegador de la
+// landing (recibe registro/compra por CAPI); solo van los pixels de PARTNERS
+// `META_PIXEL_ID_2..9` asignados por `META_PIXEL_PUBLISHER_i` (ver metaCapiService).
+// Sin código de campaña → ningún pixel.
+app.get('/api/meta-pixel-id', async (req, res) => {
+  try {
+    const raw = String((req.query && req.query.c) || '').trim();
+    const code = /^[A-Za-z0-9_-]{3,40}$/.test(raw) ? raw.toUpperCase() : '';
+    const ids = await metaCapi.pixelIdsForCampaign(code);
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json({ pixelIds: ids, campaign: code || null });
+  } catch (e) {
+    res.json({ pixelIds: [], campaign: null });
+  }
+});
+
+// LAST-TOUCH desde la landing (#198, réplica #228/#247 del gemelo): un jugador YA
+// registrado en este dispositivo vuelve por OTRO anuncio (fbclid nuevo) → la landing
+// NO crea otra cuenta: actualiza su atribución de Meta y la campaña del último clic
+// (`lastTouchCampaign`, la lee `metaCapi.resolveEventScope` para los webhooks
+// salientes). Solo cuentas `user`; sin fbc válido no hay nada que aplicar.
+app.post('/api/landing/touch', landingIpLimiter, async (req, res) => {
+  try {
+    const { username, fbc, fbp, campaignCode, landingUrl } = req.body || {};
+    const uname = String(username || '').trim();
+    const newFbc = sanitizeFbCookie(fbc);
+    const newFbp = sanitizeFbCookie(fbp);
+    if (!uname || !newFbc) return res.json({ ok: false, reason: 'no_attribution' });
+
+    const set = { metaFbc: newFbc, lastTouchAt: new Date() };
+    if (newFbp) set.metaFbp = newFbp;
+    const code = String(campaignCode || '').toUpperCase().trim().slice(0, 40);
+    if (/^[A-Z0-9_-]{3,40}$/.test(code)) set.lastTouchCampaign = code;
+    if (typeof landingUrl === 'string' && landingUrl.length <= 2000) set.landingUrl = landingUrl;
+
+    const u = await findUserByUsernameCI(uname, { select: 'id role', lean: true });
+    if (!u || u.role !== 'user') return res.json({ ok: false, reason: 'not_found' });
+    await User.updateOne({ id: u.id }, { $set: set });
+    logger.info(`[landing-touch] atribución actualizada (last-touch) para ${uname}${set.lastTouchCampaign ? ' → ' + set.lastTouchCampaign : ''}`);
+    res.json({ ok: true });
+  } catch (e) {
+    logger.warn(`[landing-touch] falló: ${e.message}`);
+    res.status(500).json({ ok: false });
   }
 });
 

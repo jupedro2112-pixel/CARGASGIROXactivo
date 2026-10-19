@@ -450,6 +450,20 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  // #198 LAST-TOUCH: campaña del ÚLTIMO anuncio por el que volvió un jugador ya
+  // registrado (la setea `POST /api/landing/touch` desde la landing externa).
+  // `acquisitionCampaign` sigue siendo la de alta (first-touch). La leen los
+  // webhooks salientes (`metaCapi.resolveEventScope`) para decidir el publicista.
+  lastTouchCampaign: {
+    type: String,
+    default: null,
+    uppercase: true,
+    trim: true
+  },
+  lastTouchAt: {
+    type: Date,
+    default: null
+  },
   // True cuando el usuario se registró por el flujo rápido sin OTP de teléfono.
   // El authMiddleware NO bloquea (a diferencia de mustChangePassword): el
   // usuario puede usar todo normalmente excepto retirar. Los endpoints de

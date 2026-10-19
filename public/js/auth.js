@@ -546,18 +546,44 @@ VIP.auth = (function () {
         try { token = new URLSearchParams(window.location.search).get('acceso'); } catch (e) {}
         if (!token) return false;
 
-        // ANTES de limpiar la URL: ¿el link pide abrir el casino directo?
-        // (ir=casino — lo agrega el alta por landing: el cliente cae jugando y
-        // el chat le queda en el widget del casino.)
+        // Modos de la landing — se leen ANTES de limpiar la URL:
+        //   `ir=casino` (legacy): abrir el casino DIRECTO al loguear.
+        //   `ir=creds` (#198, flujo actual del alta por landing): mostrar el
+        //     recuadro de usuario+clave YA y dejar todo listo por atrás; el
+        //     casino abre al tocar ENTRAR. Las credenciales llegan en el
+        //     FRAGMENTO (#lc=user:pass) — nunca viajan al server ni quedan en
+        //     el historial (se limpia abajo).
+        let goCreds = false;
+        let landingCreds = null;
         try {
-            if (new URLSearchParams(window.location.search).get('ir') === 'casino') {
+            const ir = new URLSearchParams(window.location.search).get('ir');
+            if (ir === 'casino') {
                 VIP.state._openCasinoOnLogin = true;
+            } else if (ir === 'creds') {
+                goCreds = true;
+                // Mientras el recuadro esté a la vista, nada abre el casino
+                // solo: los datos quedan FIJOS hasta que el cliente toque
+                // ENTRAR. landingEnterCasino() limpia el flag.
+                VIP.state._landingCredsActive = true;
+                const m = (window.location.hash || '').match(/lc=([^&]+)/);
+                if (m) {
+                    const parts = decodeURIComponent(m[1]).split(':');
+                    landingCreds = { username: parts[0] || '', password: parts.slice(1).join(':') || '' };
+                }
             }
         } catch (e) {}
 
-        // Sacar el token de la URL YA MISMO: es de un solo uso y no tiene que
-        // quedar en el historial ni compartirse por accidente.
+        // Sacar el token (y el fragmento con la clave) de la URL YA MISMO: es
+        // de un solo uso y no tiene que quedar en el historial ni compartirse.
         try { history.replaceState(null, '', window.location.pathname); } catch (e) {}
+
+        // Pantalla inmediata, antes de cualquier request: el cliente ve su
+        // usuario+clave mientras se canjea el link.
+        if (goCreds) { try { VIP.ui._showLandingCredsScreen(landingCreds); } catch (e) {} }
+        const credsFail = function () {
+            if (goCreds) { try { VIP.ui._hideLandingCreds(); } catch (e) {} }
+            VIP.state._landingCredsActive = false;
+        };
 
         try {
             const response = await fetch(`${VIP.config.API_URL}/api/auth/access-link`, {
@@ -569,10 +595,15 @@ VIP.auth = (function () {
             if (response.ok && data.token) {
                 VIP.state.currentToken = data.token;
                 localStorage.setItem('userToken', data.token);
+                // Canje OK → habilitar "ENTRAR AL CASINO" (completa el usuario
+                // si el fragmento no vino; la clave en ese caso está en el chat).
+                if (goCreds) { try { VIP.ui._landingCredsReady(data.user && data.user.username); } catch (e) {} }
                 return true; // el caller sigue con verifyToken() → sesión completa
             }
+            credsFail();
             VIP.ui.showToast(data.error || 'Este link de acceso ya fue usado o no es válido.', 'error');
         } catch (e) {
+            credsFail();
             VIP.ui.showToast('Error de conexión al validar tu link de acceso. Probá de nuevo.', 'error');
         }
         return false;

@@ -5,7 +5,10 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-19** — PREFIJO de los usuarios nuevos y WEBHOOKS SALIENTES a
+> Última actualización: **2026-10-19** — LANDING EXTERNA nueva (carpeta `landing/` = la de
+> PAUTANUEVAsantino apuntando a cargas1girox.com) + flujo `ir=creds`, `/api/meta-pixel-id`,
+> `/api/landing/touch` y `User.lastTouchCampaign` (#198; §2 env, §4.10, §6 access-link/casino).
+> Mismo día: PREFIJO de los usuarios nuevos y WEBHOOKS SALIENTES a
 > publicistas, réplica del gemelo AUTOGIROXcompartido (#197; §2 Config/OutboundWebhookQueue, §4.10
 > landing, §5 webhooks, §6 panel/PWA, §7 worker, §9). Anterior: **2026-10-10** — credenciales hgcash y
 > reenvío de avisos desde el panel (#192, §5 auto-carga). Anterior: **2026-10-07** — LOTES CON REGALO completos, réplica del gemelo
@@ -582,6 +585,7 @@ tenían los 4 clientes viejos.
 | `LANDING_SIGNUP_DISABLED` | — | `true` = apaga el alta por landing (410) |
 | `SSM_SKIP_KEYS` | — | Claves que SSM NO pisa (solo entornos clon; `loadSecrets.js`) |
 | `META_PIXEL_ID_2` / `META_CAPI_ACCESS_TOKEN_2` / `META_TEST_EVENT_CODE_2` | — | 2º pixel CAPI del partner de tracking (mismo `event_id`, envío en paralelo) |
+| `META_PIXEL_PUBLISHER_2..9` / `META_PIXEL_CAPIONLY_2..9` | — | #198: a qué campañas expone la landing externa el pixel `META_PIXEL_ID_i` en el NAVEGADOR (`GET /api/meta-pixel-id?c=CODE` → `metaCapi.pixelIdsForCampaign`): coma-separado de publicistas y/o códigos, `*` = todas; sin asignar o `CAPIONLY=1` → solo CAPI, invisible. El pixel propio `META_PIXEL_ID` nunca va a la landing |
 | `GIROX_GIFT_AS_BONUS` | (on) | `0`/`false`/`off` = los regalos vuelven a depósito libre en vez de bono 0 (§4.5). Kill switch sin deploy |
 | `TELEGRAM_ALERT_BOT_TOKEN` / `TELEGRAM_ALERT_CHAT_ID` | — | Bot + grupo de Telegram para las BAJADAS y el CIERRE DIARIO del banco (#183, `src/services/telegramAlertService.js`). Sin ambos, no se manda nada |
 
@@ -611,10 +615,22 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
   migración no alcanzó, o creado mientras la migración corría), el backend lo crea al
   vuelo con una contraseña random, actualiza `giroxSyncStatus` y reintenta UNA vez.
 
-### 4.10 Alta por LANDING externa (2026-08-19)
+### 4.10 Alta por LANDING externa (2026-08-19; landing nueva + `ir=creds` #198)
 
-`POST /api/landing/signup` (público, sin auth): una landing en un dominio puente
-(`landing/index.html`, archivo suelto — NO en `public/`) pide SOLO un nombre →
+**Carpeta `landing/` (#198, 2026-10-19):** es la landing de `PAUTANUEVAsantino/landing`
+copiada tal cual (`index.html` + `vercel.json` + `blank.html` + `demo.html`), con
+`API_BASE_DEFAULT = 'https://cargas1girox.com'` (el `PUBLIC_BASE_URL` de este repo;
+⚠️ NO `vipcargas.com`: ese dominio tiene challenge de Cloudflare y el preflight vuelve 403
+HTML sin CORS → la landing muestra "Sin conexión"). Se deploya aparte (Vercel: `vercel.json`
+manda a `blank.html` todo lo que no venga de Argentina; `?api=https://…` pisa el backend
+para probar). Pide `GET /api/meta-pixel-id?c=CODE` (pixel del navegador del publicista;
+sin campaña → sin pixel), `POST /api/landing/signup` y, si el dispositivo ya se registró
+(`localStorage.girox_signed`), NO crea otra cuenta: muestra "Ya tenés tu cuenta" y manda
+`POST /api/landing/touch` (last-touch) si viene con `fbclid`. Al crear, dispara en el
+navegador `CompleteRegistration` con `eventID = metaEventId` (= `reg_<id>`, el mismo
+`event_id` de la CAPI → Meta deduplica) y redirige a `accessUrl#lc=usuario:clave`.
+
+`POST /api/landing/signup` (público, sin auth): pide SOLO un nombre →
 username único derivado (**#197:** PREFIJO del panel `Config['usernamePrefix']`, default
 VACÍO + base saneada recortada a 18−prefijo−3 + sufijo de EXACTAMENTE 3 dígitos → `pedro042`,
 o `g1pedro042` con prefijo `g1`; "gx" solo si quedan menos de 3 caracteres;
@@ -623,14 +639,23 @@ publicista si la campaña la tiene → `giroxOwnerCampaign`; si no la master; si
 falla, no queda cuenta local huérfana) → `User` con
 `acquisitionSource:'landing'` (valor del enum) y `phoneVerificationPending`
 (el SMS se exige recién al RETIRAR) → responde `{ accessUrl, username,
-password }`. El `accessUrl` es el access-link de un solo uso + `&ir=casino`
-(la PWA abre el casino directo al loguear) y su canje **NO fuerza
-`mustChangePassword`** para cuentas de landing (ya vieron su clave en
-pantalla). Anti-abuso: `landingIpLimiter` por IP/hora + kill-switch
-`LANDING_SIGNUP_DISABLED`. CORS: ese path tiene CORS REFLEJADO (los dominios
-puente rotan) y se saltea el `cors()` estricto global — ver el middleware
-antes del `app.use(cors(...))` en server.js. Conversión: CompleteRegistration
-a Meta CAPI (`signup_landing`) + webhook fb-ads.
+password, metaEventId }`. El `accessUrl` es el access-link de un solo uso + `&ir=creds`
+(#198): la PWA muestra el **recuadro de usuario+clave** apenas carga (las credenciales
+viajan en el fragmento `#lc=`, nunca al server; `ui.js _showLandingCredsScreen` →
+`_landingCredsReady` al canjear → botón "ENTRAR AL CASINO" habilitado a los 2 s, auto-entra a
+los 10 s; `VIP.state._landingCredsActive` mientras está a la vista) y además deja las
+credenciales en un `Message` de sistema en el chat del cliente. `ir=casino` (landing vieja)
+sigue soportado: abre el casino directo. El canje **NO fuerza `mustChangePassword`** para
+cuentas de landing. Anti-abuso: `landingIpLimiter` por IP/hora + kill-switch
+`LANDING_SIGNUP_DISABLED`. CORS: `/api/landing/signup`, `/api/meta-pixel-id` y
+`/api/landing/touch` (`LANDING_OPEN_CORS_PATHS`) tienen CORS REFLEJADO (los dominios
+puente rotan) y se saltean el `cors()` estricto global — ver el middleware antes del
+`app.use(cors(...))` en server.js. Conversión: CompleteRegistration a Meta CAPI
+(`signup_landing`, `event_id reg_<id>`) + webhook fb-ads + webhook saliente `registro`.
+**Last-touch** (`POST /api/landing/touch`, #198): actualiza `metaFbc/metaFbp/landingUrl` y
+`User.lastTouchCampaign` (+`lastTouchAt`) del jugador que volvió por otro anuncio;
+`acquisitionCampaign` (first-touch) no se pisa. `metaCapi.resolveEventScope` lee
+`lastTouchCampaign` primero para elegir el publicista de los webhooks salientes.
 
 ### 4.11 Novedades del manual Partner API v1.11 (2026-08-13) — contexto, sin código
 
@@ -997,6 +1022,9 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   limpia la URL del historial y `verifyToken()` abre el recuadro obligatorio de
   crear contraseña (estilo WhatsApp claro/oscuro; piso front: 8+ chars con letras
   y números). No hay botón de logout en la app (eliminado a pedido del owner).
+  Modos de la landing (`?ir=`, se leen ANTES de limpiar la URL): `casino` abre el casino
+  al loguear; `creds` (#198) muestra el recuadro de usuario+clave del fragmento `#lc=`
+  y el casino abre al tocar ENTRAR (§4.10).
 - **SLA demoras**: reloj en ChatStatus (`delayClockOnUserMessage`/`delayClockResolve`);
   responder (mensaje/comando/carga/retiro/CBU) o cerrar lo resuelve; sobre-umbral →
   ChatDelay. Reporte `GET /api/admin/chat-delays` (solo admin).
@@ -1047,7 +1075,8 @@ a Meta CAPI (`signup_landing`) + webhook fb-ads.
   reales `.chat-container`/`.chat-input-container`; mismos ids/listeners/socket) —
   `closeCasinoFrame` SIEMPRE desmonta primero o la pantalla principal queda sin
   chat. El watchdog del iframe se cancela en su `load`. El access-link con
-  `ir=casino` (alta por landing, §4.10) abre el casino directo tras loguear.
+  `ir=casino` (landing vieja, §4.10) abre el casino directo tras loguear; con
+  `ir=creds` (#198) lo abre `VIP.ui.landingEnterCasino()` desde el recuadro de credenciales.
   Poll de saldo: 90s (era 30s; parte del fix del lag, §4.3).
 - **Información del Servicio** (#185): la tarjeta "Bonos en tus cargas" (infoModal) y el
   pie del grid del adServiceModal muestran "Todos los bonos y regalos tienen rollover xN"

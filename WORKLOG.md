@@ -8,6 +8,46 @@
 
 ## Sesión 2026-10-19
 
+### 198. Landing externa nueva (carpeta de PAUTANUEVAsantino) apuntando a cargas1girox.com + `ir=creds`, pixel por campaña y last-touch
+- **Owner:** "usemos la carpeta `/PAUTANUEVAsantino/landing` para CARGASGIROX, que apunte a
+  cargas1girox.com" (acá no había landing vinculada: la `landing/index.html` vieja del 2026-08-19
+  mostraba las credenciales en pantalla y no la usaba nadie).
+- **Diagnóstico previo (PICA ROJA, otra página):** la landing de grupospicaroja.com decía
+  "Sin conexión" porque su `API_BASE_DEFAULT` era `https://vipcargas.com` (backend equivocado y,
+  además, **Cloudflare le mete un challenge al preflight** de `/api/landing/signup` → 403 HTML sin
+  CORS → el fetch cae al `catch`). Su backend real es `https://picaroja.com` (sin challenge). Lección
+  para este repo: **la landing tiene que apuntar a `cargas1girox.com`, no a vipcargas.com** (mismo
+  challenge). Verificado con curl: `cargas1girox.com` responde el preflight 204 con el Origin reflejado.
+- **Landing (`landing/`):** reemplazada por la de PAUTANUEVAsantino tal cual (`index.html`,
+  `vercel.json` con filtro "solo Argentina" → `blank.html`, `demo.html`), cambiando SOLO
+  `API_BASE_DEFAULT = 'https://cargas1girox.com'` y el `<title>` (CARGAS 1GIROX). Usa: pixel del
+  navegador por campaña (`/api/meta-pixel-id`), escape del webview de IG/FB/TikTok, dedup por
+  dispositivo (`localStorage.girox_signed` → "Ya tenés tu cuenta" + `/api/landing/touch`), redirect
+  inmediato a `accessUrl#lc=usuario:clave` y `CompleteRegistration` del navegador con el
+  `metaEventId` del server.
+- **Backend (lo que la landing necesitaba y acá faltaba):** (1) `LANDING_OPEN_CORS_PATHS` — CORS
+  reflejado también para `GET /api/meta-pixel-id` y `POST /api/landing/touch` (sin esto el fetch se
+  bloqueaba en silencio, #247 del gemelo); (2) `GET /api/meta-pixel-id?c=CODE` →
+  `metaCapi.pixelIdsForCampaign`: solo pixels de partners `META_PIXEL_ID_2..9` asignados con
+  `META_PIXEL_PUBLISHER_i` (publicistas/códigos, `*`), `META_PIXEL_CAPIONLY_i=1` los oculta; el pixel
+  propio nunca va a la landing (hoy sin esas env → `[]`, la landing no carga pixel y sigue andando);
+  (3) `POST /api/landing/touch` (last-touch: `metaFbc/metaFbp/landingUrl` + **nuevo
+  `User.lastTouchCampaign`/`lastTouchAt`**, que ahora sí lee `resolveEventScope` de los webhooks
+  salientes #197); (4) el alta por landing manda la CAPI con `event_id` fijo `reg_<id>` y devuelve
+  `metaEventId` (dedup browser+server), el `accessUrl` sale con **`&ir=creds`** y las credenciales
+  quedan en un **mensaje de sistema en el chat** del cliente (la landing ya no las muestra).
+- **PWA (`ir=creds`, réplica del flujo v4 del gemelo):** `auth.js tryAccessLink` lee `ir` y el
+  fragmento `#lc=`, muestra `VIP.ui._showLandingCredsScreen` ANTES del canje, `_landingCredsReady`
+  al canjear OK (botón habilitado a los 2 s; auto-entra a los 10 s), `landingEnterCasino` →
+  `enterCasino()` (SSO de siempre; acá no hay SSO adelantado en el canje). `ir=casino` sigue
+  igual. SW `v114`. No se portó el "#309 ¿seguís con tu cuenta vieja?" (acá no existe
+  `access-link/discard`).
+- **Deploy:** (1) EB con este commit; (2) subir la carpeta `landing/` a Vercel (o al host que sea)
+  con su dominio; (3) crear la campaña en el panel y probar `https://<landing>/<CODIGO>` → tiene que
+  crear el usuario, redirigir a cargas1girox.com con el recuadro usuario+clave y, al tocar ENTRAR,
+  abrir el casino. Si querés pixel de un publicista en la landing: `META_PIXEL_ID_2` +
+  `META_PIXEL_PUBLISHER_2=<publicista o código>` en SSM.
+
 ### 197. Prefijo de los usuarios nuevos + Webhooks salientes a publicistas (réplica #328 y #334/#342-#346 de AUTOGIROXcompartido)
 - **Owner:** "sacá del gemelo AUTOGIROXcompartido el Prefijo de los usuarios nuevos, los Webhooks
   salientes y el Rollover GLOBAL y replicalo acá". El **rollover global ya existía** (#184, misma
