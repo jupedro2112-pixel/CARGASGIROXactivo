@@ -873,26 +873,36 @@
                    #homePanel, está dentro de .home-dash. Por eso hacen falta las
                    DOS reglas: si se esconde .home-dash (que es lo que pasaba antes)
                    se van los reembolsos con ella. */
-                /* (owner 2026-08-05: antes el colapsado dejaba .dash-top —
-                   reembolsos + usuario; ahora deja SOLO .dash-play — el botón
-                   del casino centrado + el saldo del cliente.) */
-                #homePanel.collapsed > *:not(.home-dash) { display:none !important; }
-                #homePanel.collapsed .home-dash > *:not(.dash-play) { display:none !important; }
-                /* Sin el margen de abajo el bloque queda pegado al botón. */
-                #homePanel.collapsed .dash-play { margin-bottom:0; }
+                /* (owner 2026-08-05: el colapsado dejaba SOLO .dash-play.)
+                   #199 (owner 2026-10-19): TRES modos, elegidos desde la barra de
+                   abajo (#homePanelToggle), y SIEMPRE se entra en "reembolsos"
+                   (no se recuerda nada): la primera vez son demasiadas cosas.
+                     - mode-full     → todo el panel.
+                     - mode-refunds  → SOLO la fila de reembolsos (sin la tarjeta
+                                       de usuario, sin casino/saldo, sin banners).
+                     - mode-closed   → nada del panel (queda RETIRAR + el chat). */
+                #homePanel.mode-refunds > *:not(.home-dash) { display:none !important; }
+                #homePanel.mode-refunds .home-dash > *:not(.dash-top) { display:none !important; }
+                #homePanel.mode-refunds .dash-top .dash-user { display:none !important; }
+                #homePanel.mode-refunds .dash-top { margin-bottom:0; }
+                #homePanel.mode-closed { display:none !important; }
                 #homePanelToggle {
-                    flex:0 0 auto; display:flex; align-items:center; justify-content:center;
-                    gap:8px; margin:3px 8px 0; padding:5px 12px; cursor:pointer;
-                    background:linear-gradient(135deg,#2d0052,#1a0033); color:#d4af37;
+                    flex:0 0 auto; display:flex; align-items:stretch; gap:4px;
+                    margin:3px 8px 0; padding:3px;
+                    background:linear-gradient(135deg,#2d0052,#1a0033);
                     border:1px solid #d4af37; border-radius:9px;
-                    font-size:11px; font-weight:800; letter-spacing:.4px;
+                }
+                #homePanelToggle .hpt-seg {
+                    flex:1 1 0; min-width:0; padding:5px 4px; cursor:pointer;
+                    background:transparent; color:#d4af37; border:none; border-radius:7px;
+                    font-size:10.5px; font-weight:800; letter-spacing:.3px; white-space:nowrap;
+                    overflow:hidden; text-overflow:ellipsis;
                     -webkit-tap-highlight-color:rgba(212,175,55,.3); touch-action:manipulation;
                 }
-                #homePanelToggle:active { transform:scale(.99); }
-                #homePanelToggle .hpt-grip {
-                    width:30px; height:3px; border-radius:3px; background:rgba(212,175,55,.5);
+                #homePanelToggle .hpt-seg:active { transform:scale(.98); }
+                #homePanelToggle .hpt-seg.active {
+                    background:linear-gradient(135deg,#d4af37,#ffd700); color:#1a0033;
                 }
-                #homePanelToggle .hpt-chevron { font-size:9px; }
             </style>
             <!-- Panel del home (colapsable con #homePanelToggle). -->
             <div id="homePanel">
@@ -989,12 +999,13 @@
                  de ganadores DENTRO del modal de la ruleta sigue existiendo. -->
             </div><!-- /#homePanel -->
 
-            <!-- Barra para subir/bajar el panel del home y agrandar el chat. -->
-            <button id="homePanelToggle" type="button" aria-expanded="true" title="Mostrar u ocultar el menú">
-                <span class="hpt-grip"></span>
-                <span class="hpt-chevron">▲</span>
-                <span class="hpt-label">Ocultar menú</span>
-            </button>
+            <!-- Barra de MODOS del panel del home (#199): completo / solo
+                 reembolsos / cerrado. Siempre arranca en "solo reembolsos". -->
+            <div id="homePanelToggle" role="group" aria-label="Menú del inicio" title="Elegí cuánto menú ver">
+                <button type="button" class="hpt-seg" data-mode="full">▼ Menú completo</button>
+                <button type="button" class="hpt-seg active" data-mode="refunds">🎁 Solo reembolsos</button>
+                <button type="button" class="hpt-seg" data-mode="closed">▲ Cerrado</button>
+            </div>
 
             <!-- Retirar mi premio: queda FUERA de #homePanel, así sigue
                  visible aunque se oculte el menú. -->

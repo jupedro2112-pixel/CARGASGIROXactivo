@@ -1078,6 +1078,12 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   `ir=casino` (landing vieja, §4.10) abre el casino directo tras loguear; con
   `ir=creds` (#198) lo abre `VIP.ui.landingEnterCasino()` desde el recuadro de credenciales.
   Poll de saldo: 90s (era 30s; parte del fix del lag, §4.3).
+- **Panel del home con 3 modos** (#199, owner 2026-10-19): `#homePanel.mode-full|mode-refunds|
+  mode-closed` (CSS en index.html) elegidos desde la barra `#homePanelToggle` (3 botones
+  `.hpt-seg[data-mode]`, app.js `applyHomePanel`). **Siempre arranca en `refunds`** (solo la fila
+  de reembolsos, sin tarjeta de usuario ni casino/saldo ni banners); NO se persiste. `closed`
+  esconde todo el panel (quedan RETIRAR + chat). El cartel de verificar teléfono solo se ve en
+  `full`. `VIP.ui.setHomePanelMode(mode)` por si otra parte necesita abrirlo.
 - **Información del Servicio** (#185): la tarjeta "Bonos en tus cargas" (infoModal) y el
   pie del grid del adServiceModal muestran "Todos los bonos y regalos tienen rollover xN"
   (N = `bonusRollover.x` de `/api/refunds/status`, el efectivo del panel; oculto si el

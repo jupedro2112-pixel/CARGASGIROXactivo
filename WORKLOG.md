@@ -8,6 +8,21 @@
 
 ## Sesión 2026-10-19
 
+### 199. Menú del inicio de la PWA: 3 modos y SIEMPRE arranca en "solo reembolsos"
+- **Owner:** "que siempre aparezca con el menú cerrado (la primera vez son muchas cosas), que
+  arranque cerrado con solo reembolsos, y que se pueda cambiar entre menú completo, menú cerrado
+  completo y menú con reembolsos".
+- La barra "Ocultar menú / Ver menú" (`#homePanelToggle`) pasó a ser una barra de **3 botones**:
+  `▼ Menú completo` · `🎁 Solo reembolsos` · `▲ Cerrado`. CSS `#homePanel.mode-full|mode-refunds|
+  mode-closed`: `refunds` deja SOLO la fila de reembolsos (se esconden la tarjeta USUARIO, casino/
+  saldo, bono por instalar, lotes, promos); `closed` esconde todo el panel (queda RETIRAR MI PREMIO
+  + el chat). El cartel de verificar teléfono solo se ve en `full` (misma lógica de "recordar si
+  estaba visible" de antes).
+- **Siempre arranca en `refunds` en cada ingreso** (antes arrancaba abierto; nunca se persistió el
+  estado y sigue sin persistirse). `VIP.ui.setHomePanelMode(mode)` queda expuesto. SW `v115`.
+- Para probar tras el deploy: entrar → se ve solo REEMBOLSOS + la barra de 3 botones; tocar
+  "Menú completo" → aparece todo; "Cerrado" → solo RETIRAR y el chat; recargar → vuelve a reembolsos.
+
 ### 198. Landing externa nueva (carpeta de PAUTANUEVAsantino) apuntando a cargas1girox.com + `ir=creds`, pixel por campaña y last-touch
 - **Owner:** "usemos la carpeta `/PAUTANUEVAsantino/landing` para CARGASGIROX, que apunte a
   cargas1girox.com" (acá no había landing vinculada: la `landing/index.html` vieja del 2026-08-19

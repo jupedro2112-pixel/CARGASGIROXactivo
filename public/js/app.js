@@ -243,74 +243,65 @@ function setupEventListeners() {
             if (body) body.innerHTML = h;
         });
 
-        // Panel del home colapsable: "subir" el menú (ruleta, reembolsos,
-        // saldo, retirar) para agrandar el chat, y bajarlo para ver todo.
+        // Panel del home con TRES modos (#199, owner 2026-10-19):
+        //   full    → todo el panel (casino/saldo, banners, reembolsos, usuario).
+        //   refunds → SOLO la fila de reembolsos (default en CADA ingreso: la
+        //             primera vez son demasiadas cosas para el cliente).
+        //   closed  → nada del panel: queda RETIRAR MI PREMIO + el chat.
+        // El recorte lo hace el CSS (`#homePanel.mode-*`); acá se elige el modo
+        // desde la barra de 3 botones y se anima la altura para que no salte.
+        // NO se recuerda el modo entre sesiones: siempre arranca en "refunds".
+        // El cartel de verificar teléfono (vive FUERA del panel, ocupa media
+        // pantalla) solo se ve en modo completo; se recuerda si estaba visible
+        // para restaurarlo tal cual (si no, reaparecería en alguien que ya
+        // verificó o quedaría oculto en alguien que no).
         const homePanel = document.getElementById('homePanel');
         const homePanelToggle = document.getElementById('homePanelToggle');
         if (homePanel && homePanelToggle) {
-            const hptLabel = homePanelToggle.querySelector('.hpt-label');
-            const hptChevron = homePanelToggle.querySelector('.hpt-chevron');
-            // "Ocultar menú" NO esconde todo: deja a la vista la fila de REEMBOLSOS
-            // y el perfil del usuario (`.dash-top`), que es lo que el cliente mira
-            // todo el tiempo. Se ocultan el casino/saldo, la comunidad, el bono de
-            // instalación y —a pedido del owner— el cartel de verificar teléfono,
-            // que vive FUERA del panel pero ocupa media pantalla.
-            // El recorte de los hijos lo hace el CSS (`#homePanel.collapsed`); acá
-            // sólo se anima la altura para que no salte.
+            const HOME_PANEL_MODES = ['full', 'refunds', 'closed'];
             const verifyBanner = document.getElementById('verifyPhoneBanner');
-            const applyHomePanel = (collapsed, animate) => {
-                if (collapsed) {
-                    homePanel.classList.add('collapsed');
-                    // Con `collapsed` puesto, scrollHeight ya es el alto reducido
-                    // (sólo .dash-top): se anima hacia ese valor, no hacia 0.
-                    if (animate) {
-                        homePanel.style.maxHeight = homePanel.scrollHeight + 'px';
-                        setTimeout(() => {
-                            if (homePanel.classList.contains('collapsed')) homePanel.style.maxHeight = 'none';
-                        }, 320);
+            const applyHomePanel = (mode, animate) => {
+                if (HOME_PANEL_MODES.indexOf(mode) === -1) mode = 'refunds';
+                HOME_PANEL_MODES.forEach((m) => homePanel.classList.toggle('mode-' + m, m === mode));
+                if (mode === 'closed' || !animate) {
+                    homePanel.style.maxHeight = 'none';
+                } else {
+                    // Con la clase puesta, scrollHeight ya es el alto del modo nuevo.
+                    homePanel.style.maxHeight = homePanel.scrollHeight + 'px';
+                    setTimeout(() => {
+                        if (homePanel.classList.contains('mode-' + mode)) homePanel.style.maxHeight = 'none';
+                    }, 320);
+                }
+                if (verifyBanner) {
+                    if (mode === 'full') {
+                        if (verifyBanner.dataset.wasVisible === '1') {
+                            verifyBanner.style.display = '';
+                            delete verifyBanner.dataset.wasVisible;
+                        }
                     } else {
-                        homePanel.style.maxHeight = 'none';
-                    }
-                    // El cartel de verificar teléfono se esconde con el menú. Se
-                    // recuerda si estaba visible para poder restaurarlo tal cual:
-                    // si no, al volver a abrir el menú reaparecería en alguien que
-                    // ya verificó (o quedaría oculto en alguien que no).
-                    if (verifyBanner) {
                         if (verifyBanner.style.display !== 'none') verifyBanner.dataset.wasVisible = '1';
                         verifyBanner.style.display = 'none';
                     }
-                    homePanelToggle.setAttribute('aria-expanded', 'false');
-                    if (hptLabel) hptLabel.textContent = 'Ver menú';
-                    if (hptChevron) hptChevron.textContent = '▼';
-                } else {
-                    homePanel.classList.remove('collapsed');
-                    if (animate) {
-                        homePanel.style.maxHeight = homePanel.scrollHeight + 'px';
-                        setTimeout(() => {
-                            if (!homePanel.classList.contains('collapsed')) homePanel.style.maxHeight = 'none';
-                        }, 320);
-                    } else {
-                        homePanel.style.maxHeight = 'none';
-                    }
-                    if (verifyBanner && verifyBanner.dataset.wasVisible === '1') {
-                        verifyBanner.style.display = '';
-                        delete verifyBanner.dataset.wasVisible;
-                    }
-                    homePanelToggle.setAttribute('aria-expanded', 'true');
-                    if (hptLabel) hptLabel.textContent = 'Ocultar menú';
-                    if (hptChevron) hptChevron.textContent = '▲';
                 }
+                homePanelToggle.querySelectorAll('.hpt-seg').forEach((b) => {
+                    const on = b.dataset.mode === mode;
+                    b.classList.toggle('active', on);
+                    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+                });
+                homePanel.dataset.mode = mode;
             };
-            homePanelToggle.addEventListener('click', () => {
-                const willCollapse = !homePanel.classList.contains('collapsed');
-                applyHomePanel(willCollapse, true);
+            homePanelToggle.addEventListener('click', (ev) => {
+                const seg = ev.target && ev.target.closest ? ev.target.closest('.hpt-seg') : null;
+                if (!seg || !seg.dataset.mode || seg.dataset.mode === homePanel.dataset.mode) return;
+                applyHomePanel(seg.dataset.mode, true);
                 setTimeout(() => {
                     if (VIP.chat && VIP.chat.scrollToBottom) VIP.chat.scrollToBottom();
                 }, 340);
             });
-            // Siempre arranca abierto en cada ingreso: si el usuario lo quiere
-            // cerrar, lo cierra él. No se recuerda el estado entre sesiones.
-            applyHomePanel(false, false);
+            // Exponer por si otra parte de la app necesita abrir el menú completo.
+            VIP.ui.setHomePanelMode = (mode) => applyHomePanel(mode, true);
+            // SIEMPRE arranca en "solo reembolsos" en cada ingreso (owner 2026-10-19).
+            applyHomePanel('refunds', false);
         }
 
         const headerInstallBtn = document.getElementById('headerInstallBtn');
