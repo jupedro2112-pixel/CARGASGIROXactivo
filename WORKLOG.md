@@ -10,6 +10,27 @@
 
 ## Sesión 2026-10-20
 
+### 204. Todos los pop-ups cerrables en Android/iPhone (con o sin app) + cartel del bono por instalar prolijo
+- **Owner:** (1) "el cartel del bono por instalar tapa toda la pantalla en el celular, que se vea
+  prolijo en todos los dispositivos"; (2) "Información del Servicio queda enorme: achicarlo para que se
+  vea el fondo y puedan tocar afuera para salir; en iPhone con la app instalada la ✕ queda muy arriba
+  y no se puede tocar. Revisá TODOS los pop-ups/menús/carteles: que todos puedan cerrarse".
+- **Auditoría (23 modales estáticos `.modal` + 6 overlays JS):** 7 modales no tenían ✕ propio
+  (depositModal, withdrawModal, appCheckModal, notifTestModal, settingsModal, publisherWelcomeModal,
+  notifSurveyModal: cerraban solo con botones internos) y 18 no cerraban tocando afuera. Los overlays
+  JS ya cerraban tocando afuera y tenían ×, pero sin margen de zona segura.
+- **Fix genérico (ui.js `_ensureModalClosable`, llamado desde `showModal`):** ✕ sticky inyectado
+  si el modal no trae uno (`.modal-xbar/.modal-x`), cierre tocando el fondo y con Escape. Excepción:
+  `changePasswordModal` (obligatorio). Opt-out por modal: `data-no-x` / `data-no-backdrop`.
+- **modals.css:** `.modal` con padding `env(safe-area-inset-top/bottom)` (la ✕ nunca queda bajo la
+  muesca) y `.modal-content` tope **84dvh** (antes `calc(100dvh - 40px)`; `#infoModal` 90/92 → 84):
+  queda fondo visible alrededor para tocar afuera. Mismo margen/tope por id para los overlays JS.
+- **Cartel del bono por instalar:** en ≤600px apila ícono+título, regla y botón a todo el ancho
+  (responsive.css); el aviso "única vez" ya no repite la regla (estaba duplicada). SW `v120`.
+- **Probar tras el deploy (iPhone con app instalada y Android):** abrir Información del Servicio →
+  se ve fondo arriba/abajo, cierra tocando afuera y con la ✕; abrir Depositar/Retirar/Configuración →
+  aparece la ✕ arriba a la derecha; cartel del bono en 393px de ancho → 3 filas prolijas.
+
 ### 203. Menú del inicio: se recuerda el último modo elegido por el cliente
 - **Owner:** "la persona arranca con el menú cerrado, pero si lo cambia a otro que quede guardado el
   que eligió último". Antes (#199) se forzaba "Reembolsos" en cada ingreso.

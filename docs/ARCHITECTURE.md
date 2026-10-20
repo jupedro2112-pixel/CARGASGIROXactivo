@@ -1088,6 +1088,20 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   `ir=creds` (#198/#201) el recuadro de credenciales entra al INICIO de la app
   (`VIP.ui.landingEnterApp()`), no al casino.
   Poll de saldo: 90s (era 30s; parte del fix del lag, §4.3).
+- **Modales SIEMPRE cerrables (#204, owner 2026-10-20):** `VIP.ui.showModal` pasa por
+  `_ensureModalClosable`: inyecta un ✕ sticky (`.modal-xbar > .modal-x`, modals.css) si el
+  `.modal-content` no trae un ✕/× propio, cierra al tocar el fondo (`e.target === modal`) y con
+  Escape. Excepciones: `MODAL_NO_CLOSE` (hoy solo `changePasswordModal`, que además se protege en
+  `hideModal` mientras `passwordChangePending`); un modal puede optar con `data-no-x` /
+  `data-no-backdrop`. `.modal` lleva padding con `env(safe-area-inset-top/bottom)` y
+  `.modal-content` tope **84dvh** (también `#infoModal`): nunca tapan toda la pantalla y el ✕ no
+  queda bajo la muesca del iPhone con la app instalada. Los overlays armados por JS
+  (`#profileModal`, `#cashbackModal`, `#reviewModalOverlay`, `#rouletteNeedsAppModal`,
+  `#appTestHelpOverlay`, `#notifBlockedModal`) reciben el mismo margen/tope por id con
+  `!important` (traen estilos inline); todos ya cerraban tocando afuera. `#landingCredsOverlay` y
+  `#casinoOverlay` NO son modales (pantallas completas a propósito). Cartel
+  `#installBonusBanner`: en ≤600px apila ícono+título / regla / botón a todo el ancho
+  (responsive.css) y el aviso de "única vez" ya no repite la regla.
 - **Panel del home con 3 modos** (#199, owner 2026-10-19): `#homePanel.mode-full|mode-refunds|
   mode-closed` (CSS en index.html) elegidos desde la barra `#homePanelToggle` (3 botones
   `.hpt-seg[data-mode]`, app.js `applyHomePanel`). La primera vez arranca en `refunds` (la fila

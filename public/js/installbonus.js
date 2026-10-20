@@ -63,7 +63,9 @@ VIP.installBonus = (function () {
         set('adInstallBonusTitle', 'Bono ' + pct + '% con la app');
         set('adInstallBonusDesc', 'Instalá la app y tu próxima carga suma un ' + pct + '%' + (cap > 0 ? ' (hasta ' + money(cap) + (ex > 0 ? ' + ' + ex + '% del resto' : '') + ')' : '') + '.');
         const notice = _el('installBonusDirectNotice');
-        if (notice) notice.innerHTML = '⚠️ Es por <strong>única vez</strong>. ' + (r.text ? _escHtml(r.text) + ' ' : '') + 'Cuando vayas a cargar, avisale al agente que tenés el bono por instalar la app y te lo aplica en el momento.';
+        // #204: la regla (r.text) YA está en installBonusRuleText; acá iba repetida y
+        // el cartel ocupaba media pantalla en el celular.
+        if (notice) notice.innerHTML = '⚠️ Es por <strong>única vez</strong>. Cuando vayas a cargar, avisale al agente que tenés el bono por instalar la app y te lo aplica en el momento.';
     }
     function _escHtml(t) { const d = document.createElement('div'); d.textContent = String(t == null ? '' : t); return d.innerHTML; }
 
