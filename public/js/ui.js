@@ -1365,6 +1365,18 @@ VIP.ui._showCasinoFrame = function() {
         'border:1px solid rgba(212,175,55,0.45);border-radius:16px;overflow:hidden;' +
         'box-shadow:0 18px 60px rgba(0,0,0,0.7);z-index:7;">' +
 
+        // 0. Agarradera para AGRANDAR/ACHICAR el widget (#202): el cliente arrastra
+        //    el borde de arriba hacia arriba (más alto) o hacia abajo (más bajo).
+        //    La altura elegida se recuerda en este dispositivo (casinoDrawerHeight).
+        '<div id="casinoDrawerGrip" title="Arrastrá para agrandar o achicar el chat" ' +
+          'style="flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:6px;' +
+          'height:18px;background:#07331a;cursor:ns-resize;touch-action:none;user-select:none;' +
+          '-webkit-user-select:none;color:#9be7b6;font-size:9.5px;font-weight:800;letter-spacing:.3px;">' +
+          '<span style="display:inline-block;width:34px;height:4px;border-radius:2px;background:rgba(255,255,255,0.45);"></span>' +
+          '<span>↕ agrandar / achicar</span>' +
+          '<span style="display:inline-block;width:34px;height:4px;border-radius:2px;background:rgba(255,255,255,0.45);"></span>' +
+        '</div>' +
+
         // 1. Header verde
         '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;flex:0 0 auto;' +
           'background:linear-gradient(135deg,#00933c,#00c853);">' +
@@ -1420,14 +1432,17 @@ VIP.ui._showCasinoFrame = function() {
         '<div style="display:flex;gap:16px;padding:0 12px 8px;flex:0 0 auto;">' +
           '<a href="javascript:void(0)" onclick="VIP.ui.openCasinoInTab()" ' +
             'style="color:#8a8aa0;font-size:11px;text-decoration:underline;">↗ Casino aparte</a>' +
+          // #202 (owner): "Salir del casino" se entendía como cerrar el casino en
+          // general; es volver a la pantalla anterior de la app.
           '<a href="javascript:void(0)" onclick="VIP.ui.closeCasinoFrame()" ' +
-            'style="color:#8a8aa0;font-size:11px;text-decoration:underline;">🚪 Salir del casino</a>' +
+            'style="color:#8a8aa0;font-size:11px;text-decoration:underline;">🏠 Volver al MENÚ PRINCIPAL</a>' +
         '</div>' +
 
         // 6. Acá se MUDA el chat real (VIP.ui._casinoChatMount)
         '<div id="casinoChatDrawerBody" style="flex:1;min-height:0;display:flex;flex-direction:column;"></div>' +
       '</div>';
     document.body.appendChild(overlay);
+    VIP.ui._setupCasinoDrawerResize();
 
     // Cuando el casino termina de cargar, se esconde el "cargando", se muestra
     // el juego y SE CANCELA el vigilante: sin esto, el aviso "¿el casino no
@@ -1543,6 +1558,55 @@ VIP.ui._showCasinoFrame = function() {
 
 VIP.ui._casinoChatOpen = false;
 
+/** Altura del widget: arrastre de la agarradera (#casinoDrawerGrip) con
+ *  pointer events (mouse y touch). Arriba = más alto, abajo = más bajo; entre
+ *  260px y el alto de la pantalla menos un margen. Se recuerda por dispositivo
+ *  (localStorage casinoDrawerHeight) y se aplica al abrir. (#202) */
+VIP.ui._casinoDrawerMinH = 260;
+VIP.ui._casinoDrawerMaxH = function() {
+  return Math.max(VIP.ui._casinoDrawerMinH, window.innerHeight - 120);
+};
+VIP.ui._applyCasinoDrawerHeight = function(h) {
+  const drawer = document.getElementById('casinoChatDrawer');
+  if (!drawer) return;
+  const clamped = Math.min(VIP.ui._casinoDrawerMaxH(), Math.max(VIP.ui._casinoDrawerMinH, Math.round(h)));
+  drawer.style.height = clamped + 'px';
+  return clamped;
+};
+VIP.ui._restoreCasinoDrawerHeight = function() {
+  let saved = 0;
+  try { saved = Number(localStorage.getItem('casinoDrawerHeight')) || 0; } catch (e) {}
+  if (saved) VIP.ui._applyCasinoDrawerHeight(saved);
+};
+VIP.ui._setupCasinoDrawerResize = function() {
+  const grip = document.getElementById('casinoDrawerGrip');
+  const drawer = document.getElementById('casinoChatDrawer');
+  if (!grip || !drawer) return;
+  let startY = 0, startH = 0, dragging = false;
+  grip.addEventListener('pointerdown', function(e) {
+    dragging = true;
+    startY = e.clientY;
+    startH = drawer.getBoundingClientRect().height;
+    try { grip.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+  });
+  grip.addEventListener('pointermove', function(e) {
+    if (!dragging) return;
+    // El widget está anclado ABAJO: subir el borde de arriba = más alto.
+    VIP.ui._applyCasinoDrawerHeight(startH + (startY - e.clientY));
+  });
+  const end = function(e) {
+    if (!dragging) return;
+    dragging = false;
+    try { grip.releasePointerCapture(e.pointerId); } catch (err) {}
+    try { localStorage.setItem('casinoDrawerHeight', String(Math.round(drawer.getBoundingClientRect().height))); } catch (err) {}
+    const msgs = document.getElementById('chatMessages');
+    if (msgs) msgs.scrollTop = msgs.scrollHeight;
+  };
+  grip.addEventListener('pointerup', end);
+  grip.addEventListener('pointercancel', end);
+};
+
 VIP.ui.toggleCasinoChat = function() {
   // Si lo que hubo fue un ARRASTRE de la burbuja, el click posterior no abre.
   if (VIP.ui._bubbleWasDragged) return;
@@ -1621,6 +1685,7 @@ VIP.ui._casinoChatMount = function() {
   chatCont.style.minHeight = '0';
 
   drawer.style.display = 'flex';
+  VIP.ui._restoreCasinoDrawerHeight(); // #202: altura elegida por el cliente
   VIP.ui._casinoChatOpen = true;
 
   // Badge a cero y scroll al fondo (tras el reflow del appendChild).

@@ -646,3 +646,13 @@ body.wa-dark #typingIndicator { color: #8696a0 !important; }
 /* Foco visible por teclado (accesibilidad): sin esto el switch es inalcanzable
    para quien no usa mouse. */
 .wa-switch input:focus-visible + .wa-switch-track { outline: 2px solid #d4af37; outline-offset: 2px; }
+
+/* ===== Chat MUDADO al widget del casino (#casinoChatDrawer, #202) =====
+   responsive.css acota .message a 55%/65% en pantallas grandes porque está
+   pensado para el chat a pantalla completa; adentro del widget (380px) eso
+   dejaba los globos en media columna y se leía raro. Acá ocupan casi todo el
+   ancho del widget. !important para ganarle a las media queries de
+   responsive.css (que carga después). */
+#casinoChatDrawer .message { max-width: 94% !important; font-size: 13.5px !important; }
+#casinoChatDrawer .chat-messages { padding: 8px 8px 10px 8px; }
+#casinoChatDrawer .message img { max-width: 100%; }

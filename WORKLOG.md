@@ -10,6 +10,22 @@
 
 ## Sesión 2026-10-20
 
+### 202. Widget del casino: agrandar/achicar, globos a todo el ancho, "Volver al MENÚ PRINCIPAL"; "Menú cerrado"
+- **Owner:** (1) "que el chat [del casino] pueda agrandarse para arriba o para abajo según decida el
+  cliente"; (2) "el chat se ve medio raro, ¿cómo se soluciona sin agrandarlo?"; (3) "que el botón de
+  salir del casino diga 'Volver a MENÚ PRINCIPAL' para que se entienda que vuelve al menú anterior y
+  no que cierra el casino general"; (4) "reemplazar 'Cerrado' por 'Menú cerrado'".
+- (1) Agarradera `#casinoDrawerGrip` ("↕ agrandar / achicar") en el borde superior del widget:
+  arrastrar hacia arriba lo hace más alto, hacia abajo más bajo (mouse y touch, pointer events;
+  260px ↔ alto de pantalla − 120). La altura queda guardada en el dispositivo
+  (`localStorage.casinoDrawerHeight`) y se aplica cada vez que se abre.
+- (2) Causa: `responsive.css` acota `.message` a 55% (≥1441px) / 65% (1025–1440px) pensando en el
+  chat a pantalla completa; adentro del widget de 380px los globos quedaban en media columna con el
+  fondo vacío al lado. Fix en `chat.css`: `#casinoChatDrawer .message { max-width:94% !important;
+  font-size:13.5px }` + padding más chico. No hace falta agrandar el widget.
+- (3) "🚪 Salir del casino" → "🏠 Volver al MENÚ PRINCIPAL" (misma acción: `closeCasinoFrame`).
+- (4) Barra de modos del inicio: "▲ Cerrado" → "▲ Menú cerrado". SW `v118`.
+
 ### 201. Desde la landing se entra al INICIO de la app (no al casino) y sin ver el login
 - **Owner:** "apenas se crea el usuario en la landing, al tocar entrar tarda mucho y en el medio
   aparece el login con fondo violeta; que entre directo. Y que entre a la app (chat + menú), no al

@@ -1073,7 +1073,13 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   `#chatMessages`) abre un widget flotante anclado a la esquina con acciones
   rápidas (Depositar → chips de monto, Retirar, Pedir CBU, Ya transferí, Hablar;
   todo termina como mensaje en el chat del cajero vía
-  `VIP.ui.casinoQuickAction` — no es un bot) y escapes "Casino aparte"/"Salir".
+  `VIP.ui.casinoQuickAction` — no es un bot) y escapes "Casino aparte"/"Volver al MENÚ
+  PRINCIPAL" (= `closeCasinoFrame`). **#202:** agarradera `#casinoDrawerGrip` arriba del widget
+  (pointer events, `_setupCasinoDrawerResize`): arrastrar hacia arriba lo agranda y hacia abajo lo
+  achica (260px ↔ alto de pantalla − 120); la altura se recuerda por dispositivo
+  (`localStorage.casinoDrawerHeight`, se aplica en `_casinoChatMount`). Los globos adentro del
+  widget van a 94% de ancho (`#casinoChatDrawer .message` en chat.css, `!important` porque
+  responsive.css los deja en 55%/65% en desktop y se veían en media columna).
   ⚠️ El chat real se **MUDA** al widget (placeholders + appendChild de los nodos
   reales `.chat-container`/`.chat-input-container`; mismos ids/listeners/socket) —
   `closeCasinoFrame` SIEMPRE desmonta primero o la pantalla principal queda sin
