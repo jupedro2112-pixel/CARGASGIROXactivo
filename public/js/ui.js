@@ -1088,12 +1088,62 @@ VIP.ui._fetchCasinoSession = async function(timeoutMs) {
   }
 };
 
-VIP.ui.enterCasino = async function() {
+// #205 (owner 2026-10-20): al tocar PÁGINA CASINO AQUÍ se elige CÓMO abrirlo.
+//   • "Solo el casino": logueado, pantalla completa, SIN la burbuja ni el chat
+//     embebido (lo que antes era "Casino aparte", pero en la MISMA página).
+//   • "Casino + chat para cargar": como siempre, con la burbuja ⚡ CARGA RÁPIDA.
+// En los dos casos es una "pestaña dentro de la pestaña": el ✕ de arriba a la
+// izquierda (#casinoCloseX) vuelve al chat normal (closeCasinoFrame).
+VIP.ui._casinoNoChat = false;
+VIP.ui.openCasinoChooser = function() {
+  let modal = document.getElementById('casinoModeModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'casinoModeModal';
+    modal.className = 'modal hidden';
+    modal.innerHTML =
+      '<div class="modal-content" style="max-width:380px;">' +
+        '<div class="modal-header" style="margin-bottom:14px;">' +
+          '<h2 style="font-size:1.25em;">🎰 ¿Cómo querés abrir el casino?</h2>' +
+          '<p>Entrás logueado en los dos casos. Para volver acá, tocá la ✕ de arriba a la izquierda.</p>' +
+        '</div>' +
+        '<button type="button" onclick="VIP.ui.hideModal(\'casinoModeModal\');VIP.ui.enterCasino({noChat:true})" ' +
+          'style="width:100%;background:linear-gradient(135deg,#6a0dad,#9b30ff);color:#fff;border:none;' +
+          'border-radius:14px;padding:14px 12px;font-weight:900;font-size:15px;cursor:pointer;text-align:left;">' +
+          '🎰 Solo el casino' +
+          '<span style="display:block;font-size:11.5px;font-weight:600;opacity:.85;margin-top:3px;">Pantalla completa, sin el chat. Ideal para jugar tranquilo.</span>' +
+        '</button>' +
+        '<button type="button" onclick="VIP.ui.hideModal(\'casinoModeModal\');VIP.ui.enterCasino({noChat:false})" ' +
+          'style="width:100%;margin-top:10px;background:linear-gradient(135deg,#00933c,#00c853);color:#04240f;border:none;' +
+          'border-radius:14px;padding:14px 12px;font-weight:900;font-size:15px;cursor:pointer;text-align:left;">' +
+          '🎰 + 💬 Casino con chat para cargar' +
+          '<span style="display:block;font-size:11.5px;font-weight:700;opacity:.85;margin-top:3px;">El casino con la burbuja ⚡ CARGA RÁPIDA para depositar o retirar sin salir.</span>' +
+        '</button>' +
+      '</div>';
+    document.body.appendChild(modal);
+  }
+  VIP.ui.showModal('casinoModeModal');
+};
+
+/** Aplica el modo elegido al overlay: sin chat → burbuja oculta y widget desmontado. */
+VIP.ui._applyCasinoChatMode = function() {
+  const bubble = document.getElementById('casinoSupportBubble');
+  if (bubble) bubble.style.display = VIP.ui._casinoNoChat ? 'none' : '';
+  if (VIP.ui._casinoNoChat && VIP.ui._casinoChatOpen) { try { VIP.ui._casinoChatUnmount(); } catch (e) {} }
+};
+
+VIP.ui.enterCasino = async function(opts) {
   if (VIP.ui._casinoOpening) return; // anti doble-click
   VIP.ui._casinoOpening = true;
 
+  // Modo (#205): explícito si viene en opts; si no, se mantiene el actual cuando
+  // es un reintento con el overlay abierto, y por default CON chat.
+  if (opts && typeof opts.noChat === 'boolean') VIP.ui._casinoNoChat = opts.noChat;
+  else if (!VIP.ui._casinoOpen) VIP.ui._casinoNoChat = false;
+
   VIP.ui.closePlatformModal();
   VIP.ui._showCasinoFrame();   // recuadro visible YA, con "cargando"
+  VIP.ui._applyCasinoChatMode();
 
   try {
     // Hasta 3 intentos ante fallas transitorias (saturación momentánea del
@@ -1377,6 +1427,14 @@ VIP.ui._showCasinoFrame = function() {
       // `allow` habilita pantalla completa y sonido dentro de los juegos.
       '<iframe id="casinoFrame" title="Casino" style="flex:1;width:100%;border:0;display:none;" ' +
         'allow="autoplay; fullscreen; payment"></iframe>' +
+
+      // ── ✕ arriba a la izquierda (#205): vuelve al chat normal. Chico y
+      //    semitransparente para no tapar el menú del propio casino. ──
+      '<button type="button" id="casinoCloseX" onclick="VIP.ui.closeCasinoFrame()" title="Volver al chat" aria-label="Volver al chat" ' +
+        'style="position:absolute;top:calc(6px + env(safe-area-inset-top,0px));left:6px;z-index:8;' +
+        'width:34px;height:34px;border-radius:50%;background:rgba(13,13,26,0.72);color:#fff;' +
+        'border:1px solid rgba(255,255,255,0.35);font-size:16px;line-height:1;cursor:pointer;' +
+        'box-shadow:0 2px 10px rgba(0,0,0,0.5);-webkit-tap-highlight-color:rgba(255,255,255,0.2);">✕</button>' +
 
       // ── Burbuja "Carga rápida" (abre/cierra el widget) ──
       // Logo 1GIROX + etiqueta "⚡ CARGA RÁPIDA": con el 🎧 pelado los clientes
@@ -1842,6 +1900,7 @@ VIP.ui.closeCasinoFrame = function() {
   overlay.style.display = 'none';
   document.body.style.overflow = '';
   VIP.ui._casinoOpen = false;
+  VIP.ui._casinoNoChat = false; // #205: la próxima apertura vuelve a preguntar
 
   // Al volver, refrescar el saldo: es muy probable que haya cambiado jugando.
   if (VIP.ui.syncBalance) { try { VIP.ui.syncBalance(); } catch (e) {} }

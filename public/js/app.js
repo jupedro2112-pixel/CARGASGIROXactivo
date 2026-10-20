@@ -248,7 +248,7 @@ function setupEventListeners() {
         //   refunds → la fila de reembolsos + PÁGINA CASINO AQUÍ/saldo (#201)
         //             (default en CADA ingreso: la primera vez son demasiadas
         //             cosas para el cliente).
-        //   closed  → nada del panel: queda RETIRAR MI PREMIO + el chat.
+        //   closed  → solo PÁGINA CASINO AQUÍ + saldo (#205), después RETIRAR + chat.
         // El recorte lo hace el CSS (`#homePanel.mode-*`); acá se elige el modo
         // desde la barra de 3 botones y se anima la altura para que no salte.
         // #203 (owner 2026-10-20): la PRIMERA vez arranca en "refunds"; si el

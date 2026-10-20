@@ -507,7 +507,7 @@
             </button>
             <!-- Página CASINO: mismo SSO que el botón del dashboard (entra logueado). -->
             <button class="menu-item" title="Entrar al casino con tu sesión iniciada" role="menuitem"
-                onclick="if(window.VIP&&VIP.ui&&VIP.ui.enterCasino)VIP.ui.enterCasino()">
+                onclick="if(window.VIP&&VIP.ui&&VIP.ui.openCasinoChooser)VIP.ui.openCasinoChooser()">
                 <span class="menu-item-icon">🎰</span><span class="menu-item-label">Página CASINO <span style="font-weight:600;color:#00ff88;font-size:11px;">(entrás logueado)</span></span>
             </button>
             <button class="menu-item referral-btn" id="referralBtn" title="Mis Referidos" role="menuitem">
@@ -885,12 +885,16 @@
                                        AQUÍ con el saldo (#201: el casino se abre SOLO
                                        desde ese botón, así que tiene que estar a mano).
                                        Sin la tarjeta de usuario ni banners.
-                     - mode-closed   → nada del panel (queda RETIRAR + el chat). */
+                     - mode-closed   → SOLO PÁGINA CASINO AQUÍ + saldo (#205: el
+                                       casino tiene que estar siempre a mano) arriba
+                                       de la barra de modos; después RETIRAR + chat. */
                 #homePanel.mode-refunds > *:not(.home-dash) { display:none !important; }
                 #homePanel.mode-refunds .home-dash > *:not(.dash-top):not(.dash-play) { display:none !important; }
                 #homePanel.mode-refunds .dash-top .dash-user { display:none !important; }
                 #homePanel.mode-refunds .dash-play { margin-bottom:0; }
-                #homePanel.mode-closed { display:none !important; }
+                #homePanel.mode-closed > *:not(.home-dash) { display:none !important; }
+                #homePanel.mode-closed .home-dash > *:not(.dash-play) { display:none !important; }
+                #homePanel.mode-closed .dash-play { margin-bottom:0; }
                 #homePanelToggle {
                     flex:0 0 auto; display:flex; align-items:stretch; gap:4px;
                     margin:3px 8px 0; padding:3px;
@@ -951,7 +955,7 @@
 
                 <!-- Jugá Aquí + saldo del jugador -->
                 <div class="dash-play">
-                    <button id="plataformaBtn" class="dash-play-btn" title="Ir al Casino" onclick="VIP.ui.enterCasino()">🎰 PÁGINA CASINO AQUÍ</button>
+                    <button id="plataformaBtn" class="dash-play-btn" title="Ir al Casino" onclick="VIP.ui.openCasinoChooser()">🎰 PÁGINA CASINO AQUÍ</button>
                     <div class="dash-balance">
                         <span class="dash-balance-label">💰 TU SALDO</span>
                         <span class="dash-balance-amount" id="userBalance">$0</span>
