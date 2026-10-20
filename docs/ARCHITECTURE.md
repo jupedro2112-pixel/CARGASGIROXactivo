@@ -1063,7 +1063,16 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
 - Server-side rendering mínimo: `renderIndexHtml` reemplaza placeholders
   (`__META_PIXEL_ID_PLACEHOLDER__`, `__VIP_PUBLIC_BASE_URL_PLACEHOLDER__`,
   `__VIP_CAMPAIGN_CODE_PLACEHOLDER__`) con cache en memoria por proceso.
-- **Botón CASINO** (`#plataformaBtn` → `VIP.ui.enterCasino()`): login único contra
+- **Abrir el casino (#205):** "PÁGINA CASINO AQUÍ" (`#plataformaBtn`) y la entrada del ☰ llaman
+  `VIP.ui.openCasinoChooser()` → modal `#casinoModeModal` con dos opciones: **Solo el casino**
+  (`enterCasino({noChat:true})`: pantalla completa, burbuja oculta y widget desmontado,
+  `VIP.ui._casinoNoChat`) o **Casino + chat para cargar** (`enterCasino({noChat:false})`, el de
+  siempre). Las dos son "pestaña dentro de la pestaña": el overlay tiene un ✕ fijo arriba a la
+  izquierda (`#casinoCloseX` → `closeCasinoFrame`, que resetea el modo). `enterCasino()` sin opts
+  (landing `ir=casino`, invitación tras una carga, reintentos) mantiene el modo si el overlay ya
+  está abierto y si no usa chat. El botón del casino se ve en los 3 modos del menú (en `closed`
+  queda solo `.dash-play`).
+- **Botón CASINO** (`#plataformaBtn` → selector → `VIP.ui.enterCasino()`): login único contra
   1girox. Ver la trampa del pop-up blocker en §4.9. El modal de acceso manual sigue
   existiendo, pero **sólo como camino de respaldo** cuando el SSO falla.
 - **Casino embebido a PANTALLA COMPLETA + widget de soporte** (2026-08-19,
@@ -1107,7 +1116,8 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   `.hpt-seg[data-mode]`, app.js `applyHomePanel`). La primera vez arranca en `refunds` (la fila
   de reembolsos + PÁGINA CASINO AQUÍ con el saldo — #201 —, sin tarjeta de usuario ni banners);
   **#203:** el modo que elige el cliente se guarda en `localStorage.homePanelMode` y es el que se
-  aplica en los próximos ingresos (por dispositivo, no en el server). `closed`
+  aplica en los próximos ingresos (por dispositivo, no en el server). `closed` (desde #205) deja
+  visible SOLO PÁGINA CASINO AQUÍ + saldo arriba de la barra de modos. `closed`
   esconde todo el panel (quedan RETIRAR + chat). `VIP.ui.setHomePanelMode(mode)` por si otra parte
   necesita abrirlo. El cartel "¡Atención! Verificá tu teléfono" (`#verifyPhoneBanner`) está
   **APAGADO** desde #200 (`refreshVerifyPhoneBanner` lo fuerza oculto; el SMS se exige al retirar).

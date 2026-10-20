@@ -10,6 +10,23 @@
 
 ## Sesión 2026-10-20
 
+### 205. PÁGINA CASINO AQUÍ siempre visible + elegir "solo casino" o "casino + chat" + ✕ para volver
+- **Owner:** "en Menú cerrado que aparezca PÁGINA CASINO AQUÍ arriba de la barra, siempre disponible.
+  Al tocarlo, dos opciones: abrir logueado el casino aparte (sin el chat a la derecha) o como ahora
+  (casino + pop-up del chat para cargar). Las dos en la misma página, tipo pestaña dentro de la
+  pestaña, y con una ✕ arriba a la izquierda que vuelva al chat normal".
+- **Menú cerrado** ya no esconde todo el panel: deja `.dash-play` (PÁGINA CASINO AQUÍ + saldo) y
+  después la barra de modos, RETIRAR y el chat.
+- **Selector** `VIP.ui.openCasinoChooser()` (modal `#casinoModeModal`, usa el cierre genérico del
+  #204): "🎰 Solo el casino" → `enterCasino({noChat:true})` (burbuja ⚡ oculta, widget desmontado) /
+  "🎰 + 💬 Casino con chat para cargar" → `enterCasino({noChat:false})`. Lo llaman el botón del inicio
+  y la entrada del menú ☰. Los demás callers (`ir=casino` de la landing, invitación tras una carga,
+  reintentar) siguen con `enterCasino()` = con chat.
+- **✕ arriba a la izquierda** (`#casinoCloseX`, 34px, semitransparente, respeta safe-area) en el
+  overlay del casino: `closeCasinoFrame()` → vuelve al chat y resetea el modo. "Casino aparte" en
+  pestaña nueva (`openCasinoInTab`) sigue existiendo como escape si el iframe no carga. SW `v121`.
+- Nota: el commit `86cadd6` llevó el código; los docs entraron en el commit siguiente (falló un ancla).
+
 ### 204. Todos los pop-ups cerrables en Android/iPhone (con o sin app) + cartel del bono por instalar prolijo
 - **Owner:** (1) "el cartel del bono por instalar tapa toda la pantalla en el celular, que se vea
   prolijo en todos los dispositivos"; (2) "Información del Servicio queda enorme: achicarlo para que se
