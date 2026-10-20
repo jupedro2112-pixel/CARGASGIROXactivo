@@ -10,6 +10,12 @@
 
 ## Sesión 2026-10-20
 
+### 203. Menú del inicio: se recuerda el último modo elegido por el cliente
+- **Owner:** "la persona arranca con el menú cerrado, pero si lo cambia a otro que quede guardado el
+  que eligió último". Antes (#199) se forzaba "Reembolsos" en cada ingreso.
+- Ahora: primera vez → "Reembolsos"; al tocar otro modo se guarda `localStorage.homePanelMode` y en
+  los próximos ingresos arranca en ese (por dispositivo/navegador, no viaja al server). SW `v119`.
+
 ### 202. Widget del casino: agrandar/achicar, globos a todo el ancho, "Volver al MENÚ PRINCIPAL"; "Menú cerrado"
 - **Owner:** (1) "que el chat [del casino] pueda agrandarse para arriba o para abajo según decida el
   cliente"; (2) "el chat se ve medio raro, ¿cómo se soluciona sin agrandarlo?"; (3) "que el botón de

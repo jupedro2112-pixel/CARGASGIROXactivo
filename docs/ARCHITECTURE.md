@@ -1090,9 +1090,10 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   Poll de saldo: 90s (era 30s; parte del fix del lag, §4.3).
 - **Panel del home con 3 modos** (#199, owner 2026-10-19): `#homePanel.mode-full|mode-refunds|
   mode-closed` (CSS en index.html) elegidos desde la barra `#homePanelToggle` (3 botones
-  `.hpt-seg[data-mode]`, app.js `applyHomePanel`). **Siempre arranca en `refunds`** (la fila
+  `.hpt-seg[data-mode]`, app.js `applyHomePanel`). La primera vez arranca en `refunds` (la fila
   de reembolsos + PÁGINA CASINO AQUÍ con el saldo — #201 —, sin tarjeta de usuario ni banners);
-  NO se persiste. `closed`
+  **#203:** el modo que elige el cliente se guarda en `localStorage.homePanelMode` y es el que se
+  aplica en los próximos ingresos (por dispositivo, no en el server). `closed`
   esconde todo el panel (quedan RETIRAR + chat). `VIP.ui.setHomePanelMode(mode)` por si otra parte
   necesita abrirlo. El cartel "¡Atención! Verificá tu teléfono" (`#verifyPhoneBanner`) está
   **APAGADO** desde #200 (`refreshVerifyPhoneBanner` lo fuerza oculto; el SMS se exige al retirar).

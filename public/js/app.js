@@ -251,7 +251,9 @@ function setupEventListeners() {
         //   closed  → nada del panel: queda RETIRAR MI PREMIO + el chat.
         // El recorte lo hace el CSS (`#homePanel.mode-*`); acá se elige el modo
         // desde la barra de 3 botones y se anima la altura para que no salte.
-        // NO se recuerda el modo entre sesiones: siempre arranca en "refunds".
+        // #203 (owner 2026-10-20): la PRIMERA vez arranca en "refunds"; si el
+        // cliente elige otro modo, queda guardado en el dispositivo
+        // (localStorage homePanelMode) y se respeta en los próximos ingresos.
         // El cartel de verificar teléfono (vive FUERA del panel, ocupa media
         // pantalla) solo se ve en modo completo; se recuerda si estaba visible
         // para restaurarlo tal cual (si no, reaparecería en alguien que ya
@@ -291,18 +293,24 @@ function setupEventListeners() {
                 });
                 homePanel.dataset.mode = mode;
             };
+            const HOME_PANEL_MODE_KEY = 'homePanelMode';
             homePanelToggle.addEventListener('click', (ev) => {
                 const seg = ev.target && ev.target.closest ? ev.target.closest('.hpt-seg') : null;
                 if (!seg || !seg.dataset.mode || seg.dataset.mode === homePanel.dataset.mode) return;
                 applyHomePanel(seg.dataset.mode, true);
+                // Lo que eligió el cliente queda guardado para la próxima vez (#203).
+                try { localStorage.setItem(HOME_PANEL_MODE_KEY, seg.dataset.mode); } catch (e) { /* sin storage: no se recuerda */ }
                 setTimeout(() => {
                     if (VIP.chat && VIP.chat.scrollToBottom) VIP.chat.scrollToBottom();
                 }, 340);
             });
             // Exponer por si otra parte de la app necesita abrir el menú completo.
             VIP.ui.setHomePanelMode = (mode) => applyHomePanel(mode, true);
-            // SIEMPRE arranca en "solo reembolsos" en cada ingreso (owner 2026-10-19).
-            applyHomePanel('refunds', false);
+            // Arranque: el último modo elegido en este dispositivo; si nunca eligió,
+            // "reembolsos" (owner 2026-10-19/20).
+            let savedMode = null;
+            try { savedMode = localStorage.getItem(HOME_PANEL_MODE_KEY); } catch (e) { /* ignore */ }
+            applyHomePanel(HOME_PANEL_MODES.indexOf(savedMode) !== -1 ? savedMode : 'refunds', false);
         }
 
         const headerInstallBtn = document.getElementById('headerInstallBtn');

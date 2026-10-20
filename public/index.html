@@ -877,8 +877,9 @@
                    se van los reembolsos con ella. */
                 /* (owner 2026-08-05: el colapsado dejaba SOLO .dash-play.)
                    #199 (owner 2026-10-19): TRES modos, elegidos desde la barra de
-                   abajo (#homePanelToggle), y SIEMPRE se entra en "reembolsos"
-                   (no se recuerda nada): la primera vez son demasiadas cosas.
+                   abajo (#homePanelToggle). La primera vez se entra en "reembolsos"
+                   (demasiadas cosas para un cliente nuevo); #203: lo que el cliente
+                   elija queda guardado en el dispositivo (localStorage homePanelMode).
                      - mode-full     → todo el panel.
                      - mode-refunds  → la fila de reembolsos + el botón PÁGINA CASINO
                                        AQUÍ con el saldo (#201: el casino se abre SOLO
@@ -1003,8 +1004,8 @@
                  de ganadores DENTRO del modal de la ruleta sigue existiendo. -->
             </div><!-- /#homePanel -->
 
-            <!-- Barra de MODOS del panel del home (#199): completo / solo
-                 reembolsos / cerrado. Siempre arranca en "solo reembolsos". -->
+            <!-- Barra de MODOS del panel del home (#199): completo / reembolsos /
+                 cerrado. Primera vez "reembolsos"; después, el último elegido (#203). -->
             <div id="homePanelToggle" role="group" aria-label="Menú del inicio" title="Elegí cuánto menú ver">
                 <button type="button" class="hpt-seg" data-mode="full">▼ Menú completo</button>
                 <button type="button" class="hpt-seg active" data-mode="refunds">🎁 Reembolsos</button>
