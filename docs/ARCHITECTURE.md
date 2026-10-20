@@ -642,10 +642,13 @@ falla, no queda cuenta local huérfana) → `User` con
 password, metaEventId }`. El `accessUrl` es el access-link de un solo uso + `&ir=creds`
 (#198): la PWA muestra el **recuadro de usuario+clave** apenas carga (las credenciales
 viajan en el fragmento `#lc=`, nunca al server; `ui.js _showLandingCredsScreen` →
-`_landingCredsReady` al canjear → botón "ENTRAR AL CASINO" habilitado a los 2 s, auto-entra a
+`_landingCredsReady` al canjear → botón "ENTRAR A MI CUENTA" habilitado a los 2 s, auto-entra a
 los 10 s; `VIP.state._landingCredsActive` mientras está a la vista) y además deja las
-credenciales en un `Message` de sistema en el chat del cliente. `ir=casino` (landing vieja)
-sigue soportado: abre el casino directo. El canje **NO fuerza `mustChangePassword`** para
+credenciales en un `Message` de sistema en el chat del cliente. **#201:** el botón
+(`VIP.ui.landingEnterApp`) lleva al INICIO de la app (chat + menú), NO al casino, y espera a
+que `verifyToken` haya mostrado `#chatScreen` (`_landingSessionReady`, hasta 12 s) antes de
+destapar, así nunca se ve el login violeta; el casino embebido se abre solo desde "PÁGINA
+CASINO AQUÍ". `ir=casino` (landing vieja) sigue soportado: abre el casino directo. El canje **NO fuerza `mustChangePassword`** para
 cuentas de landing. Anti-abuso: `landingIpLimiter` por IP/hora + kill-switch
 `LANDING_SIGNUP_DISABLED`. CORS: `/api/landing/signup`, `/api/meta-pixel-id` y
 `/api/landing/touch` (`LANDING_OPEN_CORS_PATHS`) tienen CORS REFLEJADO (los dominios
@@ -1076,12 +1079,14 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   `closeCasinoFrame` SIEMPRE desmonta primero o la pantalla principal queda sin
   chat. El watchdog del iframe se cancela en su `load`. El access-link con
   `ir=casino` (landing vieja, §4.10) abre el casino directo tras loguear; con
-  `ir=creds` (#198) lo abre `VIP.ui.landingEnterCasino()` desde el recuadro de credenciales.
+  `ir=creds` (#198/#201) el recuadro de credenciales entra al INICIO de la app
+  (`VIP.ui.landingEnterApp()`), no al casino.
   Poll de saldo: 90s (era 30s; parte del fix del lag, §4.3).
 - **Panel del home con 3 modos** (#199, owner 2026-10-19): `#homePanel.mode-full|mode-refunds|
   mode-closed` (CSS en index.html) elegidos desde la barra `#homePanelToggle` (3 botones
-  `.hpt-seg[data-mode]`, app.js `applyHomePanel`). **Siempre arranca en `refunds`** (solo la fila
-  de reembolsos, sin tarjeta de usuario ni casino/saldo ni banners); NO se persiste. `closed`
+  `.hpt-seg[data-mode]`, app.js `applyHomePanel`). **Siempre arranca en `refunds`** (la fila
+  de reembolsos + PÁGINA CASINO AQUÍ con el saldo — #201 —, sin tarjeta de usuario ni banners);
+  NO se persiste. `closed`
   esconde todo el panel (quedan RETIRAR + chat). `VIP.ui.setHomePanelMode(mode)` por si otra parte
   necesita abrirlo. El cartel "¡Atención! Verificá tu teléfono" (`#verifyPhoneBanner`) está
   **APAGADO** desde #200 (`refreshVerifyPhoneBanner` lo fuerza oculto; el SMS se exige al retirar).

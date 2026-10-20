@@ -245,8 +245,9 @@ function setupEventListeners() {
 
         // Panel del home con TRES modos (#199, owner 2026-10-19):
         //   full    → todo el panel (casino/saldo, banners, reembolsos, usuario).
-        //   refunds → SOLO la fila de reembolsos (default en CADA ingreso: la
-        //             primera vez son demasiadas cosas para el cliente).
+        //   refunds → la fila de reembolsos + PÁGINA CASINO AQUÍ/saldo (#201)
+        //             (default en CADA ingreso: la primera vez son demasiadas
+        //             cosas para el cliente).
         //   closed  → nada del panel: queda RETIRAR MI PREMIO + el chat.
         // El recorte lo hace el CSS (`#homePanel.mode-*`); acá se elige el modo
         // desde la barra de 3 botones y se anima la altura para que no salte.

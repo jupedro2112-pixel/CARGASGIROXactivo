@@ -8,6 +8,26 @@
 
 ## Sesión 2026-10-19
 
+## Sesión 2026-10-20
+
+### 201. Desde la landing se entra al INICIO de la app (no al casino) y sin ver el login
+- **Owner:** "apenas se crea el usuario en la landing, al tocar entrar tarda mucho y en el medio
+  aparece el login con fondo violeta; que entre directo. Y que entre a la app (chat + menú), no al
+  casino: el casino es cuando toca PÁGINA CASINO AQUÍ".
+- **Antes (#198):** el botón del recuadro de credenciales era "ENTRAR AL CASINO" → `enterCasino()`
+  (SSO + iframe, lento) y, si verifyToken no había terminado, se veía el login violeta detrás.
+- **Ahora:** botón "✅ ENTRAR A MI CUENTA" → `VIP.ui.landingEnterApp()`: saca el recuadro y deja al
+  cliente en el inicio (chat + menú). Si la sesión no está lista todavía, el botón pasa a
+  "⏳ Entrando…" y el recuadro sigue tapando hasta que `verifyToken` muestra `#chatScreen`
+  (`_landingSessionReady`, tope 12 s) → nunca se ve el login. El auto-inicio a los 10 s hace lo
+  mismo. `landingEnterCasino` queda como alias. El casino embebido se abre SOLO desde "PÁGINA
+  CASINO AQUÍ".
+- **Menú modo "Reembolsos" (#199) ajustado:** como el casino ahora se abre desde el botón del inicio,
+  el modo por default muestra la fila de reembolsos **más** "PÁGINA CASINO AQUÍ" + saldo (`.dash-play`).
+  Sigue sin la tarjeta USUARIO ni los banners. Etiqueta del botón: "🎁 Reembolsos". SW `v117`.
+
+## Sesión 2026-10-19 (continuación)
+
 ### 200. Cartel "¡Atención! Verificá tu teléfono" del inicio: APAGADO
 - **Owner:** "chequeá si este cartel aparece; si aparece sacalo, es muy molesto para el usuario".
   Aparecía: `refreshVerifyPhoneBanner` lo mostraba a todo usuario con `phoneVerified !== true`, o sea

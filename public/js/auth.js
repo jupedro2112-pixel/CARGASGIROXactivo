@@ -565,7 +565,8 @@ VIP.auth = (function () {
                 goCreds = true;
                 // Mientras el recuadro esté a la vista, nada abre el casino
                 // solo: los datos quedan FIJOS hasta que el cliente toque
-                // ENTRAR. landingEnterCasino() limpia el flag.
+                // ENTRAR. landingEnterApp() limpia el flag (#201: entra al
+                // INICIO de la app, no al casino).
                 VIP.state._landingCredsActive = true;
                 const m = (window.location.hash || '').match(/lc=([^&]+)/);
                 if (m) {
@@ -597,7 +598,7 @@ VIP.auth = (function () {
             if (response.ok && data.token) {
                 VIP.state.currentToken = data.token;
                 localStorage.setItem('userToken', data.token);
-                // Canje OK → habilitar "ENTRAR AL CASINO" (completa el usuario
+                // Canje OK → habilitar "ENTRAR A MI CUENTA" (completa el usuario
                 // si el fragmento no vino; la clave en ese caso está en el chat).
                 if (goCreds) { try { VIP.ui._landingCredsReady(data.user && data.user.username); } catch (e) {} }
                 return true; // el caller sigue con verifyToken() → sesión completa

@@ -880,13 +880,15 @@
                    abajo (#homePanelToggle), y SIEMPRE se entra en "reembolsos"
                    (no se recuerda nada): la primera vez son demasiadas cosas.
                      - mode-full     → todo el panel.
-                     - mode-refunds  → SOLO la fila de reembolsos (sin la tarjeta
-                                       de usuario, sin casino/saldo, sin banners).
+                     - mode-refunds  → la fila de reembolsos + el botón PÁGINA CASINO
+                                       AQUÍ con el saldo (#201: el casino se abre SOLO
+                                       desde ese botón, así que tiene que estar a mano).
+                                       Sin la tarjeta de usuario ni banners.
                      - mode-closed   → nada del panel (queda RETIRAR + el chat). */
                 #homePanel.mode-refunds > *:not(.home-dash) { display:none !important; }
-                #homePanel.mode-refunds .home-dash > *:not(.dash-top) { display:none !important; }
+                #homePanel.mode-refunds .home-dash > *:not(.dash-top):not(.dash-play) { display:none !important; }
                 #homePanel.mode-refunds .dash-top .dash-user { display:none !important; }
-                #homePanel.mode-refunds .dash-top { margin-bottom:0; }
+                #homePanel.mode-refunds .dash-play { margin-bottom:0; }
                 #homePanel.mode-closed { display:none !important; }
                 #homePanelToggle {
                     flex:0 0 auto; display:flex; align-items:stretch; gap:4px;
@@ -1005,7 +1007,7 @@
                  reembolsos / cerrado. Siempre arranca en "solo reembolsos". -->
             <div id="homePanelToggle" role="group" aria-label="Menú del inicio" title="Elegí cuánto menú ver">
                 <button type="button" class="hpt-seg" data-mode="full">▼ Menú completo</button>
-                <button type="button" class="hpt-seg active" data-mode="refunds">🎁 Solo reembolsos</button>
+                <button type="button" class="hpt-seg active" data-mode="refunds">🎁 Reembolsos</button>
                 <button type="button" class="hpt-seg" data-mode="closed">▲ Cerrado</button>
             </div>
 

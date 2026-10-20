@@ -1103,8 +1103,11 @@ VIP.ui.enterCasino = async function() {
 // ============================================================
 // ENTRADA POR LANDING (`ir=creds`, #198 — réplica del flujo v4 del gemelo):
 // recuadro de usuario+clave APENAS carga la PWA. Mientras el cliente lee sus
-// datos, por atrás ya se canjeó el link y se conectó el chat → "ENTRAR AL
-// CASINO" abre 1girox con el SSO de siempre (enterCasino).
+// datos, por atrás se canjea el link y verifyToken arma la sesión + el chat.
+// #201 (owner 2026-10-20): el botón entra al INICIO de la app (chat + menú),
+// NO al casino: el casino embebido se abre solo desde "PÁGINA CASINO AQUÍ".
+// El recuadro tapa la pantalla hasta que la sesión está lista, así el cliente
+// nunca ve el login violeta en el medio.
 // ============================================================
 
 /** Muestra el recuadro de credenciales (lo llama tryAccessLink ANTES del canje;
@@ -1133,7 +1136,7 @@ VIP.ui._showLandingCredsScreen = function(creds) {
             '<b id="landingCredsPass" style="color:#e3bd48;font-size:15px;">…</b></div>' +
         '</div>' +
         '<div style="color:#8a8fa3;font-size:12px;margin-bottom:14px;">También te los dejamos en el chat de soporte 💬</div>' +
-        '<button type="button" id="landingCredsEnter" onclick="VIP.ui.landingEnterCasino()" ' +
+        '<button type="button" id="landingCredsEnter" onclick="VIP.ui.landingEnterApp()" ' +
           'style="width:100%;background:linear-gradient(135deg,#128c4a,#25d366);color:#fff;border:none;' +
           'border-radius:14px;padding:15px;font-size:16px;font-weight:900;cursor:pointer;">⏳ Preparando tu cuenta…</button>' +
       '</div>';
@@ -1144,14 +1147,20 @@ VIP.ui._showLandingCredsScreen = function(creds) {
   VIP.ui._landingCredsShownAt = Date.now();
   VIP.ui._landingCredsReadyFlag = false;
   ov.style.display = 'flex';
-  // AUTO-INICIO a los 10s: si el cliente se queda mirando, entra solo al casino
+  // AUTO-INICIO a los 10s: si el cliente se queda mirando, entra solo a la app
   // pasado ese máximo. Solo si el canje ya terminó.
   clearTimeout(VIP.ui._landingAutoEnterTimer);
   VIP.ui._landingAutoEnterTimer = setTimeout(function() {
     if (VIP.state._landingCredsActive && VIP.ui._landingCredsReadyFlag) {
-      VIP.ui.landingEnterCasino();
+      VIP.ui.landingEnterApp();
     }
   }, 10000);
+};
+
+/** ¿La sesión ya está armada (verifyToken mostró la pantalla del chat)? */
+VIP.ui._landingSessionReady = function() {
+  const cs = document.getElementById('chatScreen');
+  return !!(VIP.state.currentUser && cs && !cs.classList.contains('hidden'));
 };
 
 /** El canje terminó OK: habilita el botón (y completa el usuario si el
@@ -1164,7 +1173,7 @@ VIP.ui._landingCredsReady = function(username) {
   const wait = Math.max(0, 2000 - (Date.now() - (VIP.ui._landingCredsShownAt || 0)));
   setTimeout(function() {
     const btn = document.getElementById('landingCredsEnter');
-    if (btn) btn.textContent = '🎰 ENTRAR AL CASINO';
+    if (btn) btn.textContent = '✅ ENTRAR A MI CUENTA';
   }, wait);
 };
 
@@ -1173,10 +1182,14 @@ VIP.ui._hideLandingCreds = function() {
   if (ov) ov.style.display = 'none';
 };
 
-/** ENTRAR AL CASINO desde el recuadro de credenciales. */
-VIP.ui.landingEnterCasino = function() {
+/** ENTRAR A MI CUENTA desde el recuadro de credenciales (#201): saca el
+ *  recuadro y deja al cliente en el INICIO de la app (chat + menú). Si la
+ *  sesión todavía se está armando, espera a que verifyToken muestre el chat
+ *  (hasta 12 s) antes de destapar: así nunca se ve el login violeta. */
+VIP.ui.landingEnterApp = function() {
   const btn = document.getElementById('landingCredsEnter');
   if (btn && btn.textContent.indexOf('Preparando') !== -1) return; // canje en curso
+  if (btn && btn.textContent.indexOf('Entrando') !== -1) return;   // ya está esperando la sesión
   // ESPERA OBLIGATORIA de 2s: si toca antes, avisar y no dejar entrar todavía.
   const shown = Date.now() - (VIP.ui._landingCredsShownAt || 0);
   if (shown < 2000) {
@@ -1188,10 +1201,22 @@ VIP.ui.landingEnterCasino = function() {
     return;
   }
   clearTimeout(VIP.ui._landingAutoEnterTimer);
-  VIP.state._landingCredsActive = false; // el cliente YA tocó ENTRAR
-  VIP.ui._hideLandingCreds();
-  try { VIP.ui.enterCasino(); } catch (e) {}
+  const finish = function() {
+    VIP.state._landingCredsActive = false; // el cliente YA entró
+    VIP.ui._hideLandingCreds();
+    try { if (VIP.chat && VIP.chat.scrollToBottom) VIP.chat.scrollToBottom(); } catch (e) {}
+  };
+  if (VIP.ui._landingSessionReady()) return finish();
+  if (btn) btn.textContent = '⏳ Entrando…';
+  const t0 = Date.now();
+  const tick = function() {
+    if (VIP.ui._landingSessionReady() || Date.now() - t0 > 12000) return finish();
+    setTimeout(tick, 200);
+  };
+  tick();
 };
+// Alias por compatibilidad (nombre anterior, #198).
+VIP.ui.landingEnterCasino = VIP.ui.landingEnterApp;
 
 /**
  * Abre el casino en una PESTAÑA APARTE (no embebido).
