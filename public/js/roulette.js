@@ -25,6 +25,42 @@
         return d.innerHTML;
     }
     function _fmt(n) { return Number(n || 0).toLocaleString('es-AR'); }
+    // #206e Ícono de la celda del inicio: una rueda real (SVG) en vez del emoji 🎰.
+    // Gajos de colores, aro dorado con luces, cubo central y puntero; gira despacio.
+    function _wheelIconSvg(size) {
+        const S = size || 40;
+        const cols = ['#ffd700', '#7c3aed', '#26e07f', '#ff5a5f', '#ffd700', '#2f80ed', '#ff8c00', '#26e07f'];
+        let segs = '';
+        for (let i = 0; i < 8; i++) {
+            const a0 = (Math.PI * 2 / 8) * i - Math.PI / 2, a1 = a0 + Math.PI * 2 / 8;
+            const x0 = 50 + 38 * Math.cos(a0), y0 = 50 + 38 * Math.sin(a0);
+            const x1 = 50 + 38 * Math.cos(a1), y1 = 50 + 38 * Math.sin(a1);
+            segs += '<path d="M50 50 L' + x0.toFixed(2) + ' ' + y0.toFixed(2) + ' A38 38 0 0 1 ' + x1.toFixed(2) + ' ' + y1.toFixed(2) + ' Z" fill="' + cols[i] + '" stroke="rgba(0,0,0,.55)" stroke-width="1.2"/>';
+        }
+        let lights = '';
+        for (let i = 0; i < 12; i++) {
+            const a = (Math.PI * 2 / 12) * i;
+            lights += '<circle cx="' + (50 + 44.5 * Math.cos(a)).toFixed(2) + '" cy="' + (50 + 44.5 * Math.sin(a)).toFixed(2) + '" r="2.1" fill="' + (i % 2 ? '#fff7cc' : '#ffe066') + '"/>';
+        }
+        if (!document.getElementById('rouletteIconCss')) {
+            const st = document.createElement('style'); st.id = 'rouletteIconCss';
+            st.textContent = '@keyframes rouletteIconSpin{to{transform:rotate(360deg)}}' +
+                '.dash-roulette-wheel{display:block;filter:drop-shadow(0 0 6px rgba(255,215,0,.65));}' +
+                '.dash-roulette-wheel .rw-spin{transform-origin:50px 50px;animation:rouletteIconSpin 9s linear infinite;}';
+            document.head.appendChild(st);
+        }
+        return '<svg class="dash-roulette-wheel" width="' + S + '" height="' + S + '" viewBox="0 0 100 100" aria-hidden="true">' +
+            '<defs><radialGradient id="rwHub" cx="35%" cy="30%" r="75%"><stop offset="0" stop-color="#fff8d6"/><stop offset=".55" stop-color="#ffd700"/><stop offset="1" stop-color="#8a6508"/></radialGradient>' +
+            '<radialGradient id="rwGloss" cx="50%" cy="20%" r="70%"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset=".6" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>' +
+            '<circle cx="50" cy="50" r="48" fill="#3a2c00" stroke="#b8860b" stroke-width="2"/>' +
+            lights +
+            '<g class="rw-spin">' + segs + '<circle cx="50" cy="50" r="38" fill="url(#rwGloss)"/></g>' +
+            '<circle cx="50" cy="50" r="11" fill="url(#rwHub)" stroke="#2a1f00" stroke-width="2"/>' +
+            '<circle cx="50" cy="50" r="4" fill="#2d0052"/>' +
+            '<path d="M50 24 L43 8 L57 8 Z" fill="#ffd700" stroke="#2a1f00" stroke-width="1.5"/>' +
+            '<circle cx="50" cy="8" r="3.2" fill="#fff" stroke="#b8860b" stroke-width="1.2"/>' +
+            '</svg>';
+    }
     // #206 "Xh Ym" hasta una fecha ISO ('' si ya pasó / no hay).
     function _countdown(iso) {
         if (!iso) return '';
@@ -100,7 +136,7 @@
         }
 
         c.innerHTML = '<div class="dash-roulette" onclick="VIP.roulette && VIP.roulette.open()">'
-            + '<span class="dash-roulette-avatar">🎰</span>'
+            + '<span class="dash-roulette-avatar dash-roulette-avatar--wheel">' + _wheelIconSvg(40) + '</span>'
             + '<span class="dash-roulette-label">RULETA</span>'
             + '<span class="dash-roulette-sub">' + _esc(subText) + '</span>'
             + '</div>';

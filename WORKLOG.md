@@ -80,6 +80,10 @@
   `io.emit('roulette_winner')` a todos los conectados (cruza instancias por el adapter Redis) y la
   PWA (`socket.js`) recarga la lista al instante; sigue el refresco cada 30 s como respaldo. Los %
   ya entraban en la lista (`prizeType:'percent'`) y ahora se muestran como "+10% EXTRA".
+- **#206e — ícono de la celda RULETA (SW v126).** Owner: "un logo más estético, que no sea un emoji,
+  una ruleta llamativa". `_wheelIconSvg()` en roulette.js: rueda SVG inline de 40px con 8 gajos de
+  colores que giran despacio, aro dorado con 12 luces, cubo dorado y puntero blanco arriba, con
+  brillo (`drop-shadow`). La celda bloqueada sigue con 🔒.
 - **Modelo `DailyRouletteSpin`:** estado `percent_expired` + `usedAt/usedBy/usedOnAmount/usedBonusARS`.
 - **Validado:** `node --check` (server.js, modelos, servicios, admin.js, roulette.js, socket.js, SWs) y
   `check-tdz` ✅; HTML del panel 781/781 divs, ids únicos. **Back necesita redeploy.** PROBAR: panel →
