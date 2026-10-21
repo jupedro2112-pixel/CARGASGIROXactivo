@@ -300,6 +300,7 @@ function setupEventListeners() {
                 applyHomePanel(seg.dataset.mode, true);
                 // Lo que eligió el cliente queda guardado para la próxima vez (#203).
                 try { localStorage.setItem(HOME_PANEL_MODE_KEY, seg.dataset.mode); } catch (e) { /* sin storage: no se recuerda */ }
+                try { if (VIP.auth && VIP.auth.installManifestSync) VIP.auth.installManifestSync(); } catch (e) {} // #207 el menú viaja en el start_url
                 setTimeout(() => {
                     if (VIP.chat && VIP.chat.scrollToBottom) VIP.chat.scrollToBottom();
                 }, 340);

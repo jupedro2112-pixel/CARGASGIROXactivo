@@ -543,10 +543,109 @@ VIP.auth = (function () {
     // automáticamente. El link muere al canjearse (single use, lo garantiza el
     // backend) y el usuario queda con mustChangePassword → verifyToken() le abre
     // el recuadro de crear su contraseña nueva (flujo existente).
+    // #207 Diagnóstico del arranque en la app instalada (iPhone): qué URL trajo, si
+    // venía el token de instalación, qué respondió el canje y si ya había sesión.
+    // Sin tokens (el server además los tacha). Se mira en /api/admin/install-diag.
+    function _isStandaloneNow() {
+        try { return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true; } catch (e) { return false; }
+    }
+    function _installDiag(extra) {
+        try {
+            const body = Object.assign({
+                href: String(window.location.href || '').replace(/(instal|acceso)=[^&#]+/g, '$1=***'),
+                standalone: _isStandaloneNow(),
+                hadUserToken: !!localStorage.getItem('userToken'),
+                username: (VIP.state.currentUser && VIP.state.currentUser.username) || ''
+            }, extra || {});
+            fetch(VIP.config.API_URL + '/api/auth/install-diag', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true
+            }).catch(function () {});
+        } catch (e) { /* opcional */ }
+    }
+
+    // #207 Canje del TOKEN DE INSTALACIÓN (?instal=<token>&menu=<modo>): la app
+    // instalada en iPhone arranca con esta URL (start_url del manifest dinámico).
+    // Reutilizable hasta vencer: si ya hay sesión guardada se ignora en silencio.
+    async function _tryInstallToken() {
+        let token = null, menu = null;
+        try {
+            const q = new URLSearchParams(window.location.search);
+            token = q.get('instal'); menu = q.get('menu');
+        } catch (e) {}
+        const standalone = _isStandaloneNow();
+        if (!token) {
+            if (standalone) _installDiag({ hadInstalToken: false });
+            return false;
+        }
+        try { history.replaceState(null, '', window.location.pathname); } catch (e) {}
+        if (menu && ['full', 'refunds', 'closed'].indexOf(menu) !== -1) {
+            try { localStorage.setItem('homePanelMode', menu); } catch (e) {}
+        }
+        const hadUserToken = !!localStorage.getItem('userToken');
+        if (hadUserToken) {
+            _installDiag({ hadInstalToken: true, hadUserToken: true, redeemStatus: null, redeemError: 'ya había sesión (no se canjea)' });
+            return false; // verifyToken() sigue con la sesión guardada
+        }
+        try {
+            const response = await fetch(`${VIP.config.API_URL}/api/auth/install-token/redeem`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token })
+            });
+            const data = await response.json().catch(function () { return {}; });
+            _installDiag({ hadInstalToken: true, hadUserToken: false, redeemStatus: response.status, redeemError: (!response.ok && data && data.error) || '', username: (data.user && data.user.username) || '' });
+            if (response.ok && data.token) {
+                VIP.state.currentToken = data.token;
+                localStorage.setItem('userToken', data.token);
+                return true; // el caller sigue con verifyToken()
+            }
+            if (data && data.error) VIP.ui.showToast(data.error, 'info');
+        } catch (e) {
+            _installDiag({ hadInstalToken: true, hadUserToken: false, redeemStatus: 0, redeemError: 'sin conexión' });
+        }
+        return false;
+    }
+
+    // #207 En Safari de iPhone (fuera de la app) el manifest apunta a
+    // /manifest.json?a=<token>&menu=<modo>: así "Agregar a pantalla de inicio" crea
+    // la app con un start_url que la arranca logueada. El token (7 días) se cachea
+    // por usuario en localStorage y se renueva solo cuando está por vencer.
+    const INSTALL_TOK_KEY = 'vip_install_tok';
+    let _installSyncBusy = false;
+    async function installManifestSync() {
+        try {
+            const ua = navigator.userAgent;
+            const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+            const link = document.querySelector('link[rel="manifest"]');
+            if (!link || !isIOS || _isStandaloneNow()) return;
+            const uname = VIP.state.currentUser && VIP.state.currentUser.username;
+            if (!VIP.state.currentToken || !uname || _installSyncBusy) return;
+            _installSyncBusy = true;
+            let cached = null;
+            try { cached = JSON.parse(localStorage.getItem(INSTALL_TOK_KEY) || 'null'); } catch (e) {}
+            if (!cached || cached.u !== uname || !cached.t || Date.now() > (Number(cached.exp) || 0) - 12 * 3600 * 1000) {
+                const r = await fetch(`${VIP.config.API_URL}/api/auth/install-token`, {
+                    method: 'POST', headers: { 'Authorization': `Bearer ${VIP.state.currentToken}`, 'Content-Type': 'application/json' }, body: '{}'
+                });
+                const d = await r.json().catch(function () { return {}; });
+                if (!r.ok || !d.token) { _installSyncBusy = false; return; }
+                cached = { u: uname, t: d.token, exp: new Date(d.expiresAt).getTime() };
+                try { localStorage.setItem(INSTALL_TOK_KEY, JSON.stringify(cached)); } catch (e) {}
+            }
+            let menu = '';
+            try { menu = localStorage.getItem('homePanelMode') || ''; } catch (e) {}
+            const href = '/manifest.json?a=' + encodeURIComponent(cached.t) + (['full', 'refunds', 'closed'].indexOf(menu) !== -1 ? '&menu=' + menu : '');
+            if (link.getAttribute('href') !== href) link.setAttribute('href', href);
+        } catch (e) { /* best-effort */ }
+        _installSyncBusy = false;
+    }
+    function installManifestReset() {
+        try { localStorage.removeItem(INSTALL_TOK_KEY); } catch (e) {}
+        try { const link = document.querySelector('link[rel="manifest"]'); if (link) link.setAttribute('href', 'manifest.json'); } catch (e) {}
+    }
+
     async function tryAccessLink() {
         let token = null;
         try { token = new URLSearchParams(window.location.search).get('acceso'); } catch (e) {}
-        if (!token) return false;
+        if (!token) return _tryInstallToken(); // #207
 
         // Modos de la landing — se leen ANTES de limpiar la URL:
         //   `ir=casino` (legacy): abrir el casino DIRECTO al loguear.
@@ -629,7 +728,15 @@ VIP.auth = (function () {
                     keepalive: true
                 }).catch(function () { /* ignore */ });
             }
+            // #207: cerrar sesión invalida el token de instalación (la app instalada
+            // no vuelve a entrar sola con el mismo token).
+            if (authToken) {
+                fetch(VIP.config.API_URL + '/api/auth/install-token/revoke', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + authToken }, body: '{}', keepalive: true
+                }).catch(function () { /* ignore */ });
+            }
         } catch (e) { /* ignore */ }
+        installManifestReset(); // #207
 
         VIP.socket.stopMessagePolling();
         VIP.ui.stopBalancePolling();
@@ -1640,6 +1747,8 @@ VIP.auth = (function () {
         handleLogin,
         verifyToken,
         tryAccessLink,
+        installManifestSync, // #207
+        installManifestReset,
         handleLogout,
         ensureUserLoaded,
         initializeSession,

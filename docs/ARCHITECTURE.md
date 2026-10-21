@@ -7,7 +7,10 @@
 >
 > Última actualización: **2026-10-19** — LANDING EXTERNA nueva (carpeta `landing/` = la de
 > PAUTANUEVAsantino apuntando a cargas1girox.com) + flujo `ir=creds`, `/api/meta-pixel-id`,
-> **2026-10-21** — RULETA DIARIA replicada del gemelo PAUTANUEVAsantino (#206): config con
+> **2026-10-21** — iPHONE instalada CON SESIÓN (#207): token de instalación reutilizable 7 días
+> (`User.installTokenHash`), manifest dinámico `/manifest.json?a=…&menu=…` → `start_url` con
+> `?instal=`, canje en `auth.js`, diagnóstico `/api/admin/install-diag` (§2 User, §5, §6 PWA, §7).
+> Mismo día — RULETA DIARIA replicada del gemelo PAUTANUEVAsantino (#206): config con
 > `enabled/requireDeposits/depositDays`, giro cada 24 h, % EXTRA que vence a las 24 h, Bonificación
 > propia por cada bono aplicado en una carga, reinicio por usuario, candado de pushes condicional
 > (§2 DailyRouletteSpin/Transaction, §5 ruleta, §6 panel/PWA, §7). Anterior:
@@ -1058,6 +1061,18 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   auth, socket, chat, ui, refunds, fire, roulette, reviews, promobonus, notifications,
   withdraw, installbonus, notifsurvey, publisherwelcome, campaign, meta-pixel, apptest,
   app). El orden real de carga está en index.html (el comentario de app.js está viejo).
+- **iPhone instalada CON SESIÓN (#207):** iOS no comparte storage entre Safari y la PWA
+  instalada. `VIP.auth.installManifestSync()` (solo iOS, fuera de la app, con sesión) pide
+  `POST /api/auth/install-token` (hash aparte del access link, 7 días, reutilizable; cache
+  `localStorage.vip_install_tok`) y apunta `<link rel="manifest">` a
+  `/manifest.json?a=<token>&menu=<modo>`; el server (ruta antes de `express.static`) devuelve el
+  manifest con `start_url=/?source=pwa&instal=<token>&menu=…`. Se llama al mostrar el inicio, al
+  cambiar el modo de menú y antes de la guía "Instalar App". Al arrancar la app instalada,
+  `tryAccessLink()` → `_tryInstallToken()` canjea `?instal=` en `/api/auth/install-token/redeem`
+  (si no había `userToken`), guarda `homePanelMode` y sigue con `verifyToken()`. Logout →
+  `/api/auth/install-token/revoke` + manifest a `manifest.json`. Cambio de clave (usuario o panel)
+  borra el token. Diagnóstico: la PWA manda `POST /api/auth/install-diag` al arrancar en modo app;
+  se lee en `GET /api/admin/install-diag` (memoria por instancia + log). Android no cambia.
 - **Ruleta diaria (roulette.js, #206/#206b):** celda `#rouletteHomeCard` en el inicio ("¡GIRÁ
   HOY!" / "Girás en Xh Ym" / "+10% · vence …" / 🔒 "Faltan N cargas"; oculta si la ruleta está
   apagada) → `VIP.roulette.open()` pinta en `#rouletteModal` la MISMA rueda del gemelo

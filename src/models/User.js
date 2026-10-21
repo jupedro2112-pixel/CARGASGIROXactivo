@@ -272,6 +272,20 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  // #207 TOKEN DE INSTALACIÓN (iPhone): la PWA logueada en Safari lo pide y lo mete
+  // en el start_url del manifest; la app instalada arranca con ?instal=<token> y lo
+  // canjea por un JWT. Hash sha256 aparte del access link (que es de UN solo uso y
+  // lo pisa cualquier link del panel). Vence a los 7 días y es REUTILIZABLE
+  // mientras no venza; se borra al cerrar sesión o al cambiar la clave.
+  installTokenHash: {
+    type: String,
+    default: null,
+    index: true
+  },
+  installTokenExpiresAt: {
+    type: Date,
+    default: null
+  },
 
 
   // Token FCM para notificaciones push (último registrado – se mantiene para compatibilidad y vista admin)

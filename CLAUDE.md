@@ -202,6 +202,13 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   salen de `getUsernamePrefix()` (`Config['usernamePrefix']`): no hardcodear "gx"/"g1"/"girox".
   `GET /api/config/access` es público y lo piden el panel y la PWA al arrancar.
 
+- **iPhone instalada CON SESIÓN (#207):** `GET /manifest.json` es una ruta dinámica (antes de
+  `express.static`) que mete el token de instalación en `start_url` (`?instal=`); la PWA lo canjea
+  en `/api/auth/install-token/redeem`. El token (`User.installTokenHash`, 7 días, reutilizable) es
+  DISTINTO del access link de un solo uso: no reusar `accessLinkHash` para esto. Todo flujo que
+  cambie la clave tiene que borrar `installTokenHash`. El diagnóstico vive en
+  `GET /api/admin/install-diag`.
+
 - **Landing externa (#198):** `landing/` es la landing de PAUTANUEVAsantino apuntando a
   `https://cargas1girox.com` (NUNCA vipcargas.com: Cloudflare le mete challenge al preflight y la
   landing muestra "Sin conexión"). Todo endpoint que la landing llame cross-origin va en

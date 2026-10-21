@@ -1260,6 +1260,35 @@ app.get('/:code', async (req, res, next) => {
   }
 });
 
+// #207 MANIFEST DINÁMICO (iPhone instalada CON SESIÓN). iOS no comparte el
+// localStorage entre Safari y la PWA instalada, así que la única forma de que la
+// app arranque logueada es que el `start_url` del manifest lleve un token:
+//   /manifest.json?a=<installToken>&menu=<full|refunds|closed>
+//   → start_url = "/?source=pwa&instal=<token>&menu=…"
+// La PWA (auth.js installManifestSync) apunta el <link rel="manifest"> a esa URL
+// mientras el cliente está logueado en Safari; sin query devuelve el manifest tal
+// cual (Android/WebAPK no cambia). Nunca se cachea.
+const INSTALL_TOKEN_RE = /^[A-Za-z0-9_-]{20,64}$/;
+const HOME_MENU_MODES = ['full', 'refunds', 'closed'];
+app.get('/manifest.json', (req, res, next) => {
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(__dirname, 'public', 'manifest.json'), 'utf8'));
+    const a = String((req.query && req.query.a) || '');
+    const menu = String((req.query && req.query.menu) || '');
+    if (INSTALL_TOKEN_RE.test(a)) {
+      m.start_url = '/?source=pwa&instal=' + encodeURIComponent(a) + (HOME_MENU_MODES.includes(menu) ? '&menu=' + menu : '');
+    }
+    res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.send(JSON.stringify(m));
+  } catch (e) {
+    logger.warn(`[manifest] no se pudo armar el manifest dinámico: ${e.message}`);
+    next();
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public'), {
   dotfiles: 'deny',
   index: false,
@@ -5230,6 +5259,7 @@ app.post('/api/auth/change-password', authMiddleware, authLimiter, async (req, r
     if (closeAllSessions) {
       user.tokenVersion = (user.tokenVersion || 0) + 1;
     }
+    user.installTokenHash = null; user.installTokenExpiresAt = null; // #207
 
     await user.save();
 
@@ -5367,6 +5397,7 @@ app.post('/api/auth/change-password/pending', authMiddleware, authLimiter, async
     if (closeAllSessions) {
       user.tokenVersion = (user.tokenVersion || 0) + 1;
     }
+    user.installTokenHash = null; user.installTokenExpiresAt = null; // #207
 
     await user.save();
 
@@ -6757,6 +6788,7 @@ app.put('/api/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
     // clave (antes el atacante seguía operando con su JWT hasta 30-90 días).
     if (updates.role !== undefined || updates.password !== undefined) {
       updateDoc.$inc = { tokenVersion: 1 };
+      updateDoc.$set.installTokenHash = null; updateDoc.$set.installTokenExpiresAt = null; // #207
     }
     const user = await User.findOneAndUpdate(
       { id },
@@ -17053,6 +17085,91 @@ app.post('/api/auth/access-link', authLimiter, async (req, res) => {
     console.error('Error canjeando link de acceso:', error);
     res.status(500).json({ error: 'Error del servidor' });
   }
+});
+
+// ============================================================
+// #207 TOKEN DE INSTALACIÓN (iPhone: la app instalada arranca logueada)
+// ============================================================
+// Distinto del access link (un solo uso, lo pisa cualquier link del panel): hash
+// aparte en el usuario, vence a los 7 días, REUTILIZABLE mientras no venza
+// (abrir la app varias veces o reinstalar no lo quema), no toca
+// mustChangePassword, y se borra al cerrar sesión / cambiar la clave.
+const INSTALL_TOKEN_TTL_MS = 7 * 24 * 3600 * 1000;
+function _installTokenHash(token) { return crypto.createHash('sha256').update(token).digest('hex'); }
+// Emite (o renueva) el token: SOLO el propio cliente logueado.
+app.post('/api/auth/install-token', authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'user') return res.status(403).json({ error: 'Solo para clientes.' });
+    const token = crypto.randomBytes(24).toString('base64url');
+    const expiresAt = new Date(Date.now() + INSTALL_TOKEN_TTL_MS);
+    const r = await User.updateOne(
+      { id: req.user.userId, role: 'user', isActive: { $ne: false }, isBlocked: { $ne: true } },
+      { $set: { installTokenHash: _installTokenHash(token), installTokenExpiresAt: expiresAt } }
+    );
+    if (!r || !r.matchedCount) return res.status(403).json({ error: 'Cuenta no habilitada.' });
+    logger.info(`[install-token] emitido para ${req.user.username} (vence ${expiresAt.toISOString()})`);
+    res.json({ success: true, token, expiresAt });
+  } catch (e) {
+    logger.warn(`[install-token] emitir falló: ${e.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+// Canje (público, rate-limiteado): NO consume el hash (reutilizable hasta vencer).
+app.post('/api/auth/install-token/redeem', authLimiter, async (req, res) => {
+  try {
+    const token = String((req.body && req.body.token) || '').trim();
+    if (!INSTALL_TOKEN_RE.test(token)) return res.status(400).json({ error: 'Token de instalación no válido.' });
+    const user = await User.findOneAndUpdate(
+      { installTokenHash: _installTokenHash(token), installTokenExpiresAt: { $gt: new Date() }, role: 'user', isActive: { $ne: false }, isBlocked: { $ne: true } },
+      { $set: { lastLogin: new Date() } },
+      { new: true }
+    ).select('id username role tokenVersion mustChangePassword').lean();
+    if (!user) return res.status(401).json({ error: 'El acceso de la app venció o no es válido. Iniciá sesión una vez.' });
+    const jwtToken = jwt.sign(
+      { userId: user.id, username: user.username, role: user.role, tokenVersion: user.tokenVersion ?? 0 },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+    logger.info(`[install-token] canjeado por ${user.username}`);
+    res.json({ token: jwtToken, user: { id: user.id, username: user.username, role: user.role, mustChangePassword: user.mustChangePassword === true } });
+  } catch (e) {
+    logger.warn(`[install-token] canje falló: ${e.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+// Revocar (lo llama la PWA al cerrar sesión).
+app.post('/api/auth/install-token/revoke', authMiddleware, async (req, res) => {
+  try {
+    await User.updateOne({ id: req.user.userId }, { $set: { installTokenHash: null, installTokenExpiresAt: null } });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+// Diagnóstico del arranque en la app instalada (sin tokens: solo booleanos y
+// estados). Se guarda en memoria (últimos 100 por instancia) y en el log; el
+// owner lo mira en GET /api/admin/install-diag con el panel abierto.
+const _installDiag = [];
+app.post('/api/auth/install-diag', authLimiter, (req, res) => {
+  try {
+    const b = req.body || {};
+    const row = {
+      at: new Date().toISOString(),
+      href: String(b.href || '').replace(/(instal|acceso)=[^&#]+/g, '$1=***').slice(0, 300),
+      standalone: !!b.standalone,
+      hadInstalToken: !!b.hadInstalToken,
+      hadUserToken: !!b.hadUserToken,
+      redeemStatus: b.redeemStatus == null ? null : Number(b.redeemStatus),
+      redeemError: String(b.redeemError || '').slice(0, 160),
+      username: String(b.username || '').slice(0, 40),
+      ua: String(req.headers['user-agent'] || '').slice(0, 160),
+      ip: String(req.ip || '').slice(0, 60)
+    };
+    _installDiag.unshift(row); if (_installDiag.length > 100) _installDiag.length = 100;
+    logger.info(`[install-diag] standalone=${row.standalone} instal=${row.hadInstalToken} userToken=${row.hadUserToken} redeem=${row.redeemStatus}${row.redeemError ? ' (' + row.redeemError + ')' : ''} user=${row.username || '-'} href=${row.href}`);
+    res.json({ success: true });
+  } catch (e) { res.json({ success: false }); }
+});
+app.get('/api/admin/install-diag', authMiddleware, adminMiddleware, (req, res) => {
+  res.json({ success: true, instance: process.env.HOSTNAME || null, items: _installDiag });
 });
 
 // Saldo EN VIVO de la(s) cuenta(s) hgcash (GET /accounts). Para que el agente vea la

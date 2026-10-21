@@ -146,6 +146,9 @@ VIP.ui = (function () {
         if (VIP.installBonus && typeof VIP.installBonus.init === 'function') {
             VIP.installBonus.init();
         }
+        // #207 iPhone en Safari: manifest con el token de instalación para que
+        // "Agregar a pantalla de inicio" cree la app ya logueada.
+        setTimeout(function () { try { if (VIP.auth && VIP.auth.installManifestSync) VIP.auth.installManifestSync(); } catch (e) {} }, 300);
 
         // Encuesta de notificaciones: aparece una sola vez para que el
         // usuario elija su grupo (suave / normal / activo / solo reembolsos).
@@ -609,6 +612,9 @@ VIP.ui = (function () {
     async function installApp() {
         const ua        = navigator.userAgent;
         const isIOS     = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+        // #207: antes de mostrar los pasos, asegurar que el manifest ya lleve el token
+        // de instalación (Safari lo lee al tocar "Agregar a pantalla de inicio").
+        if (isIOS) { try { if (VIP.auth && VIP.auth.installManifestSync) await VIP.auth.installManifestSync(); } catch (e) {} }
         const isAndroid = /Android/.test(ua);
         const isWindows = /Windows/.test(ua);
         const isMac     = /Macintosh|MacIntel/.test(ua) && !isIOS;

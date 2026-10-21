@@ -8,6 +8,41 @@
 
 ## Sesión 2026-10-21
 
+### 207. iPHONE: la app instalada arranca LOGUEADA (token de instalación en el start_url del manifest) + diagnóstico
+- **Owner:** "los iPhone, cuando instalen la PWA, que les entre con la sesión iniciada" (referencia: la
+  misma solución probada en otra repo). Causa de fondo: iOS no comparte localStorage/cookies entre
+  Safari y la PWA instalada → el JWT no viaja. Android sí lo comparte (no cambia).
+- **Token de instalación** (`User.installTokenHash` + `installTokenExpiresAt`): lo emite SOLO el cliente
+  logueado (`POST /api/auth/install-token`, rol user; 24 bytes random, hash sha256, vence a los 7 días).
+  Es REUTILIZABLE mientras no venza (abrir la app varias veces o reinstalar no lo quema) — por eso es
+  un campo aparte del access link, que es de un solo uso y lo pisa cualquier link del panel. No toca
+  `mustChangePassword`. Se borra al cerrar sesión (`POST /api/auth/install-token/revoke`, lo llama el
+  logout de la PWA), al cambiar la clave (`/api/auth/change-password` y `/pending`) y al resetearla
+  desde el panel (`PUT /api/users/:id` con password).
+- **Manifest dinámico** `GET /manifest.json` (ruta antes de `express.static`): con `?a=<token>&menu=<modo>`
+  reescribe `start_url` a `/?source=pwa&instal=<token>&menu=…`; sin query devuelve el archivo tal cual
+  (Android/WebAPK igual que siempre). `Cache-Control: no-store`.
+- **PWA (SW v129):** `VIP.auth.installManifestSync()` — solo iPhone y fuera de la app — pide el token
+  (cache `localStorage.vip_install_tok` por usuario, se renueva 12 h antes de vencer) y apunta el
+  `<link rel="manifest">` a la URL con token + el modo de menú actual. Se llama al mostrar el inicio
+  (300 ms), al cambiar de modo de menú y ANTES de mostrar la guía "Instalar App" (Safari lee el manifest
+  cuando el cliente toca "Agregar a pantalla de inicio"). Al arrancar, `tryAccessLink()` → si no hay
+  `?acceso=` prueba `_tryInstallToken()`: lee `?instal=` y `menu`, limpia la URL, guarda `homePanelMode`,
+  y si no había `userToken` canjea en `POST /api/auth/install-token/redeem` → JWT de 30 días →
+  `verifyToken()` sigue como una sesión normal (desde ahí el casino abre con el SSO de siempre). Si ya
+  había sesión, ignora el token en silencio. El logout revoca el token, borra el cache y vuelve el
+  manifest a `manifest.json`.
+- **Diagnóstico:** `POST /api/auth/install-diag` (la PWA lo manda al arrancar en modo app o si venía
+  `?instal=`: href con el token tachado, standalone, si traía token, si había sesión, status/error del
+  canje, usuario) → memoria (últimos 100 por instancia) + log `[install-diag]`. Se mira entrando con el
+  panel abierto a `https://cargas1girox.com/api/admin/install-diag` (cookie del panel).
+- **Validado:** `node --check` (server.js, User.js, auth.js, ui.js, app.js, SW) + `check-tdz` ✅. **Back
+  necesita redeploy.** PROBAR en iPhone: Safari → loguearse → (opcional) elegir modo de menú → Compartir →
+  Agregar a pantalla de inicio → abrir el ícono: tiene que entrar al inicio sin pedir clave y con el
+  mismo modo de menú; PÁGINA CASINO AQUÍ abre logueado. Después mirar `/api/admin/install-diag`: tiene
+  que figurar `standalone=true, instal=true, userToken=false, redeem=200`. Si figura `instal=false`,
+  Safari instaló con el manifest viejo (reinstalar después de abrir una vez la app en Safari logueado).
+
 ### 206. RULETA DIARIA como la de PAUTANUEVAsantino (réplica #254/#267/#293/#303/#305/#306 del gemelo) + bonos de ruleta en Transacciones
 - **Owner:** "fijate cómo está implementada la ruleta de PAUTANUEVAsantino y replicala en CARGASGIROX;
   así debería quedar [capturas del panel: card verde de premios, budget, probar giro, reiniciar por
