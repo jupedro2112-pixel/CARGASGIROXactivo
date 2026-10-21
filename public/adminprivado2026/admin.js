@@ -4840,16 +4840,23 @@ function renderRoulettePercentBanner(user) {
     }
     if (!banner) return;
     const pct = Number(user && user.dailyRoulettePendingPct) || 0;
-    if (!(pct > 0)) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
+    // #206: el % vence a las 24 h del giro (dailyRoulettePendingAt).
+    const _wonAt = user && user.dailyRoulettePendingAt ? new Date(user.dailyRoulettePendingAt).getTime() : null;
+    const _expired = _wonAt != null && (Date.now() - _wonAt) >= 24 * 3600 * 1000;
+    if (!(pct > 0) || _expired) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
+    const _vence = _wonAt != null ? ' · vence ' + fmtFechaHoraAR(new Date(_wonAt + 24 * 3600 * 1000)) : '';
+    const _resetBtn = (currentAdmin && currentAdmin.role === 'admin')
+        ? '<button onclick="resetChatRoulette(\'' + escapeHtml(user.id) + '\')" title="Borra su giro de hoy y el % pendiente (solo para pruebas)" style="background:rgba(0,0,0,0.35);color:#fff;border:1px solid rgba(255,255,255,0.35);border-radius:8px;padding:8px 10px;font-weight:800;font-size:11.5px;cursor:pointer;">🧪 Reiniciar (prueba)</button>'
+        : '';
     banner.style.display = '';
     banner.innerHTML =
         '<div style="background:linear-gradient(135deg,#6a0dad,#9b30ff);color:#fff;border-radius:10px;padding:10px 12px;margin:6px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
-            '<span style="font-size:20px;">🎡</span>' +
+            '<span style="font-size:20px;">🎰</span>' +
             '<div style="flex:1;min-width:180px;">' +
-                '<strong style="font-size:13px;display:block;">RULETA: +' + pct + '% EXTRA en su PRÓXIMA CARGA</strong>' +
-                '<span style="font-size:11.5px;opacity:.92;">Ganó ' + escapeHtml(user.dailyRoulettePendingLabel || ('+' + pct + '%')) + ' en la ruleta diaria. Lo aplica el SISTEMA solo en su próxima carga (hgcash o manual) y queda marcado como aplicado.</span>' +
+                '<strong style="font-size:13px;display:block;">RULETA DIARIA: ' + pct + '% EXTRA en su PRÓXIMA CARGA</strong>' +
+                '<span style="font-size:11.5px;opacity:.92;">Ganó ' + escapeHtml(user.dailyRoulettePendingLabel || (pct + '% EXTRA')) + ' en la ruleta diaria' + escapeHtml(_vence) + '. Lo aplica el SISTEMA solo en su próxima carga (hgcash o manual) y queda marcado como aplicado.</span>' +
             '</div>' +
-            '<button onclick="markRoulettePercentUsed(\'' + escapeHtml(user.id) + '\')" style="background:#2d0052;color:#e9c8ff;border:1px solid rgba(255,255,255,0.3);border-radius:8px;padding:8px 14px;font-weight:800;font-size:12px;cursor:pointer;">✅ Marcar aplicado</button>' +
+            '<button onclick="markRoulettePercentUsed(\'' + escapeHtml(user.id) + '\')" style="background:#2d0052;color:#e9c8ff;border:1px solid rgba(255,255,255,0.3);border-radius:8px;padding:8px 14px;font-weight:800;font-size:12px;cursor:pointer;">✅ Marcar aplicado</button>' + _resetBtn +
         '</div>';
 }
 async function markRoulettePercentUsed(userId) {
@@ -5757,7 +5764,7 @@ function renderTransactions(transactions) {
         <tr>
             <td>${formatDateTime(t.timestamp || t.createdAt)}</td>
             <td>${escapeHtml(t.username)}</td>
-            <td><span class="type-badge ${_txIsCashback(t) ? 'cashback' : t.type}">${_txIsCashback(t) ? '📉 Reembolso en vivo' : getTransactionTypeLabel(t.type)}</span></td>
+            <td><span class="type-badge ${_txIsCashback(t) ? 'cashback' : t.type}">${_txIsCashback(t) ? '📉 Reembolso en vivo' : getTransactionTypeLabel(t.type)}</span>${getTransactionSourceLabel(t)}</td>
             <td>${formatMoney(t.amount)}</td>
             <td>${escapeHtml(t.description || '-')}</td>
             <td>${escapeHtml(t.adminUsername || '-')}</td>
@@ -5784,6 +5791,31 @@ function getTransactionTypeLabel(type) {
         transfer: 'Transferencia'
     };
     return labels[type] || type;
+}
+
+// #206 (réplica #267): sub-etiqueta con el ORIGEN de la transacción (metadata.source)
+// para distinguir de un vistazo qué es cada bonificación/depósito.
+function getTransactionSourceLabel(t) {
+    const src = (t && t.metadata && t.metadata.source) || '';
+    const map = {
+        daily_roulette: '🎰 ruleta diaria',
+        roulette: '🎰 ruleta diaria',
+        instant_cashback: '📉 reembolso en vivo',
+        install_bonus: '📱 bono instalación',
+        welcome_code: '🎁 código bienvenida',
+        welcome_gift: '🎁 regalo bienvenida',
+        notif_batch: '🎁 lote con regalo',
+        notif_batch_auto: '🎁 lote con regalo',
+        auto_hgcash: '🏦 auto hgcash',
+        hgcash_assigned: '🏦 bandeja hgcash',
+        payout_refund: '↩️ devolución de retiro',
+        deposit_bonus: '💳 bonus del cajero',
+        fire_reward: '🔥 fueguito',
+        vip_levelup: '👑 nivel VIP'
+    };
+    const txt = map[src] || (src ? src.replace(/_/g, ' ') : '');
+    if (!txt) return '';
+    return '<div style="font-size:10.5px;color:#9aa4b2;margin-top:2px;">' + escapeHtml(txt) + '</div>';
 }
 
 function filterTransactions(type) {
@@ -10736,14 +10768,14 @@ async function saveRouletteBudget() {
 // volver a girar. Confirmación obligatoria — es una acción destructiva.
 async function resetRouletteDaily() {
     if (!confirm('¿Reiniciar la ruleta de HOY?\n\nTodos los que ya giraron hoy van a poder girar de nuevo. Los premios ya acreditados NO se tocan.')) return;
-    // 2026-09-07: sin aviso push (ninguna push puede mencionar la ruleta).
+    const notify = !!(document.getElementById('rouletteResetNotify') || {}).checked; // #206 vuelve el aviso (sale solo con la ruleta ACTIVADA)
     const box = document.getElementById('rouletteResetStatus');
     if (box) { box.style.color = '#aaa'; box.textContent = '⏳ Reiniciando…'; }
     try {
         const r = await rouletteAuthFetch('/api/admin/roulette/reset-daily', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
+            body: JSON.stringify({ notify: notify })
         });
         const d = await r.json();
         if (!r.ok || !d.success) throw new Error(d.error || 'No se pudo reiniciar');
@@ -10778,16 +10810,17 @@ async function rouletteTestSpin() {
             if (box) box.innerHTML = '<div style="color:#ff8080;padding:6px;font-size:12px;">❌ ' + escapeHtml(d.error || 'Error') + '</div>';
             return;
         }
-        const won = (d.prize.prizeARS || 0) > 0;
-        const color = won ? '#ffd700' : '#888';
-        const bg = won ? 'rgba(255,215,0,0.10)' : 'rgba(255,255,255,0.04)';
-        const border = won ? '#ffd700' : 'rgba(255,255,255,0.18)';
+        const isPct = d.prize.prizeType === 'percent' && Number(d.prize.prizePct) > 0; // #206
+        const won = (d.prize.prizeARS || 0) > 0 || isPct;
+        const color = isPct ? '#26e07f' : (won ? '#ffd700' : '#888');
+        const bg = isPct ? 'rgba(38,224,127,0.10)' : (won ? 'rgba(255,215,0,0.10)' : 'rgba(255,255,255,0.04)');
+        const border = isPct ? '#26e07f' : (won ? '#ffd700' : 'rgba(255,255,255,0.18)');
         if (box) {
             box.innerHTML =
                 '<div style="background:' + bg + ';border:1.5px solid ' + border + ';border-radius:9px;padding:10px 12px;display:flex;align-items:center;gap:10px;">' +
                     '<div style="font-size:30px;line-height:1;">' + (d.prize.emoji || '🎲') + '</div>' +
                     '<div style="flex:1;">' +
-                        '<div style="color:' + color + ';font-weight:900;font-size:14px;">' + escapeHtml(d.prize.prizeLabel) + (won ? ' · $' + Number(d.prize.prizeARS).toLocaleString('es-AR') : '') + '</div>' +
+                        '<div style="color:' + color + ';font-weight:900;font-size:14px;">' + escapeHtml(d.prize.prizeLabel) + (isPct ? ' · ' + d.prize.prizePct + '% EXTRA en su próxima carga (24 h)' : (won ? ' · $' + Number(d.prize.prizeARS).toLocaleString('es-AR') : '')) + '</div>' +
                         '<div style="color:#aaa;font-size:11px;">A nombre de <strong>@' + escapeHtml(d.username) + '</strong> · peso ' + d.prize.weight + ' · simulación, no afecta nada real.</div>' +
                     '</div>' +
                 '</div>';
@@ -10797,84 +10830,113 @@ async function rouletteTestSpin() {
     }
 }
 
-// #188 ===== Premios y elegibilidad de la ruleta (editables) =====
+// #188/#206 ===== Premios y elegibilidad de la ruleta diaria (editables) =====
+// #206: misma card que la ruleta diaria de PAUTANUEVAsantino (filas etiqueta / tipo /
+// valor / peso / rollover, ACTIVADA, cargas mínimas en N días, exigir app).
 let _rouletteGlobalRollover = null;
-function _rpRowHtml(p) {
-    p = p || { emoji: '💰', label: '', type: 'cash', value: 1000, rolloverX: 0, weight: 5 };
-    const v = (x) => escapeHtml(String(x == null ? '' : x));
-    const sel = (t) => (p.type === t ? ' selected' : '');
-    return '<tr class="rp-row">' +
-        '<td><input type="text" class="rp-emoji" value="' + v(p.emoji) + '" maxlength="8" style="width:52px;"></td>' +
-        '<td><input type="text" class="rp-label" value="' + v(p.label) + '" maxlength="30" placeholder="(auto)" style="width:130px;"></td>' +
-        '<td><select class="rp-type" onchange="roulettePrizesChanged()"><option value="cash"' + sel('cash') + '>💰 Dinero (fichas)</option><option value="percent"' + sel('percent') + '>🎁 Bonificación % próx. carga</option><option value="none"' + sel('none') + '>😔 Sin premio</option></select></td>' +
-        '<td><input type="number" class="rp-value" value="' + v(p.value) + '" min="0" style="width:90px;" oninput="roulettePrizesChanged()"></td>' +
-        '<td><input type="number" class="rp-roll" value="' + v(p.rolloverX || 0) + '" min="0" max="50" style="width:64px;" title="Solo para Dinero. Si el rollover global está activado, manda el global."></td>' +
-        '<td><input type="number" class="rp-weight" value="' + v(p.weight) + '" min="0.01" step="0.5" style="width:70px;" oninput="roulettePrizesChanged()"></td>' +
-        '<td class="rp-prob" style="font-weight:800;color:#ffd700;white-space:nowrap;">—</td>' +
-        '<td><button class="btn btn-sm" style="background:#dc3545;color:#fff;border:none;border-radius:6px;padding:4px 8px;cursor:pointer;" onclick="this.closest(\'.rp-row\').remove();roulettePrizesChanged()">🗑️</button></td>' +
-        '</tr>';
-}
-function _rpRead() {
-    return Array.from(document.querySelectorAll('#roulettePrizesRows .rp-row')).map(r => ({
-        emoji: r.querySelector('.rp-emoji').value, label: r.querySelector('.rp-label').value, type: r.querySelector('.rp-type').value,
-        value: Number(r.querySelector('.rp-value').value) || 0, rolloverX: Number(r.querySelector('.rp-roll').value) || 0, weight: Number(r.querySelector('.rp-weight').value) || 0
-    }));
-}
-function roulettePrizesChanged() {
-    const rows = Array.from(document.querySelectorAll('#roulettePrizesRows .rp-row'));
-    const total = rows.reduce((s, r) => s + (Number(r.querySelector('.rp-weight').value) || 0), 0) || 1;
-    let ev = 0;
-    rows.forEach(r => {
-        const w = Number(r.querySelector('.rp-weight').value) || 0;
-        const t = r.querySelector('.rp-type').value;
-        const val = Number(r.querySelector('.rp-value').value) || 0;
-        const prob = w / total;
-        r.querySelector('.rp-prob').textContent = (Math.round(prob * 1000) / 10) + '%';
-        r.querySelector('.rp-value').disabled = t === 'none';
-        r.querySelector('.rp-roll').disabled = t !== 'cash' || _rouletteGlobalRollover != null;
-        r.querySelector('.rp-value').placeholder = t === 'percent' ? '% extra' : (t === 'cash' ? '$ fichas' : '');
-        if (t === 'cash') ev += prob * val;
-    });
-    const sum = document.getElementById('roulettePrizesSummary');
-    if (sum) sum.textContent = rows.length + ' premio(s) · valor esperado por giro (solo dinero): $' + Math.round(ev).toLocaleString('es-AR');
-}
-function addRoulettePrizeRow(p) {
-    const tb = document.getElementById('roulettePrizesRows');
-    if (!tb) return;
-    tb.insertAdjacentHTML('beforeend', _rpRowHtml(p));
-    roulettePrizesChanged();
-}
-async function loadRoulettePrizes() {
-    const tb = document.getElementById('roulettePrizesRows');
-    if (!tb) return;
+async function loadDailyRouletteCfg() {
+    const card = document.getElementById('drCfgCard');
     try {
         const r = await rouletteAuthFetch('/api/admin/roulette/config');
-        const d = await r.json();
-        if (!r.ok || !d.success) return;
-        _rouletteGlobalRollover = d.globalRollover;
+        const cfg = await r.json();
+        if (!r.ok || !cfg.success) { if (card) card.style.display = 'none'; return; }
+        if (card) card.style.display = '';
+        _rouletteGlobalRollover = cfg.globalRollover;
         const hint = document.getElementById('roulettePrizesGlobalHint');
-        if (hint) { hint.style.display = _rouletteGlobalRollover != null ? '' : 'none'; hint.textContent = _rouletteGlobalRollover != null ? ('⚠️ El rollover GLOBAL está activado (x' + _rouletteGlobalRollover + '): los premios en dinero salen con ese rollover y el de cada fila se ignora.') : ''; }
-        tb.innerHTML = '';
-        (d.prizes || []).forEach(p => tb.insertAdjacentHTML('beforeend', _rpRowHtml(p)));
-        const mc = document.getElementById('rouletteMinCargas'); if (mc) mc.value = d.minCargas30d;
-        const ra = document.getElementById('rouletteRequireApp'); if (ra) ra.checked = d.requireApp !== false;
-        roulettePrizesChanged();
-    } catch (_) {}
+        if (hint) { hint.style.display = _rouletteGlobalRollover != null ? '' : 'none'; hint.textContent = _rouletteGlobalRollover != null ? ('⚠️ El rollover GLOBAL está activado (x' + _rouletteGlobalRollover + '): los premios en Saldo $ salen con ese rollover y el de cada fila se ignora.') : ''; }
+        const en = document.getElementById('drEnabled');
+        if (en) en.checked = cfg.enabled !== false;
+        const md = document.getElementById('drMinDeposits');
+        if (md) md.value = (cfg.requireDeposits != null ? cfg.requireDeposits : 1);
+        const dd = document.getElementById('drDepositDays');
+        if (dd) dd.value = (cfg.depositDays != null ? cfg.depositDays : 7);
+        const ra = document.getElementById('drRequireApp');
+        if (ra) ra.checked = cfg.requireAppInstalled === true;
+        const list = document.getElementById('drPrizesList');
+        if (list) { list.innerHTML = ''; (cfg.prizes || []).forEach(function(p) { drAddPrize(p); }); drUpdateOdds(); }
+    } catch (e) { if (card) card.style.display = 'none'; }
 }
-async function saveRoulettePrizes() {
-    const prizes = _rpRead();
-    if (!prizes.length) { showToast('Agregá al menos un premio', 'error'); return; }
-    if (!prizes.some(p => p.type === 'none')) { if (!confirm('No hay ningún "Sin premio": TODOS los giros van a ganar algo. ¿Guardar igual?')) return; }
-    const body = { prizes, minCargas30d: Number((document.getElementById('rouletteMinCargas') || {}).value) || 0, requireApp: !!(document.getElementById('rouletteRequireApp') || {}).checked };
+function drAddPrize(p) {
+    p = p || { label: '', type: 'percent', value: '', weight: '', rolloverX: 0 };
+    const list = document.getElementById('drPrizesList');
+    if (!list) return;
+    const row = document.createElement('div');
+    row.className = 'dr-prize-row';
+    row.dataset.emoji = p.emoji || ''; // se conserva aunque no se edite acá (lo usa la celda de la app)
+    row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:rgba(255,255,255,0.04);padding:8px;border-radius:8px;margin-bottom:6px;';
+    const inp = 'background:rgba(0,0,0,0.45);border:1px solid rgba(38,224,127,0.35);color:#fff;padding:6px 8px;border-radius:6px;font-size:12.5px;';
+    row.innerHTML =
+        '<input class="drP-label" placeholder="Etiqueta (ej. 10% EXTRA)" value="' + escapeHtml(p.label || '') + '" maxlength="40" style="flex:2;min-width:120px;' + inp + '">' +
+        '<select class="drP-type" onchange="drUpdateOdds()" style="flex:1;min-width:100px;' + inp + '">' +
+          '<option value="percent"' + (p.type === 'percent' || !p.type ? ' selected' : '') + '>% Extra</option>' +
+          '<option value="cash"' + (p.type === 'cash' ? ' selected' : '') + '>Saldo $</option>' +
+          '<option value="none"' + (p.type === 'none' ? ' selected' : '') + '>Sin premio</option>' +
+        '</select>' +
+        '<input class="drP-value" type="number" min="0" placeholder="valor" value="' + (p.type === 'none' ? '' : (p.value || '')) + '" title="% o monto $ (Sin premio: dejar vacío)" style="width:80px;' + inp + '" oninput="drUpdateOdds()">' +
+        '<input class="drP-weight" type="number" min="0.01" step="0.5" placeholder="peso" value="' + (p.weight || '') + '" title="probabilidad relativa" style="width:70px;' + inp + '" oninput="drUpdateOdds()">' +
+        '<input class="drP-roll" type="number" min="0" max="50" placeholder="rollX" value="' + (p.rolloverX || 0) + '" title="rollover del saldo (solo Saldo $; si el rollover GLOBAL está activado, manda el global)" style="width:66px;' + inp + '">' +
+        '<button type="button" class="btn btn-danger" onclick="this.parentNode.remove();drUpdateOdds();" style="padding:4px 9px;">✕</button>';
+    list.appendChild(row);
+    drUpdateOdds();
+}
+function drUpdateOdds() {
+    const rows = document.querySelectorAll('#drPrizesList .dr-prize-row');
+    let total = 0, ev = 0;
+    rows.forEach(function(r) { total += Number(r.querySelector('.drP-weight').value) || 0; });
+    const parts = [];
+    rows.forEach(function(r) {
+        const w = Number(r.querySelector('.drP-weight').value) || 0;
+        const t = r.querySelector('.drP-type').value;
+        const val = Number(r.querySelector('.drP-value').value) || 0;
+        const lbl = r.querySelector('.drP-label').value || '(sin nombre)';
+        r.querySelector('.drP-value').disabled = t === 'none';
+        r.querySelector('.drP-roll').disabled = t !== 'cash' || _rouletteGlobalRollover != null;
+        r.querySelector('.drP-value').placeholder = t === 'percent' ? '% extra' : (t === 'cash' ? '$ fichas' : '—');
+        if (w > 0 && total > 0) { parts.push(lbl + ': ' + Math.round(w / total * 100) + '%'); if (t === 'cash') ev += (w / total) * val; }
+    });
+    const hint = document.getElementById('drOddsHint');
+    if (!hint) return;
+    hint.textContent = total ? ('Probabilidades → ' + parts.join(' · ') + ' · valor esperado por giro (solo saldo): $' + Math.round(ev).toLocaleString('es-AR')) : '';
+}
+function _drReadPrizes() {
+    const rows = document.querySelectorAll('#drPrizesList .dr-prize-row');
+    const prizes = []; let bad = false;
+    rows.forEach(function(r, i) {
+        const label = r.querySelector('.drP-label').value.trim();
+        const type = r.querySelector('.drP-type').value;
+        const value = Number(r.querySelector('.drP-value').value) || 0;
+        const weight = Number(r.querySelector('.drP-weight').value) || 0;
+        const rolloverX = Number(r.querySelector('.drP-roll').value) || 0;
+        if (weight <= 0) bad = true;
+        if (type !== 'none' && value <= 0) bad = true;
+        prizes.push({ id: 'd' + i, label: label, emoji: r.dataset.emoji || '', type: type, value: value, weight: weight, rolloverX: rolloverX });
+    });
+    return { prizes: prizes, bad: bad };
+}
+async function saveDailyRoulette() {
+    const rd = _drReadPrizes();
+    if (!rd.prizes.length) { showToast('Agregá al menos un premio', 'error'); return; }
+    if (rd.bad) { showToast('Cada premio necesita peso > 0 (y valor > 0, salvo Sin premio)', 'error'); return; }
+    if (!rd.prizes.some(p => p.type === 'none')) { if (!confirm('No hay ningún "Sin premio": TODOS los giros van a ganar algo. ¿Guardar igual?')) return; }
     try {
-        const r = await rouletteAuthFetch('/api/admin/roulette/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok || !d.success) { showToast(d.error || 'No se pudo guardar', 'error'); return; }
-        showToast('✅ Premios y elegibilidad guardados', 'success');
-        loadRoulettePrizes();
-    } catch (_) { showToast('Error al guardar', 'error'); }
+        const r = await rouletteAuthFetch('/api/admin/roulette/config', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                enabled: !!(document.getElementById('drEnabled') || {}).checked,
+                requireDeposits: Number((document.getElementById('drMinDeposits') || {}).value) || 0,
+                depositDays: Number((document.getElementById('drDepositDays') || {}).value) || 0,
+                requireAppInstalled: !!(document.getElementById('drRequireApp') || {}).checked,
+                prizes: rd.prizes
+            })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.success) { showToast(j.error || 'No se pudo guardar', 'error'); return; }
+        showToast('✅ Ruleta diaria guardada', 'success');
+        loadDailyRouletteCfg();
+    } catch (e) { showToast('Error de conexión', 'error'); }
 }
-window.addRoulettePrizeRow = addRoulettePrizeRow; window.roulettePrizesChanged = roulettePrizesChanged; window.saveRoulettePrizes = saveRoulettePrizes; window.loadRoulettePrizes = loadRoulettePrizes;
+window.drAddPrize = drAddPrize; window.drUpdateOdds = drUpdateOdds; window.saveDailyRoulette = saveDailyRoulette; window.loadDailyRouletteCfg = loadDailyRouletteCfg;
+window.loadRoulettePrizes = loadDailyRouletteCfg; // compat
 
 async function loadRouletteAdmin() {
     const days = parseInt((document.getElementById('rouletteDays') || {}).value || '14', 10) || 14;
@@ -10883,7 +10945,7 @@ async function loadRouletteAdmin() {
     body.innerHTML = '<div style="color:#aaa;text-align:center;padding:24px;">⏳ Cargando…</div>';
     // Cargar budget en paralelo (no bloqueante).
     loadRouletteBudget();
-    loadRoulettePrizes(); // #188
+    loadDailyRouletteCfg(); // #188/#206
     try {
         const [statsResp, historyResp] = await Promise.all([
             rouletteAuthFetch('/api/admin/roulette/stats?days=' + days),
@@ -10906,6 +10968,9 @@ async function loadRouletteAdmin() {
         html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(255,215,0,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Giros totales</div><div style="color:#ffd700;font-size:22px;font-weight:900;margin-top:2px;">' + fmtNum(t.spinsTotal) + '</div></div>';
         html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(102,255,102,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Ganadores</div><div style="color:#66ff66;font-size:22px;font-weight:900;margin-top:2px;">' + fmtNum(t.winnersTotal) + '</div><div style="color:#888;font-size:10px;">' + (t.spinsTotal > 0 ? ((t.winnersTotal / t.spinsTotal * 100).toFixed(1) + '%') : '—') + '</div></div>';
         html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(255,215,0,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">$ Regalado</div><div style="color:#ffd700;font-size:22px;font-weight:900;margin-top:2px;">' + fmtMoney(t.givenTotal) + '</div></div>';
+        // #206 (réplica #303): premios % EXTRA (bono para la próxima carga): ganados, aplicados, vencidos y $ que generaron.
+        html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(38,224,127,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">% EXTRA aplicados</div><div style="color:#26e07f;font-size:22px;font-weight:900;margin-top:2px;">' + fmtNum(t.pctUsedTotal) + ' <span style="font-size:12px;color:#aaa;">/ ' + fmtNum(t.pctWonTotal) + ' ganados' + (t.pctExpiredTotal > 0 ? ' · ' + fmtNum(t.pctExpiredTotal) + ' vencidos' : '') + '</span></div></div>';
+        html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(38,224,127,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">$ Bono por % EXTRA</div><div style="color:#26e07f;font-size:22px;font-weight:900;margin-top:2px;">' + fmtMoney(t.pctBonusTotal) + '</div></div>';
         if (t.pendingTotal > 0) html += '<div style="background:rgba(0,0,0,0.30);border:1px solid rgba(255,128,128,0.35);border-radius:10px;padding:11px;text-align:center;"><div style="color:#aaa;font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;">$ Pendiente</div><div style="color:#ff8080;font-size:22px;font-weight:900;margin-top:2px;">' + fmtMoney(t.pendingTotal) + '</div><div style="color:#888;font-size:10px;">credit fallido</div></div>';
         html += '</div>';
 
@@ -10920,6 +10985,8 @@ async function loadRouletteAdmin() {
             html += '<th style="padding:8px 10px;font-weight:800;text-align:right;">Ganadores</th>';
             html += '<th style="padding:8px 10px;font-weight:800;text-align:right;">$ Regalado</th>';
             html += '<th style="padding:8px 10px;font-weight:800;text-align:right;">$ Pendiente</th>';
+            html += '<th style="padding:8px 10px;font-weight:800;text-align:right;" title="Premios % EXTRA aplicados en una carga / ganados ese día">% aplic./ganados</th>';
+            html += '<th style="padding:8px 10px;font-weight:800;text-align:right;">$ Bono %</th>';
             html += '</tr></thead><tbody>';
             for (const d of stats.byDay) {
                 html += '<tr style="border-top:1px solid rgba(255,255,255,0.05);">';
@@ -10928,6 +10995,8 @@ async function loadRouletteAdmin() {
                 html += '<td style="padding:7px 10px;text-align:right;color:#66ff66;font-weight:700;">' + fmtNum(d.winners) + '</td>';
                 html += '<td style="padding:7px 10px;text-align:right;color:#ffd700;font-weight:800;">' + fmtMoney(d.totalGiven) + '</td>';
                 html += '<td style="padding:7px 10px;text-align:right;color:' + (d.totalPending > 0 ? '#ff8080' : '#888') + ';">' + (d.totalPending > 0 ? fmtMoney(d.totalPending) : '—') + '</td>';
+                html += '<td style="padding:7px 10px;text-align:right;color:#26e07f;font-weight:700;">' + (d.pctWon > 0 ? fmtNum(d.pctUsed) + ' / ' + fmtNum(d.pctWon) : '—') + '</td>';
+                html += '<td style="padding:7px 10px;text-align:right;color:#26e07f;font-weight:800;">' + (d.pctBonus > 0 ? fmtMoney(d.pctBonus) : '—') + '</td>';
                 html += '</tr>';
             }
             html += '</tbody></table></div>';
@@ -10970,16 +11039,28 @@ async function loadRouletteAdmin() {
                     won:           '<span style="background:rgba(255,170,102,0.15);color:#ffaa66;border:1px solid #ffaa66;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">⏳ PROCESANDO</span>',
                     credited:      '<span style="background:rgba(102,255,102,0.15);color:#66ff66;border:1px solid #66ff66;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">✅ ACREDITADO</span>',
                     credit_failed: '<span style="background:rgba(255,128,128,0.15);color:#ff8080;border:1px solid #ff8080;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">❌ FALLO</span>',
-                    percent_pending: '<span style="background:rgba(217,166,255,0.15);color:#d9a6ff;border:1px solid #d9a6ff;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">🎁 % PENDIENTE</span>',
-                    percent_used:    '<span style="background:rgba(102,255,102,0.15);color:#66ff66;border:1px solid #66ff66;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">✅ % APLICADO</span>'
+                    // #206 (réplica #303/#305): premios % EXTRA (para la próxima carga, valen 24 h).
+                    percent_pending: '<span style="background:rgba(255,215,0,0.12);color:#ffd700;border:1px solid #ffd700;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">🎁 % PENDIENTE</span>',
+                    percent_used:    '<span style="background:rgba(38,224,127,0.15);color:#26e07f;border:1px solid #26e07f;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">✅ % APLICADO</span>',
+                    percent_expired: '<span style="background:rgba(136,136,136,0.15);color:#aaa;border:1px solid #888;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;">⌛ % VENCIDO</span>'
                 }[it.status] || it.status;
                 html += '<tr style="border-top:1px solid rgba(255,255,255,0.05);">';
                 html += '<td style="padding:7px 10px;color:#aaa;font-size:10.5px;white-space:nowrap;">' + escapeHtml(when) + '</td>';
                 html += '<td style="padding:7px 10px;color:#fff;font-weight:700;">' + escapeHtml(it.username || '?') + '</td>';
-                html += '<td style="padding:7px 10px;text-align:right;color:' + (it.prizeARS >= 10000 ? '#ffd700' : (it.prizeARS >= 1000 ? '#ff8c5a' : (it.prizeARS > 0 ? '#aaffaa' : '#888'))) + ';font-weight:800;">' + (it.prizeARS > 0 ? fmtMoney(it.prizeARS) : (it.prizeType === 'percent' ? '<span style="color:#d9a6ff;">+' + escapeHtml(String(it.prizePct || 0)) + '% próx. carga</span>' : '—')) + '</td>';
+                html += '<td style="padding:7px 10px;text-align:right;color:' + (it.prizeARS >= 10000 ? '#ffd700' : (it.prizeARS >= 1000 ? '#ff8c5a' : (it.prizeARS > 0 ? '#aaffaa' : '#888'))) + ';font-weight:800;">' + (it.prizeARS > 0 ? fmtMoney(it.prizeARS) : (it.prizeType === 'percent' ? '<span style="color:#26e07f;">' + escapeHtml(it.prizeLabel || ((it.prizePct || 0) + '% EXTRA')) + '</span>' : '—')) + '</td>';
                 html += '<td style="padding:7px 10px;text-align:center;">' + statusBadge + '</td>';
                 html += '<td style="padding:7px 10px;color:#888;font-size:10px;font-family:monospace;">';
-                if (it.status === 'credited' && it.creditTxId) {
+                if (it.status === 'percent_used') {
+                    // #206: cuándo, sobre qué carga, cuánto bono y quién lo aplicó.
+                    html += '<span style="color:#26e07f;font-family:inherit;">' + (it.usedBonusARS > 0 ? fmtMoney(it.usedBonusARS) + ' de bono' : 'sin bono aparte') +
+                        (it.usedOnAmount > 0 ? ' sobre carga ' + fmtMoney(it.usedOnAmount) : '') + '</span>' +
+                        '<div style="color:#888;">' + (it.usedAt || it.creditedAt ? escapeHtml(fmtFechaHoraAR(it.usedAt || it.creditedAt)) : '') + (it.usedBy ? ' · ' + escapeHtml(it.usedBy) : '') + '</div>';
+                } else if (it.status === 'percent_pending') {
+                    const _exp = it.spunAt ? new Date(new Date(it.spunAt).getTime() + 24 * 3600 * 1000) : null;
+                    html += '<span style="color:#ffd700;font-family:inherit;">se aplica en su próxima carga · vence ' + (_exp ? escapeHtml(fmtFechaHoraAR(_exp)) : '') + '</span>';
+                } else if (it.status === 'percent_expired') {
+                    html += '<span style="color:#aaa;font-family:inherit;">pasaron 24 h sin cargar' + (it.usedAt ? ' · ' + escapeHtml(fmtFechaHoraAR(it.usedAt)) : '') + '</span>';
+                } else if (it.status === 'credited' && it.creditTxId) {
                     html += escapeHtml(String(it.creditTxId).slice(0, 18));
                 } else if (it.status === 'credit_failed') {
                     html += '<button onclick="retryRouletteCredit(\'' + rouletteEscapeJsArg(it.id) + '\')" style="background:rgba(0,212,255,0.10);color:#00d4ff;border:1px solid rgba(0,212,255,0.40);padding:3px 8px;border-radius:5px;font-size:10px;font-weight:700;cursor:pointer;">🔁 Reintentar</button>';
@@ -11013,6 +11094,46 @@ async function retryRouletteCredit(spinId) {
         alert('Error de conexión');
     }
 }
+
+// #206 (réplica #293): reinicio de la ruleta diaria para UN usuario (pruebas). Borra
+// su giro de hoy / últimas 24 h y limpia el % pendiente. Solo admin general (el
+// server también lo exige). Lo ya acreditado no se devuelve.
+async function _resetRouletteFor(body, onDone) {
+    try {
+        const r = await rouletteAuthFetch('/api/admin/roulette/reset-user', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        const j = await r.json();
+        if (!r.ok || !j.success) { showToast(j.error || 'No se pudo reiniciar', 'error'); return null; }
+        let msg = '🧪 Ruleta reiniciada para ' + (j.username || '') + ': ' + ((j.daily && j.daily.deleted) || 0) + ' giro(s) borrado(s)' +
+            (j.daily && j.daily.pendingPctCleared ? ' · % pendiente (' + j.daily.pendingPctCleared + '%) limpiado' : '') + '. Ya puede volver a girar.';
+        showToast(msg, 'success');
+        if (onDone) onDone(j, msg);
+        return j;
+    } catch (e) { showToast('Error de conexión', 'error'); return null; }
+}
+async function resetChatRoulette(userId) {
+    if (!confirm('🧪 ¿Reiniciar la ruleta diaria de ESTE usuario? (para pruebas)\n\nSe borra su giro de hoy y su % EXTRA pendiente. Lo que ya cobró NO se devuelve: si vuelve a girar, cobra de nuevo. Usalo solo con cuentas de prueba.')) return;
+    await _resetRouletteFor({ userId: userId }, function () {
+        try { if (typeof loadUserInfo === 'function') loadUserInfo(userId); } catch (_) {}
+        const b = document.getElementById('chatRoulettePctBanner'); if (b) { b.style.display = 'none'; b.innerHTML = ''; }
+    });
+}
+async function resetRouletteUser() {
+    const inp = document.getElementById('rouletteResetUserName');
+    const box = document.getElementById('rouletteResetUserStatus');
+    const username = (inp && inp.value || '').trim();
+    if (!username) { showToast('Escribí el usuario', 'error'); return; }
+    if (!confirm('🧪 ¿Reiniciar la ruleta diaria de "' + username + '"? (solo pruebas)\n\nLo ya acreditado no se devuelve: si vuelve a girar, cobra de nuevo.')) return;
+    if (box) { box.style.color = '#aaa'; box.textContent = '⏳ Reiniciando…'; }
+    const j = await _resetRouletteFor({ username: username }, function (_j, msg) {
+        if (box) { box.style.color = '#66ff99'; box.textContent = msg; }
+        if (typeof loadRouletteAdmin === 'function') loadRouletteAdmin();
+    });
+    if (!j && box) { box.style.color = '#ff7070'; box.textContent = '❌ No se pudo reiniciar (revisá el usuario / permisos).'; }
+}
+window.resetChatRoulette = resetChatRoulette;
+window.resetRouletteUser = resetRouletteUser;
 
 
 // =========================================================================

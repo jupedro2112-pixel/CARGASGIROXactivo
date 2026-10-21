@@ -7,6 +7,10 @@
 >
 > Última actualización: **2026-10-19** — LANDING EXTERNA nueva (carpeta `landing/` = la de
 > PAUTANUEVAsantino apuntando a cargas1girox.com) + flujo `ir=creds`, `/api/meta-pixel-id`,
+> **2026-10-21** — RULETA DIARIA replicada del gemelo PAUTANUEVAsantino (#206): config con
+> `enabled/requireDeposits/depositDays`, giro cada 24 h, % EXTRA que vence a las 24 h, Bonificación
+> propia por cada bono aplicado en una carga, reinicio por usuario, candado de pushes condicional
+> (§2 DailyRouletteSpin/Transaction, §5 ruleta, §6 panel/PWA, §7). Anterior:
 > `/api/landing/touch` y `User.lastTouchCampaign` (#198; §2 env, §4.10, §6 access-link/casino).
 > Mismo día: PREFIJO de los usuarios nuevos y WEBHOOKS SALIENTES a
 > publicistas, réplica del gemelo AUTOGIROXcompartido (#197; §2 Config/OutboundWebhookQueue, §4.10
@@ -129,7 +133,12 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   `loginWithoutPassword`, `withdrawalAccount`, `pendingAccessCode`.
 - **Transaction** — registro PERMANENTE (sin TTL). `type`: deposit|withdrawal|bonus|
   refund|transfer|referral_commission|fire_reward|rakeback|vip_levelup|roulette
-  (`roulette` desde 2026-09-07: antes la ruleta no escribía Transaction).
+  (`roulette` desde 2026-09-07: antes la ruleta no escribía Transaction; desde #206 lleva
+  `metadata.source:'daily_roulette'`). **#206:** todo bono automático aplicado ADENTRO de una
+  carga (% de la ruleta diaria, bono por instalar la app, lote con regalo) deja además una
+  Transaction `type:'bonus'` propia con `metadata.source` ('daily_roulette' | 'install_bonus' |
+  'notif_batch'), `appliedOnDeposit:true` y `depositTxId` (`_recordAppliedBonusTx`); la base del
+  reembolso en vivo las excluye porque ya cuenta `deposit.bonus`.
   `metadata.creditedAs` ('bonus'|'deposit') en ruleta y fueguito = cómo salió de
   verdad hacia 1girox (fallback a depósito queda registrado).
   `metadata.source` distingue regalos ('install_bonus','welcome_gift') y devoluciones
@@ -987,19 +996,29 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   `vip-refcom-<payoutId>` reusando el documento de intentos fallidos). El revenue sale
   del netwin del panel × `GIROX_REFERRAL_COMMISSION_PCT` (8%) y sobre eso la tasa del
   referidor (7%). Ver §4.6.
-- **Ruleta diaria** (#188, premios y elegibilidad EDITABLES): `Config['dailyRoulette']`
-  = `{ prizes:[{label, emoji, type, value, rolloverX, weight}], minCargas30d,
-  requireApp }` (`getDailyRouletteConfig`; default = pirámide histórica + 10 cargas +
-  app). Elegible = (app instalada si `requireApp`) + MÁS de `minCargas30d` cargas
-  reales en 30 días; si no, la PWA muestra la celda bloqueada con las cargas que
-  faltan. Pick ponderado por `weight` + **budget pacing** (solo dinero). Premio
-  `cash` → `girox.creditGift` con el `rolloverX` de la fila (el global lo pisa),
-  reference `vip-roulette-<spinId>`; `credit_failed` → retry con la MISMA reference.
-  Premio `percent` → pendiente en el User (+X% en la PRÓXIMA carga; el modal Depositar
-  del panel lo sugiere y `_consumeRoulettePercent` lo marca usado al cargar con bono,
-  o a mano con `POST /api/admin/users/:id/roulette-percent/use`). Escribe
-  `Transaction type:'roulette'` (dinero; idempotente por `metadata.spinId`).
-  Admin: `GET/PUT /api/admin/roulette/config`.
+- **Ruleta diaria** (#188 → **#206, réplica de PAUTANUEVAsantino**): `Config['dailyRoulette']`
+  = `{ enabled, prizes:[{label, emoji, type, value, rolloverX, weight}], requireDeposits,
+  depositDays, requireAppInstalled }` (`getDailyRouletteConfig`; legacy `minCargas30d`/`requireApp`
+  se traducen; default = activada, 1 carga en 7 días, app exigida, premios del gemelo). Elegible =
+  `enabled` + (app instalada si se exige) + **≥ requireDeposits cargas reales en los últimos
+  depositDays días** (`_dailyRouletteDepositsOk`, 0 = histórico); si no, la PWA muestra la celda
+  bloqueada con las cargas que faltan (ruleta apagada = sin celda). **Un giro cada 24 h** desde el
+  último (`_dailyRouletteCooldown`; el índice único userId+dateKey queda como anti-race). Pick
+  ponderado por `weight` + **budget pacing** (solo dinero). Premio `cash` → `girox.creditGift` con el
+  `rolloverX` de la fila (el global lo pisa), reference `vip-roulette-<spinId>`, `Transaction
+  type:'roulette'` + `metadata.source:'daily_roulette'` (idempotente por `metadata.spinId`);
+  `credit_failed` → retry con la MISMA reference. Premio `percent` → pendiente en el User
+  (`dailyRoulettePendingPct/Label/SpinId/At`), **vence a las 24 h** (`DAILY_PCT_TTL_MS`,
+  `_expireDailyRoulettePct` cron 15 min + lazy; giro → `percent_expired`); lo aplica el SERVER en la
+  carga vía `_pendingBonusFor` → `_settlePendingBonuses(user, agent, {amount, bonus, txId,
+  transactionId, adminRole})` → `_consumeRoulettePercent` (giro → `percent_used` con
+  `usedAt/usedBy/usedOnAmount/usedBonusARS` + Bonificación propia `_recordAppliedBonusTx`), o a mano
+  con `POST /api/admin/users/:id/roulette-percent/use` (`usedBonusARS 0`). Admin: `GET/PUT
+  /api/admin/roulette/config`, `POST /api/admin/roulette/reset-daily {notify}` (borra hoy + últimas
+  24 h; aviso push solo si la ruleta está activada), `POST /api/admin/roulette/reset-user
+  {userId|username}` (solo admin general; emite `rewards_changed` al cliente), stats con
+  `pctWon/pctUsed/pctExpired/pctBonus`. `getDailyRouletteConfig()` setea
+  `notificationService.setRouletteActive(enabled)` (candado de pushes, ver §7).
 - **Fueguito**: reclamo diario sin requisitos; premios de hitos (editables en panel,
   Config['fireMilestones']) exigen actividad de cargas y expiran el mismo día. Crédito
   con depósito libre (`vip-fire-<userId>-d<día>-<fecha>`).
@@ -1197,9 +1216,17 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   `metadata.source:'instant_cashback'`, separado de Bonificaciones en el resumen y
   en el filtro); etiquetas en `getTransactionTypeLabel` / `_txIsCashback` (tipo
   nuevo ⇒ sumar etiqueta + botón + case del resumen).
-- **Ruleta diaria** (#188): card "🎁 PREMIOS Y PROBABILIDADES" (tabla editable + cargas
-  mínimas + exigir app; guardar solo admin general) sobre el budget diario. Chat: banner
-  violeta "RULETA: +X% EXTRA" con "Marcar aplicado". **Config → "📲 Bono por instalar la
+- **Ruleta diaria** (#188/#206, igual que el gemelo): card verde "🎰 PREMIOS DE LA RULETA DIARIA"
+  (`drCfgCard`: ACTIVADA · cargas mínimas · …en los últimos N días · exigir app · filas
+  etiqueta/tipo/valor/peso/rollover · "Probabilidades →"; `loadDailyRouletteCfg/drAddPrize/
+  drUpdateOdds/saveDailyRoulette`, guardar solo admin general), budget diario, probar giro (muestra el
+  %), "🧪 REINICIAR RULETA PARA UN USUARIO" (`resetRouletteUser`), "🔄 REINICIAR RULETA DIARIA" con
+  checkbox de aviso, cards "% EXTRA aplicados / ganados · vencidos" y "$ Bono por % EXTRA", tabla por
+  día con "% aplic./ganados" y "$ Bono %", historial con 🎁 % PENDIENTE (vence) / ✅ % APLICADO ($bono
+  sobre carga · fecha · quién) / ⌛ % VENCIDO. Chat: banner violeta "RULETA DIARIA: X% EXTRA" con
+  "vence …", "Marcar aplicado" y 🧪 Reiniciar (prueba) (`resetChatRoulette`, solo admin general).
+  Transacciones: sub-etiqueta de ORIGEN bajo el tipo (`getTransactionSourceLabel`) y filtro 🎡 Ruleta =
+  premios en saldo + % aplicados. **Config → "📲 Bono por instalar la
   app"**: pct / tope / % excedente con ejemplo. **Modal Depositar:** bloque de bonos
   pendientes que pre-carga "Monto de Bonificación" (`renderDepositPendingBonus`, usa
   `window._chatUserInfo` del chat abierto).
@@ -1342,11 +1369,12 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   (`GIROX_NETWIN_SCOPE`).
 - **Sin `User.giroxUserId` no hay reembolso ni comisión** para ese usuario. El buscador
   del panel hace LIKE: la coincidencia tiene que ser EXACTA o se le paga a otro (§4.6).
-- **NINGUNA push puede mencionar la ruleta diaria** (2026-09-07): candado global
-  `isRouletteText` al inicio de las 5 funciones de envío de
-  `notificationService` (devuelve `blocked:'roulette'`), migración de reglas y
-  plantillas guardadas en el seed del boot, y sin aviso push en "Reiniciar
-  ruleta". La ruleta NO está activa; si se reactiva, sacar el candado.
+- **Pushes que mencionan la ruleta diaria** (2026-09-07 → #206): el candado `isRouletteText`
+  (inicio de las 5 funciones de envío de `notificationService`, `blocked:'roulette'`) y las
+  migraciones de reglas/plantillas del seed del boot **solo actúan con la ruleta APAGADA**
+  (`Config['dailyRoulette'].enabled === false`): `getDailyRouletteConfig()` llama
+  `setRouletteActive(enabled)` al boot, cada 5 min y en cada status/giro. Con la ruleta ACTIVADA
+  las pushes pasan (incluido el aviso de "Reiniciar ruleta").
 - **Message TTL 3 días; Transaction permanente.** Snapshot en ChatDelay por eso.
 - **ChatStatus se crea con actividad**, no al crear el usuario.
 - **Atribución de publicista** se fija al registrar; el login NO la cambia. El referido

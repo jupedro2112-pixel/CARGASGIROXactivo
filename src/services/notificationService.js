@@ -26,7 +26,15 @@ const FCM_SEND_TIMEOUT_MS = 10000;
 // manuales. Si algún día la ruleta se reactiva, sacar este candado.
 // ============================================================
 const ROULETTE_TEXT_RE = /ruleta|roulette|giro\s+(gratis|del\s+d[ií]a)|\bgir[aá]\b/i;
+// #206: el candado depende de si la ruleta diaria está ACTIVADA en el panel
+// (`Config['dailyRoulette'].enabled`). server.js llama setRouletteActive() cada vez
+// que lee la config (boot, cada 5 min, en cada status/giro). Activa → las pushes
+// que la mencionan pasan; apagada → se bloquean como hasta ahora.
+let _rouletteActive = false;
+function setRouletteActive(v) { _rouletteActive = !!v; }
+function isRouletteActive() { return _rouletteActive; }
 function isRouletteText(title, body, data) {
+  if (_rouletteActive) return false;
   const t = String(title || '') + ' ' + String(body || '');
   if (ROULETTE_TEXT_RE.test(t)) return true;
   if (data && typeof data === 'object') {
@@ -1099,5 +1107,7 @@ module.exports = {
   pruneInvalidFcmTokens,
   initializeFirebase,
   isRouletteText,
+  setRouletteActive,
+  isRouletteActive,
   ROULETTE_TEXT_RE
 };

@@ -44,16 +44,22 @@ const spinSchema = new mongoose.Schema({
   // Si prizeARS=0, status='no_prize'.
   status: {
     type: String,
-    // percent_pending: ganó un % en la próxima carga (lo aplica el agente);
-    // percent_used: ya se aplicó en una carga.
-    enum: ['no_prize', 'won', 'credited', 'credit_failed', 'percent_pending', 'percent_used'],
+    // percent_pending: ganó un % en la próxima carga (lo aplica el SERVER en la carga);
+    // percent_used: ya se aplicó en una carga (o el agente lo marcó a mano);
+    // percent_expired (#206): pasaron 24 h sin cargar → el % se perdió.
+    enum: ['no_prize', 'won', 'credited', 'credit_failed', 'percent_pending', 'percent_used', 'percent_expired'],
     default: 'won',
     index: true
   },
   creditTxId: { type: String, default: null, index: true },
   creditError: { type: String, default: null },
   creditedAt: { type: Date, default: null },
-  creditAttempts: { type: Number, default: 0 }
+  creditAttempts: { type: Number, default: 0 },
+  // #206 (réplica #303 de PAUTANUEVAsantino): trazabilidad del % EXTRA cuando se aplica.
+  usedAt: { type: Date, default: null },
+  usedBy: { type: String, default: null },          // 'auto-hgcash' | agente | 'vencido (24 h)'
+  usedOnAmount: { type: Number, default: 0 },       // carga sobre la que se aplicó
+  usedBonusARS: { type: Number, default: 0 }        // bono que generó (0 si se marcó a mano)
 }, { timestamps: true });
 
 // Garantiza 1 spin/día por user — incluso con race / reinstall.

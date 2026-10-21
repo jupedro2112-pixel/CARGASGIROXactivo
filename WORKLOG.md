@@ -4,7 +4,70 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-19**
+> **Última actualización: 2026-10-21**
+
+## Sesión 2026-10-21
+
+### 206. RULETA DIARIA como la de PAUTANUEVAsantino (réplica #254/#267/#293/#303/#305/#306 del gemelo) + bonos de ruleta en Transacciones
+- **Owner:** "fijate cómo está implementada la ruleta de PAUTANUEVAsantino y replicala en CARGASGIROX;
+  así debería quedar [capturas del panel: card verde de premios, budget, probar giro, reiniciar por
+  usuario, reiniciar diaria con aviso, cards/tabla con % EXTRA, quién ganó qué]; también que los
+  bonos que reclaman de ruleta aparezcan en TRANSACCIONES".
+- **Config `Config['dailyRoulette']`** pasa a los campos del gemelo: `{ enabled, prizes[{label, emoji,
+  type, value, rolloverX, weight}], requireDeposits, depositDays, requireAppInstalled }`. Elegible =
+  ACTIVADA + (app instalada si se exige) + **≥ `requireDeposits` cargas reales en los últimos
+  `depositDays` días** (0 días = histórico; `_dailyRouletteDepositsOk`). Legacy #188 (`minCargas30d`
+  "más de N en 30 días" / `requireApp`) se lee y traduce a N+1 en 30 días hasta volver a guardar.
+  Default sin config: activada, 1 carga en 7 días, app exigida, premios del gemelo (10% 40 · 20% 14 ·
+  $500 10 · $1.000 5 · 50% 1 · SIN PREMIO 30). Endpoints siguen siendo `GET/PUT /api/admin/roulette/config`.
+- **Giro cada 24 h** desde el último giro (`_dailyRouletteCooldown`, como el gemelo; antes era por día
+  calendario): status/spin devuelven `nextResetAt`/`nextSpinAt`; la celda del inicio dice "Girás en Xh Ym".
+  Reiniciar (global o por usuario) borra los giros de HOY **y** los de las últimas 24 h (los que bloquean).
+- **% EXTRA vence a las 24 h** (`DAILY_PCT_TTL_MS`, `_expireDailyRoulettePct`: cron cada 15 min + lazy en
+  status / `_pendingBonusFor` / `_consumeRoulettePercent`): limpia `dailyRoulettePendingPct` (se usa
+  `dailyRoulettePendingAt` como "ganado el"), giro → `percent_expired` (`usedBy 'vencido (24 h)'`), nota ⌛
+  en el chat. Status/spin exponen `pendingExpiresAt`, `pctTtlHours`, `prize.expiresAt`. Un % nuevo que
+  pisa a otro deja el viejo como `percent_used` sin bono ('pisado por un giro nuevo').
+- **Bonos de ruleta en Transacciones (réplica #267/#303):** el premio en SALDO sigue como `type:'roulette'`
+  pero con `metadata.source:'daily_roulette'` y descripción "Ruleta diaria — premio en saldo (label)";
+  el **% EXTRA aplicado en una carga** deja su propia `Transaction type:'bonus'` ("Ruleta diaria — 20%
+  EXTRA aplicado en carga de $X", `metadata.source:'daily_roulette'`, `appliedOnDeposit:true`,
+  `depositTxId`) vía `_recordAppliedBonusTx`, que también registra el **bono por instalar la app**
+  (`source:'install_bonus'`) y el **lote con regalo** (`source:'notif_batch'`) aplicados dentro de una
+  carga (hgcash y manual). La "Bonificación incluida en depósito…" genérica del depósito manual ya no se
+  duplica cuando el bono salió de un pendiente o de un lote. La base del reembolso en vivo
+  (`CASHBACK_GIFT_EXPR`) EXCLUYE `appliedOnDeposit:true` (ya cuenta `deposit.bonus`). El giro pasa a
+  `percent_used` con `usedAt/usedBy/usedOnAmount/usedBonusARS` (`_markDailySpinPctUsed`; "Marcar
+  aplicado" a mano → `usedBonusARS 0`). `_settlePendingBonuses(user, agent, ctx)` ahora recibe
+  `{amount, bonus, txId, transactionId, adminRole}`. Filtro 🎡 Ruleta del panel = `roulette` ∪
+  `bonus`+`daily_roulette`; la tabla muestra la sub-etiqueta de ORIGEN (`getTransactionSourceLabel`:
+  🎰 ruleta diaria / 📱 bono instalación / 🎁 lote con regalo / 🏦 auto hgcash / ↩️ devolución…).
+- **Reinicio por usuario** `POST /api/admin/roulette/reset-user` `{userId|username}` (solo admin general):
+  borra sus giros (hoy / 24 h), limpia el % pendiente, nota 🧪 en el chat y emite `rewards_changed` al
+  socket del cliente → la PWA refresca la celda sin F5 (`socket.js`).
+- **Candado de pushes condicional:** `notificationService.setRouletteActive(enabled)` lo setea
+  `getDailyRouletteConfig()` (boot, cada 5 min, cada status/giro). Ruleta ACTIVADA → las pushes que la
+  mencionan pasan y las migraciones del seed (reglas/plantillas) no corren; APAGADA → todo como #181.
+  "Reiniciar la ruleta de hoy" recupera el checkbox "📲 Avisar a todos" (solo sale si está activada).
+- **Panel (admin-sw v50):** card "🎰 PREMIOS DE LA RULETA DIARIA" idéntica al gemelo (ACTIVADA · cargas
+  mínimas · …en los últimos N días · exigir app · filas etiqueta/tipo/valor/peso/rollover · Probabilidades →),
+  card "🧪 REINICIAR RULETA PARA UN USUARIO", stats "% EXTRA aplicados / ganados · vencidos" y "$ Bono por %
+  EXTRA", columnas por día "% aplic./ganados" y "$ Bono %", historial con badges 🎁 % PENDIENTE (vence
+  <fecha>) / ✅ % APLICADO ($bono sobre carga $X · fecha · quién) / ⌛ % VENCIDO, probar giro muestra el %,
+  banner del chat con "vence …" y botón 🧪 Reiniciar (prueba). Las funciones viejas `*RoulettePrizes` se
+  reemplazaron por `loadDailyRouletteCfg/drAddPrize/drUpdateOdds/saveDailyRoulette`.
+- **PWA (SW v122):** celda bloqueada "Faltan N carga(s)" con toast "necesitás N cargas en los últimos D
+  días"; ruleta apagada → sin celda; "+10% · vence 23 h 5 min" / "% ya aplicado" / "% vencido"; en la
+  rueda: "⏳ Reclamable por 24 horas: cargá antes de que venza (vence en …)", estado PREMIO VENCIDO,
+  "Volvés a girar en Xh Ym". Los premios en saldo no cambian.
+- **Modelo `DailyRouletteSpin`:** estado `percent_expired` + `usedAt/usedBy/usedOnAmount/usedBonusARS`.
+- **Validado:** `node --check` (server.js, modelos, servicios, admin.js, roulette.js, socket.js, SWs) y
+  `check-tdz` ✅; HTML del panel 781/781 divs, ids únicos. **Back necesita redeploy.** PROBAR: panel →
+  Ruleta diaria → ver la card verde con los premios, guardar con "1 carga en 3 días" → la celda 🎰 aparece a
+  quien cargó esta semana; girar con cuenta de prueba → si sale %, Transacciones no muestra nada todavía y
+  al cargarle (hgcash o manual) aparece "Bonificación · 🎰 ruleta diaria · Ruleta diaria — 10% EXTRA aplicado
+  en carga de $X" y el historial lo marca ✅ % APLICADO; "🧪 Reiniciar" con ese usuario → la celda vuelve a
+  "¡GIRÁ HOY!" sin recargar.
 
 ## Sesión 2026-10-19
 

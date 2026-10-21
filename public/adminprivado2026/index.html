@@ -2168,36 +2168,34 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                         <button class="refresh-btn" onclick="loadRouletteAdmin()" title="Actualizar">🔄</button>
                     </div>
                 </div>
-                <!-- #188 PREMIOS Y ELEGIBILIDAD editables (solo admin general guarda) -->
-                <div style="background:linear-gradient(135deg,rgba(155,48,255,0.12),rgba(255,215,0,0.06));border:1.5px solid rgba(155,48,255,0.55);border-radius:11px;padding:13px 14px;margin-bottom:14px;" id="roulettePrizesCard">
-                    <div style="color:#d9a6ff;font-weight:900;font-size:12px;letter-spacing:0.6px;margin-bottom:6px;">🎁 PREMIOS Y PROBABILIDADES</div>
+                <!-- #188/#206 PREMIOS Y ELEGIBILIDAD editables (solo admin general guarda).
+                     #206: misma card que la ruleta diaria de PAUTANUEVAsantino. -->
+                <div id="drCfgCard" style="background:linear-gradient(135deg,rgba(38,224,127,0.10),rgba(0,150,90,0.06));border:1.5px solid rgba(38,224,127,0.55);border-radius:11px;padding:13px 14px;margin-bottom:14px;">
+                    <div style="color:#26e07f;font-weight:900;font-size:12px;letter-spacing:0.6px;margin-bottom:6px;">🎰 PREMIOS DE LA RULETA DIARIA (un giro gratis por día)</div>
                     <div style="color:#bbb;font-size:11px;margin-bottom:9px;line-height:1.5;">
-                        Cada fila es un premio. <b>Dinero</b> = fichas que se acreditan solas como BONO (con el rollover que pongas acá; si el <b>rollover GLOBAL</b> está activado, manda el global).
-                        <b>Bonificación</b> = un % EXTRA en la PRÓXIMA CARGA del cliente (queda pendiente, el modal Depositar lo sugiere y se marca aplicado solo).
-                        <b>Peso</b> = probabilidad relativa; la columna <b>Prob.</b> muestra el % real que sale de la suma de pesos. Dejá al menos un "Sin premio".
+                        <b>% Extra</b> = se suma automático en su próxima carga (vale 24 h) · <b>Saldo $</b> = se acredita al instante (con rollover) ·
+                        <b>Sin premio</b> = pierde el giro. El peso define la probabilidad. El cliente ve la celda 🎰 RULETA en el inicio de la app.
                     </div>
                     <div id="roulettePrizesGlobalHint" style="font-size:11px;color:#ffb347;margin-bottom:8px;display:none;"></div>
-                    <div style="overflow-x:auto;">
-                        <table class="data-table" style="min-width:640px;font-size:12px;">
-                            <thead><tr><th>Emoji</th><th>Etiqueta</th><th>Tipo</th><th>Valor</th><th>Rollover (x)</th><th>Peso</th><th>Prob.</th><th></th></tr></thead>
-                            <tbody id="roulettePrizesRows"></tbody>
-                        </table>
-                    </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
-                        <button class="btn btn-secondary btn-sm" onclick="addRoulettePrizeRow()">➕ Agregar premio</button>
-                        <span style="margin-left:auto;font-size:11px;color:#aaa;" id="roulettePrizesSummary"></span>
-                    </div>
-                    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:10px;border-top:1px dashed rgba(255,255,255,0.15);">
-                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#fff;">
-                            🔓 Cargas mínimas en 30 días (más de):
-                            <input id="rouletteMinCargas" type="number" min="0" max="1000" style="width:80px;background:rgba(0,0,0,0.45);border:1px solid rgba(212,175,55,0.40);color:#ffd700;padding:6px 8px;border-radius:7px;font-weight:800;">
+                    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:9px;">
+                        <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#fff;cursor:pointer;">
+                            <input type="checkbox" id="drEnabled" style="accent-color:#26e07f;"> <span><b>Ruleta diaria ACTIVADA</b></span>
                         </label>
-                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#fff;cursor:pointer;">
-                            <input type="checkbox" id="rouletteRequireApp" style="accent-color:#ffd700;"> 📲 Exigir la app instalada (con notificaciones)
+                        <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#fff;">
+                            Cargas mínimas para girar: <input id="drMinDeposits" type="number" min="0" max="100" value="1" style="width:60px;background:rgba(0,0,0,0.45);border:1px solid rgba(38,224,127,0.40);color:#fff;padding:5px 7px;border-radius:6px;">
                         </label>
-                        <button onclick="saveRoulettePrizes()" style="margin-left:auto;background:linear-gradient(135deg,#9b30ff,#6a0dad);color:#fff;border:none;padding:8px 14px;border-radius:7px;font-weight:900;font-size:12.5px;cursor:pointer;">💾 GUARDAR PREMIOS</button>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#fff;" title="Las cargas se cuentan solo dentro de esta ventana. 0 = cualquier carga histórica.">
+                            …en los últimos <input id="drDepositDays" type="number" min="0" max="365" value="7" style="width:60px;background:rgba(0,0,0,0.45);border:1px solid rgba(38,224,127,0.40);color:#fff;padding:5px 7px;border-radius:6px;"> días (0 = histórico)
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#fff;cursor:pointer;">
+                            <input type="checkbox" id="drRequireApp" style="accent-color:#26e07f;"> <span>Exigir app instalada</span>
+                        </label>
                     </div>
-                    <div style="font-size:10.5px;color:#888;margin-top:6px;">Si al cliente no le aparece la ruleta es por esto: necesita MÁS de las cargas mínimas en los últimos 30 días (0 = todos) y, si está tildado, la app instalada. En la app ve la celda bloqueada con cuántas cargas le faltan.</div>
+                    <div id="drPrizesList"></div>
+                    <button type="button" class="btn btn-secondary" onclick="drAddPrize()" style="margin:6px 6px 6px 0;">➕ Agregar premio</button>
+                    <button type="button" class="btn btn-primary" onclick="saveDailyRoulette()" style="margin:6px 0;">💾 Guardar ruleta diaria</button>
+                    <div id="drOddsHint" style="color:#8fb;font-size:11px;margin-top:6px;"></div>
+                    <div style="font-size:10.5px;color:#888;margin-top:6px;">Si al cliente no le aparece la ruleta es por esto: necesita las cargas mínimas en la ventana de días (0 = todos) y, si está tildado, la app instalada. En la app ve la celda bloqueada con cuántas cargas le faltan. Con la ruleta APAGADA tampoco salen pushes que la mencionen.</div>
                 </div>
 
                 <!-- Budget diario: monto máximo a regalar por día, distribuido
@@ -2231,11 +2229,25 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                     <div id="rouletteTestResult" style="margin-top:9px;"></div>
                 </div>
 
-                <!-- Reiniciar la ruleta del día: borra los giros de HOY
+                <!-- #206 (réplica #293): reiniciar la ruleta para UN SOLO usuario (pruebas). -->
+                <div style="background:linear-gradient(135deg,rgba(90,60,200,0.12),rgba(60,120,255,0.06));border:1.5px solid rgba(140,110,255,0.55);border-radius:11px;padding:13px 14px;margin-bottom:14px;">
+                    <div style="color:#b9a6ff;font-weight:900;font-size:12px;letter-spacing:0.6px;margin-bottom:6px;">🧪 REINICIAR RULETA PARA UN USUARIO (pruebas)</div>
+                    <div style="color:#bbb;font-size:11px;margin-bottom:9px;line-height:1.5;">Para probar la rueda con tu cuenta sin tocar a nadie más. Borra SU giro de hoy (y el de las últimas 24 h, que es el que lo bloquea) y limpia su % EXTRA pendiente. Lo ya acreditado no se devuelve (si vuelve a girar, cobra de nuevo). También está el botón 🧪 en el banner de ruleta del chat de cada cliente. Solo admin general.</div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:9px;">
+                        <input type="text" id="rouletteResetUserName" placeholder="usuario (ej: jose123)" autocomplete="off" style="flex:1;min-width:160px;background:#1a1a2e;color:#fff;border:1px solid #444;border-radius:7px;padding:8px 10px;font-size:12.5px;">
+                        <button onclick="resetRouletteUser()" style="background:linear-gradient(135deg,#7c5cff,#4b34c4);color:#fff;border:none;padding:8px 14px;border-radius:7px;font-weight:900;font-size:12.5px;cursor:pointer;letter-spacing:0.4px;">🧪 REINICIAR</button>
+                    </div>
+                    <div id="rouletteResetUserStatus" style="font-size:11.5px;color:#aaa;"></div>
+                </div>
+                <!-- Reiniciar la ruleta del día: borra los giros de HOY (y de las últimas 24 h)
                      para que todos los que ya giraron puedan girar de nuevo. -->
                 <div style="background:linear-gradient(135deg,rgba(255,60,60,0.10),rgba(255,107,53,0.06));border:1.5px solid rgba(255,60,60,0.50);border-radius:11px;padding:13px 14px;margin-bottom:14px;">
                     <div style="color:#ff6060;font-weight:900;font-size:12px;letter-spacing:0.6px;margin-bottom:6px;">🔄 REINICIAR RULETA DIARIA</div>
-                    <div style="color:#bbb;font-size:11px;margin-bottom:9px;line-height:1.5;">Borra los giros de HOY. Todos los que ya giraron van a poder volver a girar. Los premios ya acreditados no se tocan. Usalo cuando quieras reabrir la ruleta en el día.</div>
+                    <div style="color:#bbb;font-size:11px;margin-bottom:9px;line-height:1.5;">Borra los giros de HOY (y los de las últimas 24 h). Todos los que ya giraron van a poder volver a girar. Los premios ya acreditados no se tocan. Usalo cuando quieras reabrir la ruleta en el día.</div>
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#fff;margin-bottom:9px;">
+                        <input type="checkbox" id="rouletteResetNotify" checked style="accent-color:#ff6060;">
+                        <span>📲 Avisar a todos por notificación ("🎰 Ruleta diaria actualizada · ¡Volvé a probar tu suerte!") — solo sale si la ruleta está ACTIVADA</span>
+                    </label>
                     <button onclick="resetRouletteDaily()" style="background:linear-gradient(135deg,#ff4040,#c20000);color:#fff;border:none;padding:8px 16px;border-radius:7px;font-weight:900;font-size:12.5px;cursor:pointer;letter-spacing:0.4px;">🔄 REINICIAR LA RULETA DE HOY</button>
                     <div id="rouletteResetStatus" style="font-size:11.5px;color:#aaa;margin-top:9px;"></div>
                 </div>

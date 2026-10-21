@@ -133,9 +133,13 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   Test en frío: `node scripts/test-rollover-multicuenta.js`. La misma espec (§B)
   cruza el TITULAR del comprobante (`Comprobante.originHolderKey`) contra otras
   cuentas: avisa, no bloquea.
-- **Ruleta diaria y bono por instalar (2026-09-18):** los premios de la ruleta
-  (tipo dinero/bonificación %, valor, rollover, peso) y la elegibilidad (cargas
-  mínimas en 30 días, app requerida) viven en `Config['dailyRoulette']`; la regla
+- **Ruleta diaria y bono por instalar (2026-09-18, réplica del gemelo PAUTANUEVAsantino
+  2026-10-21 #206):** los premios de la ruleta (tipo dinero/bonificación %, valor, rollover,
+  peso) y la elegibilidad (`enabled`, `requireDeposits` cargas en los últimos `depositDays`
+  días, `requireAppInstalled`) viven en `Config['dailyRoulette']`; giro cada 24 h; el % EXTRA
+  vence a las 24 h; todo bono aplicado dentro de una carga deja su Transaction 'bonus' propia
+  con `metadata.appliedOnDeposit:true` (`_recordAppliedBonusTx`; excluida de la base del
+  reembolso en vivo). La regla
   del bono por instalar (% hasta un tope + % del excedente) en `Config['installBonus']`.
   No hardcodear "100%", "$5.000" ni "10 cargas": salen de la config y de las variables
   `{pct} {tope} {excedente} {regla}` de `/sys_install_bonus`. Un premio "%" de la
@@ -147,9 +151,10 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   (`claimAutoPromoPercent` → bonus de la MISMA operación con tope `_loteBonusAmount` →
   `settle`/`revert`). Una carga = como mucho UN bono automático. Las fichas de un lote
   por tiempo se acreditan recién cuando el cliente toca 🎁 RECLAMAR (`/api/gift/claim`).
-- **Ninguna push puede mencionar la RULETA** (2026-09-07): la ruleta diaria no está
-  activa; `notificationService.isRouletteText` bloquea el envío en las 5 funciones
-  (`blocked:'roulette'`) y el seed del boot migra reglas/plantillas guardadas.
+- **Pushes con la RULETA** (2026-09-07 → #206): `notificationService.isRouletteText` bloquea el
+  envío en las 5 funciones (`blocked:'roulette'`) y el seed del boot migra reglas/plantillas
+  SOLO si la ruleta diaria está APAGADA en el panel (`setRouletteActive`, lo setea
+  `getDailyRouletteConfig()`). Con la ruleta ACTIVADA (default) las pushes pasan.
 - **Username tomado en 1girox por OTRA estructura** (2026-09-07):
   `syncUserToPlatform` devuelve `code:'username_taken_foreign'` y TODAS las altas
   rebotan sin dejar cuenta local (una cuenta así "vinculada" es inoperable para

@@ -191,6 +191,12 @@ VIP.socket = (function () {
         // actualiza el header al instante y dispara la invitación al casino
         // (ui.handleBalancePush decide si subió o bajó). Antes este evento se
         // emitía desde el server y el cliente NO lo escuchaba (solo polling 30s).
+        // #206: el panel reinició la ruleta de este usuario (pruebas) → refrescar la
+        // celda 🎰 RULETA sin F5.
+        VIP.state.socket.on('rewards_changed', function () {
+            try { if (VIP.roulette && VIP.roulette.loadStatus) VIP.roulette.loadStatus(); } catch (e) { /* opcional */ }
+        });
+
         VIP.state.socket.on('balance_updated', function (data) {
             if (data && data.balance !== undefined && VIP.ui && VIP.ui.handleBalancePush) {
                 try { VIP.ui.handleBalancePush(data.balance); } catch (e) { /* nunca romper el socket */ }
