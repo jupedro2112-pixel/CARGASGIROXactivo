@@ -19142,20 +19142,13 @@ app.get('/api/roulette/recent-winners', authMiddleware, async (req, res) => {
       .limit(limit)
       .select('username prizeARS prizeType prizePct prizeLabel spunAt')
       .lean();
-    // Tapa ~70% del username. Visible: últimas 2 letras del nombre + todos
-    // los números finales. Ej: "lalodj777" → "****dj777", "atojoaquin" → "********in",
-    // "tribetcb45" → "******cb45".
+    // #206c (owner): se ven las PRIMERAS 3 letras y el resto tapado.
+    // Ej: "lalodj777" → "lal******", "gxcarina195" → "gxc********", "ana" → "a**".
     const _mask = (u) => {
       const s = String(u || '').trim();
       if (!s) return '—';
-      // Separamos el sufijo numérico del resto.
-      const m = s.match(/^(.*?)(\d+)$/);
-      const letters = m ? m[1] : s;
-      const numbers = m ? m[2] : '';
-      // De la parte de letras, mostramos las últimas 2 (o todas si tiene <=2).
-      const visibleLetters = letters.length <= 2 ? letters : letters.slice(-2);
-      const maskedCount = Math.max(0, letters.length - visibleLetters.length);
-      return '*'.repeat(maskedCount) + visibleLetters + numbers;
+      const vis = s.length <= 3 ? s.slice(0, 1) : s.slice(0, 3);
+      return vis + '*'.repeat(Math.max(3, s.length - vis.length));
     };
     const me = String((req.user && req.user.username) || '').toLowerCase();
     const items = winners.map(w => {
@@ -19456,6 +19449,7 @@ app.post('/api/roulette/spin', authMiddleware, async (req, res) => {
       await _emitAdminOnlyChatNote(userId, username,
         `🎰 Ruleta DIARIA: ganó ${pick.label} (${prizePct}% EXTRA) para su PRÓXIMA CARGA — PENDIENTE, vence en 24 h. Lo aplica el SISTEMA solo en la carga automática (hgcash) o manual y queda marcado como aplicado; también podés marcarlo a mano desde el chat.`).catch(() => {});
       logger.info(`[ROULETTE] ${username} → ${prizePct}% EXTRA pendiente (${dateKey}), vence ${_dailyPctExpiresAt(_wonAt).toISOString()}`);
+      try { io.emit('roulette_winner', { prizeType: 'percent', prizePct, prizeLabel: pick.label, spunAt: spinDoc.spunAt }); } catch (_) {} // #206c lista en vivo
       return res.json({
         success: true,
         nextSpinAt: _nextSpinAt, prizeIndex,
@@ -19519,6 +19513,7 @@ app.post('/api/roulette/spin', authMiddleware, async (req, res) => {
     // 'roulette' (NO 'deposit': no es carga real). Fire-and-forget.
     await _recordRouletteTransaction(spinDoc.id, userId, username, prizeARS, pick.label, txId, credit);
     logger.info(`[ROULETTE] ${username} → $${prizeARS} acreditado tx=${txId}`);
+    try { io.emit('roulette_winner', { prizeType: 'cash', prizeARS, prizeLabel: pick.label, spunAt: spinDoc.spunAt }); } catch (_) {} // #206c lista en vivo
     return res.json({
       success: true,
       nextSpinAt: _nextSpinAt, prizeIndex,

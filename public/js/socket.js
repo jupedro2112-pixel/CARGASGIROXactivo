@@ -193,6 +193,11 @@ VIP.socket = (function () {
         // emitía desde el server y el cliente NO lo escuchaba (solo polling 30s).
         // #206: el panel reinició la ruleta de este usuario (pruebas) → refrescar la
         // celda 🎰 RULETA sin F5.
+        // #206c: alguien ganó en la ruleta diaria → refrescar "Ganadores de hoy · EN VIVO".
+        VIP.state.socket.on('roulette_winner', function () {
+            try { if (VIP.roulette && VIP.roulette.loadRecentWinners) VIP.roulette.loadRecentWinners(); } catch (e) { /* opcional */ }
+        });
+
         VIP.state.socket.on('rewards_changed', function () {
             try { if (VIP.roulette && VIP.roulette.loadStatus) VIP.roulette.loadStatus(); } catch (e) { /* opcional */ }
         });
