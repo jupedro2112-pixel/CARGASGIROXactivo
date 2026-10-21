@@ -1058,6 +1058,16 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   auth, socket, chat, ui, refunds, fire, roulette, reviews, promobonus, notifications,
   withdraw, installbonus, notifsurvey, publisherwelcome, campaign, meta-pixel, apptest,
   app). El orden real de carga está en index.html (el comentario de app.js está viejo).
+- **Ruleta diaria (roulette.js, #206/#206b):** celda `#rouletteHomeCard` en el inicio ("¡GIRÁ
+  HOY!" / "Girás en Xh Ym" / "+10% · vence …" / 🔒 "Faltan N cargas"; oculta si la ruleta está
+  apagada) → `VIP.roulette.open()` pinta en `#rouletteModal` la MISMA rueda del gemelo
+  PAUTANUEVAsantino (`_wheelMarkup`: aro con luces, gajos en el orden de `status.prizes`,
+  etiquetas radiales, puntero, cubo con el logo) + botón GIRAR + chips de premios +
+  "Ganadores de hoy". `spin()` manda `POST /api/roulette/spin`, gira `#wrWheel` 5 vueltas
+  hasta `prizeIndex` (4,2 s) y a los 4,4 s muestra el resultado (`_resultFor`: saldo
+  acreditado con rollover / % EXTRA con "reclamable 24 h" y botón "💳 Cargar ahora" →
+  `enterCasino()` / vencido / sin suerte con cuenta regresiva). Con un giro ya hecho la rueda
+  queda parada en su gajo (`_parkWheelAt`). `socket 'rewards_changed'` → `loadStatus()`.
 - **SW único**: `firebase-messaging-sw.js` (CACHE_VERSION se bumpea por release —
   ver el valor actual en el archivo) — FCM + caché: `/js/` y `/css/`
   stale-while-revalidate (deploy llega en la SIGUIENTE carga sin bumpear versión),

@@ -60,6 +60,18 @@
   días"; ruleta apagada → sin celda; "+10% · vence 23 h 5 min" / "% ya aplicado" / "% vencido"; en la
   rueda: "⏳ Reclamable por 24 horas: cargá antes de que venza (vence en …)", estado PREMIO VENCIDO,
   "Volvés a girar en Xh Ym". Los premios en saldo no cambian.
+- **#206b — la RUEDA que ve el usuario es la del gemelo (SW v123).** Owner: "cambiá esta ruleta que
+  ve el usuario por la que está en PAUTANUEVAsantino, es mejor visualmente". Antes el modal era un
+  ícono 🎰 que giraba; ahora `roulette.js` pinta la misma rueda (`_wheelMarkup` portada de
+  `ui.js` del gemelo: aro verde con luces, gajos con los premios del panel en orden, etiquetas
+  radiales, puntero, cubo con el logo de 1girox), título verde "🎰 RULETA DIARIA", botón GIRAR
+  verde, y la rueda gira 5 vueltas hasta el gajo ganador. Para eso el `POST /api/roulette/spin`
+  devuelve `prizeIndex` (índice del premio en `status.prizes`, incluso cuando el budget lo degradó
+  a SIN PREMIO). Resultado debajo de la rueda: "🎉 ¡Ganaste $500 GRATIS! Ya está ACREDITADO" (+
+  rollover), "¡Ganaste 10% EXTRA! Se suma automático en tu PRÓXIMA CARGA · ⏳ Reclamable por 24
+  horas" con botón "💳 Cargar ahora y usarlo" (abre el casino con chat), "😅 Hoy no hubo suerte ·
+  próximo giro en 23 h 42 min". Si ya giró, la rueda queda parada en su gajo con el resultado. La
+  lista "Ganadores de hoy · EN VIVO" sigue debajo.
 - **Modelo `DailyRouletteSpin`:** estado `percent_expired` + `usedAt/usedBy/usedOnAmount/usedBonusARS`.
 - **Validado:** `node --check` (server.js, modelos, servicios, admin.js, roulette.js, socket.js, SWs) y
   `check-tdz` ✅; HTML del panel 781/781 divs, ids únicos. **Back necesita redeploy.** PROBAR: panel →

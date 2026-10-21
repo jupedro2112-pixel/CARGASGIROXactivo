@@ -19437,6 +19437,11 @@ app.post('/api/roulette/spin', authMiddleware, async (req, res) => {
     // carga (pisa un % anterior). El agente lo ve en el chat y el modal Depositar
     // lo sugiere solo; se consume al cargar con bono.
     const _nextSpinAt = new Date(spinDoc.spunAt.getTime() + DAILY_ROULETTE_COOLDOWN_MS).toISOString();
+    // #206b: índice del gajo ganador (mismo orden que `prizes` del status) para que la
+    // rueda de la PWA pare en el premio correcto.
+    let prizeIndex = rcfg.prizes.indexOf(pick);
+    if (prizeIndex < 0) prizeIndex = rcfg.prizes.findIndex(p => p.type === pick.type && Number(p.value) === Number(pick.value));
+    if (prizeIndex < 0) prizeIndex = Math.max(0, rcfg.prizes.findIndex(p => p.type === 'none'));
     if (prizePct > 0) {
       const _wonAt = new Date();
       // Si tenía otro % pendiente, su giro queda como usado-sin-bono (lo pisa el nuevo).
@@ -19453,7 +19458,7 @@ app.post('/api/roulette/spin', authMiddleware, async (req, res) => {
       logger.info(`[ROULETTE] ${username} → ${prizePct}% EXTRA pendiente (${dateKey}), vence ${_dailyPctExpiresAt(_wonAt).toISOString()}`);
       return res.json({
         success: true,
-        nextSpinAt: _nextSpinAt,
+        nextSpinAt: _nextSpinAt, prizeIndex,
         prize: { prizeARS: 0, prizeType: 'percent', prizePct, prizeLabel: pick.label, emoji: pick.emoji, status: 'percent_pending', expiresAt: _dailyPctExpiresAt(_wonAt).toISOString(), ttlHours: 24 }
       });
     }
@@ -19461,7 +19466,7 @@ app.post('/api/roulette/spin', authMiddleware, async (req, res) => {
       logger.info(`[ROULETTE] ${username} → SIN PREMIO (${dateKey})`);
       return res.json({
         success: true,
-        nextSpinAt: _nextSpinAt,
+        nextSpinAt: _nextSpinAt, prizeIndex,
         prize: { prizeARS: 0, prizeType: 'none', prizeLabel: pick.label, emoji: pick.emoji, status: 'no_prize' }
       });
     }
@@ -19516,7 +19521,7 @@ app.post('/api/roulette/spin', authMiddleware, async (req, res) => {
     logger.info(`[ROULETTE] ${username} → $${prizeARS} acreditado tx=${txId}`);
     return res.json({
       success: true,
-      nextSpinAt: _nextSpinAt,
+      nextSpinAt: _nextSpinAt, prizeIndex,
       prize: {
         prizeARS, prizeType: 'cash', prizeLabel: pick.label, emoji: pick.emoji,
         status: 'credited', transactionId: txId,
