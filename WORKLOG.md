@@ -93,6 +93,13 @@
   pasos de siempre (`_showNeedsAppModal`, expuesta como `VIP.roulette.showInstallGuide`); `spin()`
   corta del lado del cliente (el server igual devuelve 403). Si faltan cargas, la rueda también se
   abre con el aviso y el botón "💳 Cargar ahora".
+- **#206g — cartel del bono por instalar la app, compacto de verdad (SW v128).** Owner (captura de
+  iPhone 17): "sigue gigante el cartel de instalar app, es lo que te pedí hace un rato". El #204 solo
+  reacomodó; ahora el cartel es UNA fila en todos los anchos: 🎁 · título corto ("100% de bono hasta
+  $5.000") · regla en una línea ("En tu próxima carga, por instalar la app · 20% sobre lo que pase de
+  $5.000 · se aplica solo · única vez") · botón chico "Reclamar". La nota amarilla de abajo
+  (`#installBonusDirectNotice`, "avisale al agente…") se eliminó: en esta repo el bono lo aplica el
+  sistema solo (#189). Mide ~56px de alto en el celular (antes ~280px).
 - **Modelo `DailyRouletteSpin`:** estado `percent_expired` + `usedAt/usedBy/usedOnAmount/usedBonusARS`.
 - **Validado:** `node --check` (server.js, modelos, servicios, admin.js, roulette.js, socket.js, SWs) y
   `check-tdz` ✅; HTML del panel 781/781 divs, ids únicos. **Back necesita redeploy.** PROBAR: panel →

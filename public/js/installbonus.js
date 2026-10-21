@@ -38,10 +38,7 @@ VIP.installBonus = (function () {
         // Usamos acquisitionCampaign del usuario (verdad del server), no la
         // atribución de localStorage (que vence a los 60 días).
         const notice = _el('installBonusDirectNotice');
-        if (notice) {
-            const fromPauta = !!(VIP.state.currentUser && VIP.state.currentUser.acquisitionCampaign);
-            notice.style.display = (!_claimed && !fromPauta) ? '' : 'none';
-        }
+        if (notice) notice.style.display = 'none'; // #206g: sin nota extra (ver _applyRuleTexts)
 
         VIP.ui.adjustLayout();
     }
@@ -56,16 +53,17 @@ VIP.installBonus = (function () {
         const ex = Number(r.excessPct) || 0;
         const corto = pct + '% de bono' + (cap > 0 ? ' hasta ' + money(cap) : '');
         const set = (id, txt) => { const el = _el(id); if (el) el.textContent = txt; };
-        set('installBonusTitle', '¡' + corto + ' en tu próxima carga!');
-        set('installBonusClaimBtn', '🎁 Reclamar mi ' + pct + '%');
-        set('installBonusRuleText', r.text || '');
+        // #206g: título corto + regla en UNA línea (el cartel era gigante en el iPhone).
+        set('installBonusTitle', corto.charAt(0).toUpperCase() + corto.slice(1));
+        set('installBonusClaimBtn', 'Reclamar');
+        set('installBonusRuleText', 'En tu próxima carga, por instalar la app' + (cap > 0 && ex > 0 ? ' · ' + ex + '% sobre lo que pase de ' + money(cap) : '') + ' · se aplica solo · única vez.');
         set('infoInstallBonusDesc', 'Instalá la app, reclamá el bono y en tu próxima carga te damos el ' + pct + '%' + (cap > 0 ? ' (hasta ' + money(cap) + ' de carga' + (ex > 0 ? '; sobre el resto, el ' + ex + '%' : '') + ')' : '') + '. Por única vez.');
         set('adInstallBonusTitle', 'Bono ' + pct + '% con la app');
         set('adInstallBonusDesc', 'Instalá la app y tu próxima carga suma un ' + pct + '%' + (cap > 0 ? ' (hasta ' + money(cap) + (ex > 0 ? ' + ' + ex + '% del resto' : '') + ')' : '') + '.');
+        // #206g: la nota amarilla de abajo se ELIMINÓ: en esta repo el bono lo aplica el
+        // SISTEMA solo en la carga (#189) y "única vez" ya está en la línea de la regla.
         const notice = _el('installBonusDirectNotice');
-        // #204: la regla (r.text) YA está en installBonusRuleText; acá iba repetida y
-        // el cartel ocupaba media pantalla en el celular.
-        if (notice) notice.innerHTML = '⚠️ Es por <strong>única vez</strong>. Cuando vayas a cargar, avisale al agente que tenés el bono por instalar la app y te lo aplica en el momento.';
+        if (notice) { notice.innerHTML = ''; notice.style.display = 'none'; }
     }
     function _escHtml(t) { const d = document.createElement('div'); d.textContent = String(t == null ? '' : t); return d.innerHTML; }
 
