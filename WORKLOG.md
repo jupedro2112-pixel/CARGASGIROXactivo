@@ -84,6 +84,15 @@
   una ruleta llamativa". `_wheelIconSvg()` en roulette.js: rueda SVG inline de 40px con 8 gajos de
   colores que giran despacio, aro dorado con 12 luces, cubo dorado y puntero blanco arriba, con
   brillo (`drop-shadow`). La celda bloqueada sigue con 🔒.
+- **#206f — menú ☰ + sin app se ve igual (SW v127).** Owner: "que aparezca la ruleta en el menú
+  hamburguesa; si exige app instalada, que la vean pero al girar esté bloqueada y explique cómo
+  instalar la app como siempre, porque hoy directamente no les aparece". Entrada "🎡 Ruleta diaria
+  (giro gratis)" en el menú (`#menuRouletteBtn` → `VIP.roulette.open()`; con la ruleta apagada,
+  toast). Con `needsAppNotifs` la celda del inicio se muestra ("📲 Instalá la app") y la rueda
+  abre completa: aviso 🔒, botón GIRAR bloqueado y "📲 INSTALAR LA APP — ver cómo" → la guía de 3
+  pasos de siempre (`_showNeedsAppModal`, expuesta como `VIP.roulette.showInstallGuide`); `spin()`
+  corta del lado del cliente (el server igual devuelve 403). Si faltan cargas, la rueda también se
+  abre con el aviso y el botón "💳 Cargar ahora".
 - **Modelo `DailyRouletteSpin`:** estado `percent_expired` + `usedAt/usedBy/usedOnAmount/usedBonusARS`.
 - **Validado:** `node --check` (server.js, modelos, servicios, admin.js, roulette.js, socket.js, SWs) y
   `check-tdz` ✅; HTML del panel 781/781 divs, ids únicos. **Back necesita redeploy.** PROBAR: panel →

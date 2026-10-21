@@ -94,7 +94,16 @@
             const _min = Number(_state && (_state.minDeposits != null ? _state.minDeposits : _state.minCargas)) || 0;
             const _have = Number(_state && (_state.deposits != null ? _state.deposits : _state.cargas30d)) || 0;
             const _days = Number(_state && _state.depositDays) || 0;
-            if (_state && _state.enabled !== false && (_state.needsDeposit || _state.needsActive) && _min > 0) {
+            if (_state && _state.enabled !== false && _state.needsAppNotifs) {
+                // #206f (owner): si falta la app, la ruleta SE VE igual; al querer girar
+                // queda bloqueada y se explica cómo instalar la app.
+                c.innerHTML = '<div class="dash-roulette" onclick="VIP.roulette && VIP.roulette.open()">'
+                    + '<span class="dash-roulette-avatar dash-roulette-avatar--wheel">' + _wheelIconSvg(40) + '</span>'
+                    + '<span class="dash-roulette-label">RULETA</span>'
+                    + '<span class="dash-roulette-sub">📲 Instalá la app</span>'
+                    + '</div>';
+                c.style.display = '';
+            } else if (_state && _state.enabled !== false && (_state.needsDeposit || _state.needsActive) && _min > 0) {
                 const faltan = Math.max(1, _min - _have);
                 const _msg = '🎰 Para girar la ruleta diaria necesitás ' + _min + ' carga' + (_min === 1 ? '' : 's') + (_days > 0 ? ' en los últimos ' + _days + ' días' : '') + ' (llevás ' + _have + '). Cargá y girás gratis.';
                 c.innerHTML = '<div class="dash-roulette" style="opacity:.55;" onclick="VIP.ui&&VIP.ui.showToast&&VIP.ui.showToast(\'' + _msg.replace(/'/g, '') + '\',\'info\')">'
@@ -241,7 +250,11 @@
     function open() {
         const modal = document.getElementById('rouletteModal');
         if (!modal) return;
-        if (!_state) { loadStatus(); }
+        if (_state && _state.enabled === false) {
+            try { VIP.ui.showToast('🎰 La ruleta diaria no está disponible por ahora.', 'info'); } catch (_) {}
+            return;
+        }
+        if (!_state) { loadStatus().then(() => { if (modal.style.display === 'flex') _renderModal(); }); }
         _renderModal();
         modal.style.display = 'flex';
     }
@@ -461,6 +474,22 @@
             const r = _resultFor(spin);
             if (rEl) rEl.innerHTML = r.html;
             if (aEl) aEl.innerHTML = r.actions;
+        } else if (_state.needsAppNotifs && !_state.eligible) {
+            // #206f: sin app instalada → la rueda se ve, el giro está bloqueado y se explica cómo instalarla.
+            if (rEl) rEl.innerHTML = '<div style="background:rgba(255,215,0,0.10);border:1px solid rgba(255,215,0,0.55);border-radius:12px;padding:11px 12px;font-size:13px;line-height:1.45;">' +
+                '🔒 <b>Para girar necesitás la app instalada</b> con las notificaciones activas. Es gratis y tarda un minuto: tocá el botón y te mostramos cómo.' +
+                (_state.minDeposits > 0 && _state.needsDeposit ? '<div style="margin-top:6px;font-size:12px;opacity:.85;">También hace falta ' + _esc(_state.minDeposits) + ' carga' + (_state.minDeposits === 1 ? '' : 's') + (_state.depositDays > 0 ? ' en los últimos ' + _esc(_state.depositDays) + ' días' : '') + '.</div>' : '') +
+                '</div>';
+            if (aEl) aEl.innerHTML =
+                '<button type="button" onclick="VIP.roulette.spin()" style="' + BTN_MAIN + 'opacity:.55;filter:grayscale(.3);">🔒 GIRAR</button>' +
+                '<button type="button" onclick="VIP.roulette.showInstallGuide()" style="width:100%;background:linear-gradient(135deg,#ffd700,#ff8800);color:#000;border:none;border-radius:16px;padding:14px;font-size:16px;font-weight:900;cursor:pointer;box-shadow:0 4px 14px rgba(255,215,0,0.40);">📲 INSTALAR LA APP — ver cómo</button>' +
+                '<button type="button" onclick="VIP.roulette.close()" style="' + BTN_SOFT + '">Cerrar</button>';
+        } else if (!_state.eligible && (_state.needsDeposit || _state.needsActive)) {
+            if (rEl) rEl.innerHTML = '<div style="background:rgba(255,215,0,0.10);border:1px solid rgba(255,215,0,0.55);border-radius:12px;padding:11px 12px;font-size:13px;line-height:1.45;">' +
+                '🔒 <b>La ruleta es para clientes:</b> necesitás ' + _esc(_state.minDeposits || 1) + ' carga' + (Number(_state.minDeposits) === 1 ? '' : 's') + (_state.depositDays > 0 ? ' en los últimos ' + _esc(_state.depositDays) + ' días' : '') + ' (llevás ' + _esc(_state.deposits || 0) + '). Cargá y girás gratis.</div>';
+            if (aEl) aEl.innerHTML =
+                '<button type="button" onclick="VIP.roulette.close();if(window.VIP&&VIP.ui&&VIP.ui.enterCasino)VIP.ui.enterCasino()" style="' + BTN_MAIN.replace('padding:16px;font-size:19px', 'padding:15px;font-size:17px') + '">💳 Cargar ahora</button>' +
+                '<button type="button" onclick="VIP.roulette.close()" style="' + BTN_SOFT + '">Cerrar</button>';
         } else {
             if (aEl) aEl.innerHTML = '<button type="button" id="rouletteSpinBtn" onclick="VIP.roulette.spin()" style="' + BTN_MAIN + '">🎰 GIRAR</button>';
         }
@@ -475,6 +504,7 @@
 
     async function spin() {
         if (_spinning) return;
+        if (_state && _state.needsAppNotifs && !_state.eligible) { _showNeedsAppModal(); return; } // #206f
         _spinning = true;
         const btn = document.getElementById('rouletteSpinBtn');
         if (btn) { btn.disabled = true; btn.textContent = 'Girando…'; btn.style.opacity = '.7'; }
@@ -602,7 +632,7 @@
         } catch (e) { /* best-effort */ }
     }
 
-    VIP.roulette = { loadStatus, open, close, spin, loadRecentWinners };
+    VIP.roulette = { loadStatus, open, close, spin, loadRecentWinners, showInstallGuide: _showNeedsAppModal };
 
     // Boot: cargar status apenas el usuario esté autenticado.
     document.addEventListener('DOMContentLoaded', () => {

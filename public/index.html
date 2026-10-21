@@ -510,6 +510,11 @@
                 onclick="if(window.VIP&&VIP.ui&&VIP.ui.openCasinoChooser)VIP.ui.openCasinoChooser()">
                 <span class="menu-item-icon">🎰</span><span class="menu-item-label">Página CASINO <span style="font-weight:600;color:#00ff88;font-size:11px;">(entrás logueado)</span></span>
             </button>
+            <!-- #206f Ruleta diaria desde el menú (si falta la app, la rueda se ve pero el giro queda bloqueado con la guía). -->
+            <button class="menu-item" id="menuRouletteBtn" title="Ruleta diaria: un giro gratis cada 24 h" role="menuitem"
+                onclick="if(window.VIP&&VIP.roulette&&VIP.roulette.open)VIP.roulette.open()">
+                <span class="menu-item-icon">🎡</span><span class="menu-item-label">Ruleta diaria <span style="font-weight:600;color:#ffd700;font-size:11px;">(giro gratis)</span></span>
+            </button>
             <button class="menu-item referral-btn" id="referralBtn" title="Mis Referidos" role="menuitem">
                 <span class="menu-item-icon">🤝</span><span class="menu-item-label">Mis Referidos</span>
             </button>
