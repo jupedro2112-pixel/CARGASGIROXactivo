@@ -19142,20 +19142,19 @@ app.get('/api/roulette/recent-winners', authMiddleware, async (req, res) => {
       .limit(limit)
       .select('username prizeARS prizeType prizePct prizeLabel spunAt')
       .lean();
-    // #206d (owner): se ven las ÚLTIMAS 2 letras del nombre y los ÚLTIMOS 3 dígitos;
-    // todo lo anterior va tapado. Ej: "argencarlos904" → "*********os904",
-    // "gxcarina1955" → "******na*955", "lalodj" → "****dj".
+    // #206h (owner): se ven las ÚLTIMAS 2 letras del nombre, los ÚLTIMOS 3 dígitos y lo
+    // que venga después de los dígitos; adelante van SIEMPRE 8 asteriscos (largo fijo:
+    // un nombre corto "simula" ser largo para que nadie adivine la cuenta).
+    // Ej: "argencarlos904" → "********os904", "marshallpepe291x" → "********pe291x",
+    // "axe18" → "********xe18", "ana" → "********a", "lalodj" → "********dj".
     const _mask = (u) => {
       const s = String(u || '').trim();
       if (!s) return '—';
-      const m = s.match(/^(.*?)(\d*)$/);
-      const letters = m ? m[1] : s, digits = m ? m[2] : '';
-      const visL = letters.length <= 2 ? letters.slice(-1) : letters.slice(-2);
-      const visD = digits.slice(-3);
-      return '*'.repeat(Math.max(letters.length <= 2 ? 2 : 0, letters.length - visL.length)) + visL +
-        '*'.repeat(digits.length - visD.length) + visD;
-    };
-    const me = String((req.user && req.user.username) || '').toLowerCase();
+      const m = s.match(/^(.*?)(\d+)([^\d]*)$/);
+      const prefix = m ? m[1] : s, digits = m ? m[2] : '', suffix = m ? m[3] : '';
+      const visL = prefix.length <= 2 ? prefix.slice(-1) : prefix.slice(-2);
+      return '********' + visL + digits.slice(-3) + suffix;
+    };    const me = String((req.user && req.user.username) || '').toLowerCase();
     const items = winners.map(w => {
       const isMe = String(w.username || '').toLowerCase() === me;
       const ageMs = Date.now() - new Date(w.spunAt).getTime();
