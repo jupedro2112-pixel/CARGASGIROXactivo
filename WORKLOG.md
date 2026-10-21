@@ -75,7 +75,8 @@
 - **#206c — ganadores en vivo (SW v124).** Owner: "que los nombres estén tapados al final y
   muestren las primeras 3 letras; cuando una persona real gana que se actualice la lista; y que
   aparezca también si gana un porcentaje". Máscara de `/api/roulette/recent-winners`: 3 primeras
-  letras + asteriscos (`gxc********`). Al ganar (saldo o % EXTRA) el server hace
+  letras + asteriscos (`gxc********`) → **#206d** (owner, mismo día): últimas 2 letras + últimos 3
+  dígitos visibles y el resto tapado (`argencarlos904` → `*********os904`; SW v125). Al ganar (saldo o % EXTRA) el server hace
   `io.emit('roulette_winner')` a todos los conectados (cruza instancias por el adapter Redis) y la
   PWA (`socket.js`) recarga la lista al instante; sigue el refresco cada 30 s como respaldo. Los %
   ya entraban en la lista (`prizeType:'percent'`) y ahora se muestran como "+10% EXTRA".

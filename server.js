@@ -19142,13 +19142,18 @@ app.get('/api/roulette/recent-winners', authMiddleware, async (req, res) => {
       .limit(limit)
       .select('username prizeARS prizeType prizePct prizeLabel spunAt')
       .lean();
-    // #206c (owner): se ven las PRIMERAS 3 letras y el resto tapado.
-    // Ej: "lalodj777" → "lal******", "gxcarina195" → "gxc********", "ana" → "a**".
+    // #206d (owner): se ven las ÚLTIMAS 2 letras del nombre y los ÚLTIMOS 3 dígitos;
+    // todo lo anterior va tapado. Ej: "argencarlos904" → "*********os904",
+    // "gxcarina1955" → "******na*955", "lalodj" → "****dj".
     const _mask = (u) => {
       const s = String(u || '').trim();
       if (!s) return '—';
-      const vis = s.length <= 3 ? s.slice(0, 1) : s.slice(0, 3);
-      return vis + '*'.repeat(Math.max(3, s.length - vis.length));
+      const m = s.match(/^(.*?)(\d*)$/);
+      const letters = m ? m[1] : s, digits = m ? m[2] : '';
+      const visL = letters.length <= 2 ? letters.slice(-1) : letters.slice(-2);
+      const visD = digits.slice(-3);
+      return '*'.repeat(Math.max(letters.length <= 2 ? 2 : 0, letters.length - visL.length)) + visL +
+        '*'.repeat(digits.length - visD.length) + visD;
     };
     const me = String((req.user && req.user.username) || '').toLowerCase();
     const items = winners.map(w => {
