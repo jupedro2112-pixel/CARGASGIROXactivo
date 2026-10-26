@@ -41,9 +41,10 @@ const notifBatchSchema = new mongoose.Schema({
   // Etiqueta para el historial ("Lote de AGENTE — <name>").
   name: { type: String, default: '', trim: true, maxlength: 60 },
   mode: { type: String, enum: ['code', 'window'], required: true },
-  giftType: { type: String, enum: ['percent', 'fixed'], required: true },
-  // % (1..200) o $ (1..500000) según giftType.
-  amount: { type: Number, required: true, min: 1 },
+  // #211: 'none' = sólo aviso (sin regalo) — lo usan el recorrido de retención y el piloto automático.
+  giftType: { type: String, enum: ['percent', 'fixed', 'none'], required: true },
+  // % (1..200) o $ (1..500000) según giftType; 0 con 'none'.
+  amount: { type: Number, required: true, min: 0 },
   // Fichas: rollover del bono auto-acreditado (0 = libre). #191: también el % AUTOMÁTICO
   // (va como bonus_multiplier de la carga). Si el rollover GLOBAL está encendido, lo pisa.
   rolloverX: { type: Number, default: 0, min: 0 },

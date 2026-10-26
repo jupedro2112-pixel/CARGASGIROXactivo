@@ -1302,6 +1302,11 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
 | `fbAdsWebhook.startWorker` | 5 min | activo | nextRetryAt |
 | `outboundWebhook.startWorker` (webhooks salientes, #197) | 5 min (1er tick al minuto) | activo | `OutboundWebhookQueue.nextRetryAt` + `event_id` estable (el receptor dedupe por `X-Webhook-Id`) |
 | Limpieza mensajes >3d | 6 h | activo (red de seguridad del TTL) | deleteMany |
+| `_storyAutoTick` / `_storiesRepeatTick` (#210) | 5 min / 1 h | **OFF por default** (flag `stories`) | `Story.autoKey` único |
+| `_journeyTick` (recorrido, #211) | 20 min (corre 17–19 h ART, 1×/día) | **OFF por default** (flag `notifCenter` + `notifCenter.journey`) | `_cronClaim('journey')` + `journeyLast.day` + `User.journey.sent` |
+| `_refundReminderTick` (#211) | 15 min (11–21 h) | **OFF por default** (flag `notifCenter`) | `_cronClaim('refundremind')` + `refundRemindLast.slots` |
+| `_weeklyReviewTick` (#211) | 30 min (lunes 10–14 h) | **OFF por default** (flag `notifCenter`) | `_cronClaim('weeklyreview')` + `weeklyReview.weekKey` |
+| `_autopilotTick` (#211) | 3 h (1º a los 5 min) | **OFF por default** (flag `autopilot`) | `ScheduledCampaign.autoKey` único sparse |
 
 Migraciones one-shot: patrón flag en Config (`migration_*_done`) en `initializeData()`.
 El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
@@ -1523,3 +1528,19 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
 - PWA: `public/js/stories.js` (`VIP.stories = {init, load, loadPublic, open, openById, claimBonus, close, …}`), botón
   `#navHistorias` (header), anillo `#lgStoriesRing` (ingreso), visor `#storyViewer`; CSS en `chat.css` y `login.css`.
   El SW reenvía `data.url` de la push (`vip-open`).
+
+### 10.3 Centro de avisos y piloto automático (#211)
+
+- **Audiencia de lotes:** `_resolveNotifBatchAudience` = wrapper (`appOnly`, `monthlyCap`, `dailyCap`, `rotGroup`) sobre
+  `_resolveNotifBatchAudienceBase`. `NotifBatch.giftType 'none'` = sólo aviso. Preferencias: `User.notifPrefs`
+  (`prefsFilter` en notificationService; `sendPushIfOffline` mira `data.kind`). Fatiga ⇒ `/api/activity/ping` la resetea.
+- **Recorrido:** `retentionJourney.{classify,pickStep,render,batchBody}`; motor `_journeyScan`/`_journeyTick`; panel
+  `/api/admin/notif-center` (GET/PUT/run). Config `notifCenter {monthlyCap, journey, refundReminder}`, `journeyTuning`, `journeyLast`.
+- **Avisos del reembolso:** `_refundRemindPlan/_refundRemindRun/_refundReminderTick` (periodKey igual al del reclamo:
+  `daily:YYYY-MM-DD`, `weekly:<lunes>`, `monthly:YYYY-MM`). Push `url:'/?open=refund'` ⇒ `app.js` abre Reembolso.
+- **Revisión semanal:** `_weeklyMetrics` + `weeklyReview.decide` ⇒ `journeyTuning`; informe en `Config['weeklyReview']`;
+  rutas `/api/admin/weekly-review` (+`/run`).
+- **Piloto:** `getAutopilotConfig` (fijo: 19:00, 4 h, 3 tandas/30 min, tope 8 o el del Centro), `_autopilotMonthItems(Raw)`,
+  `_autopilotProgramMonth`, `_autopilotClearFuture`, `_autopilotTick`; ruta `/api/admin/cronograma-autopilot`. Las campañas
+  las ejecuta `_schedTick` como cualquier otra (`payload` → `_createNotifBatchFromBody`).
+- Locks multi-instancia: `_cronClaim(name, ttl)` sobre `Config['cronlock_<name>']` (fail-open).

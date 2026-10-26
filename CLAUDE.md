@@ -159,7 +159,10 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   (`_inviteOnlyBlocks`; también en el envío del OTP). **Historias (#210):** `Story` + `storyAutopilot`/`storyImage`;
   el bono "+X%" de una historia se aplica en la carga por el MISMO pipeline de la ruleta (`_pendingBonusFor` /
   `_settlePendingBonuses` → `_consumeStoryBonus`, source `story_bonus`). En el panel `deleteStory`/`loadStories` son de
-  las historias de INFLUENCERS: las de la app se llaman `*AppStory`.
+  las historias de INFLUENCERS: las de la app se llaman `*AppStory`. **Centro de avisos / piloto (#211):** todo aviso
+  automático nuevo sale como lote por `_createNotifBatchFromBody` (así cuenta para el tope `dailyCap`/`monthlyCap`) y toda
+  push nueva lleva `data.kind` ('promo' masivo · 'personal' lo del cliente) para respetar `User.notifPrefs`. El piloto
+  pre-programa `ScheduledCampaign.autoKey 'ap-*'`: no borrar ese índice único.
 - **Pushes con la RULETA** (2026-09-07 → #206): `notificationService.isRouletteText` bloquea el
   envío en las 5 funciones (`blocked:'roulette'`) y el seed del boot migra reglas/plantillas
   SOLO si la ruleta diaria está APAGADA en el panel (`setRouletteActive`, lo setea
