@@ -1487,7 +1487,7 @@ async function getPlayerStats(username, fromDate, toDate, label = 'stats', opts 
  * @param {string[]} usernames  1 a 100
  * @returns {{success, players:{[username]: stats}, notFound:string[]}} | {success:false,...}
  */
-async function getPlayersStatsBatch(usernames, fromDate, toDate, label = 'stats-batch') {
+async function getPlayersStatsBatch(usernames, fromDate, toDate, label = 'stats-batch', opts = {}) { // #212: opts.retryable=false ⇒ sin reintentos (una sola pasada de 20 s)
   const list = (Array.isArray(usernames) ? usernames : []).map((u) => String(u).trim()).filter(Boolean);
   if (list.length === 0) return { success: true, players: {}, notFound: [] };
   if (list.length > 100) {
@@ -1525,7 +1525,8 @@ async function getPlayersStatsBatch(usernames, fromDate, toDate, label = 'stats-
       label: `${label}(${groupList.length} jugadores${gk ? ', key publicista' : ''}, ${from} → ${to})`,
       apiKey: gk || null,
       // Lectura pura: el grupo de la master puede ir por una key de consultas.
-      readOnly: !gk
+      readOnly: !gk,
+      retryable: opts.retryable !== false
     });
 
     // Si UN grupo falla, falla todo el batch (mismo contrato de antes: el caller

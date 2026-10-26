@@ -8,6 +8,17 @@
 
 ## Sesión 2026-10-26
 
+### 212. FIX Alertas de estafa: "No se pudo cargar: JSON.parse: unexpected character" (504 de nginx por las stats de 1girox)
+- **Qué pasaba (primera prueba en producción, 2026-10-26):** `GET /api/admin/fraud/alerts` pedía las estadísticas de juego a 1girox
+  (`getPlayersStatsBatch`, 56 jugadores, 30 días) y la Partner API no respondía: timeout de 20 s + reintentos 2/5/15 s ≈ 100 s.
+  nginx corta a los 60 s y devuelve un 504 en HTML ⇒ el panel intentaba parsear JSON y mostraba ese error. El radar en sí andaba.
+- **Fix:** `getPlayersStatsBatch(..., opts)` acepta `retryable:false` (una sola pasada); la ruta de alertas la llama así y además la
+  acota con `Promise.race` a **15 s**: si 1girox no llega, el escaneo sigue SIN las reglas de juego ("retira casi sin jugar" y
+  "abuso de bonos" se evalúan sin lo apostado; el servicio ya lo soportaba) y la respuesta trae `playStats {ok, note}`. El panel
+  muestra un aviso amarillo con el motivo y 🔄 para reintentar, y si igual llegara un 502/504 lo dice en castellano en vez del
+  JSON.parse. admin-sw bumpeado. Mismo fix en las 5 páginas sobre 1girox (CARGASGIROX, AUTOGIROXcompartido, giroxNARDOnuevoo,
+  PAUTANUEVAsantino, SANTINOGANAMOS); las de JUGAYGANA no piden stats.
+
 ### 211. RÉPLICA DE PICA ROJA — tanda 4: 🧭 CENTRO DE AVISOS (recorrido, avisos de reembolso, preferencias, revisión semanal) y 🤖 PILOTO AUTOMÁTICO de notificaciones (en OFF, dos interruptores en COMANDOS)
 - **Interruptores:** `notifCenter` (recorrido por cliente + avisos "reclamá tu reembolso" + revisión semanal + preferencias del
   cliente) y `autopilot` (campaña masiva diaria). Rutas de panel admin-only con `_ncGate(flag)` (404 `FEATURE_OFF` apagado).
