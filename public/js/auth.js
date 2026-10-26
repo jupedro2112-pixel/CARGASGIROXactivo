@@ -21,6 +21,8 @@ VIP.auth = (function () {
                     if (ru && (!ru.value.trim() || ru.value.trim() === prev)) ru.value = _usernamePrefix;
                 }
                 if (j) _applyRegistrationMode(j);
+                // #210: historias públicas en la pantalla de ingreso (sólo con la función prendida)
+                try { if (j && j.features && j.features.stories && VIP.stories && VIP.stories.loadPublic) VIP.stories.loadPublic('lgStoriesRing'); } catch (_) {}
             }).catch(function () {});
     } catch (_) {}
 

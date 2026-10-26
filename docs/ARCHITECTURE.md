@@ -1506,3 +1506,20 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `x-datos-pin`, 423/429). Config: `datosIaPinHash`, `usdtRate`, `adSpend`, `adSpendTotal`, `otherPageStats`,
   `projectionCalibration`. `POST /api/activity/ping` (rol user) arma las sesiones y escribe `lastDevice`/`deviceIds`;
   apagado ⇒ `{ok:false, off:true}`. Cliente: `public/js/activity.js` + `window.VIP_DEVICE` (index.html).
+
+### 10.2 Historias (#210)
+
+- Modelo `Story` (`src/models/Story.js`; `autoKey` único sparse, `mediaData` y `autoImg` con `select:false`; TTL no: vencen
+  por `expiresAt` pero quedan en el panel). `User.storyBonus`.
+- Rutas cliente: `GET /api/stories/public` (sin sesión), `GET /api/stories/active` (`off:true` si está apagado),
+  `POST /api/stories/:id/view|click|react`, `GET /api/stories/:id/auto.svg|media`, `POST /api/stories/:id/claim-bonus`,
+  `GET /api/stories/bonus`. Admin: `/api/admin/stories*`, `/api/admin/stories-autopilot*` (admin general). Gate `_storiesGate`.
+- Motor: `_storyAutoTick` (5 min), `_storiesRepeatTick` (1 h); plan del día = `storyAuto.planDay(dayKey, matches, ctx)`;
+  fotos = `storyImage.renderSvg(spec)` servidas en `/auto.svg` (CSP estricta). `STORY_IMG_VER` fuerza rearmar las fotos.
+  Config: `storiesConfig`, `storyAutoMatches`, `storyGamesSnapshot`, `storyAutoDiag`.
+- Bono de historia en la carga: parte `story` de `_pendingBonusFor` + `_consumeStoryBonus` en `_settlePendingBonuses`
+  (Transaction 'bonus' con `metadata.source 'story_bonus'`). Un flujo de carga nuevo que pase por `_settlePendingBonuses`
+  lo hereda solo.
+- PWA: `public/js/stories.js` (`VIP.stories = {init, load, loadPublic, open, openById, claimBonus, close, …}`), botón
+  `#navHistorias` (header), anillo `#lgStoriesRing` (ingreso), visor `#storyViewer`; CSS en `chat.css` y `login.css`.
+  El SW reenvía `data.url` de la push (`vip-open`).
