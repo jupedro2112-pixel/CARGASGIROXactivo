@@ -20,8 +20,27 @@ VIP.auth = (function () {
                     const ru = document.getElementById('registerUsername');
                     if (ru && (!ru.value.trim() || ru.value.trim() === prev)) ru.value = _usernamePrefix;
                 }
+                if (j) _applyRegistrationMode(j);
             }).catch(function () {});
     } catch (_) {}
+
+    // #208 (réplica #748 de PICA ROJA): registro SÓLO CON INVITACIÓN. Sin link de referido (?ref=) ni atribución de
+    // publicidad, la pantalla de ingreso esconde "Registrarse" y muestra el aviso del panel (/sys_register_invite).
+    // Con invitación el registro se ve igual que siempre (el server valida el código/campaña al crear la cuenta).
+    let _registrationMode = 'open';
+    function _applyRegistrationMode(j) {
+        try {
+            _registrationMode = j.registrationMode === 'invite' ? 'invite' : 'open';
+            let viaRef = false, viaAd = false;
+            try { viaRef = !!new URLSearchParams(location.search).get('ref'); } catch (_) {}
+            try { const ri = document.getElementById('registerReferralCode'); if (ri && ri.value.trim()) viaRef = true; } catch (_) {}
+            try { viaAd = !!(VIP.campaign && VIP.campaign.getActive && VIP.campaign.getActive()); } catch (_) {}
+            const invite = _registrationMode === 'invite' && !viaRef && !viaAd;
+            document.body.classList.toggle('reg-invite', invite);
+            const note = document.getElementById('lgInviteNote');
+            if (note) { note.textContent = invite ? (j.registerInviteText || '🔒 El registro es sólo con invitación.') : ''; note.style.display = invite ? '' : 'none'; }
+        } catch (_) {}
+    }
 
     // Aplica Advanced Matching al pixel cuando el backend devolvió los hashes
     // (data.user.metaMatching). Idempotente: si se llama varias veces con el
@@ -163,7 +182,12 @@ VIP.auth = (function () {
                 const r = await fetch(`${VIP.config.API_URL}/api/auth/send-register-otp`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone: fullPhone, username })
+                    body: JSON.stringify({
+                        phone: fullPhone, username,
+                        // #208: con el registro sólo con invitación el server chequea el código/campaña ANTES de gastar el SMS
+                        referralCode: (document.getElementById('registerReferralCode') && document.getElementById('registerReferralCode').value.trim().toUpperCase()) || undefined,
+                        campaignCode: (VIP.campaign && VIP.campaign.getActive && VIP.campaign.getActive()) ? VIP.campaign.getActive().code : undefined
+                    })
                 });
                 const d = await r.json();
                 if (r.ok && d.success) {
@@ -1742,6 +1766,7 @@ VIP.auth = (function () {
         maybeOfferSmsVerification,
         refreshVerifyPhoneBanner,
         applyRegisterModalMode,
+        getRegistrationMode: function () { return _registrationMode; }, // #208
         handleVerifyPhoneSend,
         handleVerifyPhoneConfirm,
         handleLogin,

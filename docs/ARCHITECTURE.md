@@ -1288,11 +1288,11 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
 
 | Motor | Frecuencia | Estado | Idempotencia |
 |---|---|---|---|
-| `_runNotifRulesEvaluator` (reglas push) | 5 min | activo (reglas refund/tier inertes: PlayerStats no portado) | lastFiredAt + ventana |
-| `_runEncuestaTick` | 5 min | pushes sí, **bonos apagados** (`bDays=[]`); el incentivo de la ruleta se eliminó (2026-09-07) | EncuestaFire.slotKey único |
+| `_runNotifRulesEvaluator` (reglas push) | 5 min | **APAGADO por default** (#208: corre sólo con `featureFlags.legacyNotifs` ON) | lastFiredAt + ventana |
+| `_runEncuestaTick` | 5 min | **APAGADO por default** (#208: sólo con `legacyNotifs` ON); bonos apagados (`bDays=[]`) | EncuestaFire.slotKey único |
 | `_runInactividadTick` | 6 h | **APAGADO** (`INACTIVIDAD_DISABLED=true`) | InactividadFire.fireKey único |
 | `_runBonusStrategy` | 10 min | **APAGADO** (`BONUS_STRATEGY_DISABLED=true`) | step en StrategyEnrollment |
-| `_runDueSchedules` (ScheduledNotif) | 60 s | activo | lastRunAt |
+| `_runDueSchedules` (ScheduledNotif) | 60 s | **APAGADO por default** (#208: sólo con `legacyNotifs` ON) | lastRunAt |
 | `_pollPayingPayouts` | 45 s | activo (confirma pagos si el webhook no llegó) | handlePayoutStatusWebhook idempotente |
 | `_runVipTick` (niveles VIP) | 30 min | activo (se apaga desde el panel: Config → "Niveles VIP", flag `vip_levels_disabled` en Config, SOLO admin general — sin cache a propósito para que aplique al instante en todas las instancias) | buckets con `$set` idempotente + bono con reference `vip-lvl-*` (la plataforma dedupe) |
 | `_runVipSweepCheck` (sweep VIP) | 1 h (corre a las 05 ART) | activo | claim atómico por día en Config (`vip_sweep_day`) → instancia única |
@@ -1478,3 +1478,18 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `notificationRoutes.sendBatchPush` (wrapper de `POST /api/notifications/send-batch`) en chunks;
   `manual:true` = envío a mano registrado por `setPushLogHook`. El `GET` del cronograma suma lotes
   enviados a mano y ocurrencias de ScheduledNotif como ítems de sólo lectura.
+
+## 10. Interruptores de funciones y modo de registro (#208, réplica de PICAROJA30)
+
+- **`src/services/featureFlags.js`** — `Config['features']` = `{ datosIa, fraudRadar, notifCenter, autopilot,
+  stories, legacyNotifs }`, **todo `false` por default**, cache 30 s por proceso. `isOn(name)`, `getAll()`,
+  `set(patch, by)`. Rutas `GET/POST /api/admin/features` (POST solo admin general). Hooks `onFeaturesChanged(fn)`
+  en server.js (p. ej. limpiar lo que una función programó al apagarla). Panel: COMANDOS → "🧩 Funciones"; los
+  `.nav-item[data-feature]` se esconden si el flag está OFF (`applyFeatureNav`). Regla: **toda función replicada de
+  PICA ROJA consulta su flag** en sus rutas (responder 404/`{ok:false}` apagada) y al principio de cada cron.
+- `legacyNotifs` = el sistema automático anterior de esta página (reglas, encuesta, estrategia programada). Los envíos
+  manuales no dependen de él.
+- **Registro:** `Config['registrationMode']` `'open'|'invite'` (`getRegistrationMode`, `_inviteOnlyBlocks`). En
+  `invite`, `/api/auth/register` y `/api/auth/send-register-otp` → `403 INVITE_ONLY` salvo código de referido real o
+  campaña activa. Aviso `/sys_register_invite`. `GET /api/config/access` (público) publica `registrationMode`,
+  `registerInviteText` y `features.stories`; la PWA pone `body.reg-invite`.

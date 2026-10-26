@@ -4,7 +4,48 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-21**
+> **Última actualización: 2026-10-26**
+
+## Sesión 2026-10-26
+
+### 208. RÉPLICA DE PICA ROJA (PICAROJA30) — tanda 1: interruptores en COMANDOS, registro abierto / sólo con invitación, sistema de notificaciones anterior APAGADO y al fondo del menú
+- **Owner:** replicar de `PICAROJA30` seis cosas (Datos IA, Centro de avisos, Alertas de estafa, notificaciones
+  programadas nuevas, registro activado/desactivado, historias) en 7 repos, trabajando uno por uno, **todo en OFF**
+  salvo el registro (ON = abierto) y **todo prendible/apagable desde COMANDOS**. Las notificaciones automáticas que
+  hoy corren en esta página quedan apagadas y su menú abajo de todo. Se hace en 4 tandas; esta es la primera.
+- **Hallazgo clave:** ni "Datos IA" ni las "notificaciones con IA" usan inteligencia artificial: son reglas sobre los
+  datos de la base (el nombre viene de que se escribió con IA). No hay claves, SSM ni dependencias npm nuevas.
+- **Interruptores** — `src/services/featureFlags.js` (nuevo): `Config['features']` =
+  `{ datosIa, fraudRadar, notifCenter, autopilot, stories, legacyNotifs }`, **todos `false` por default**, cache 30 s
+  por proceso. Rutas `GET/POST /api/admin/features` (POST solo admin general; `onFeaturesChanged(fn)` para hooks, p. ej.
+  borrar las campañas futuras del piloto automático al apagarlo). Panel → COMANDOS → card **"🧩 Funciones (réplica de
+  PICA ROJA)"** con un tilde por función (`loadFeaturesCard` / `saveFeatures`). Un ítem del menú con
+  `data-feature="x"` se ve sólo si `x` está ON (`applyFeatureNav`, se llama al entrar y al guardar).
+- **Sistema de notificaciones ANTERIOR apagado** (`legacyNotifs`, default OFF): `_runNotifRulesEvaluator` (reglas),
+  `_runEncuestaTick` (encuesta) y `_runDueSchedules` (estrategia programada `ScheduledNotif`, en
+  `notificationRoutes.js`) retornan sin hacer nada mientras el flag esté apagado. Inactividad y estrategia de bonos ya
+  estaban apagadas por constante. **Lo manual sigue funcionando** (compositor, lotes con regalo, campañas del
+  cronograma creadas a mano): no depende del flag. Menú: "Notificaciones (manual)", "Encuesta" e "Inactivos" bajaron al
+  grupo "No se usa (sistema anterior · apagado en COMANDOS)"; **Cronograma queda arriba** porque va a alojar el piloto
+  automático nuevo (tanda 4).
+- **Registro de clientes** — `Config['registrationMode']` = `'open'` (default, como hasta ahora) | `'invite'`.
+  `_inviteOnlyBlocks(referralCode, campaignCode)`: con `invite`, `POST /api/auth/register` **y**
+  `POST /api/auth/send-register-otp` (para no gastar el SMS) responden `403 {code:'INVITE_ONLY', error:<aviso>}` salvo
+  que venga un código de referido de un cliente real o una campaña activa. La landing externa no cambia (ya exige
+  campaña). Iniciar sesión siempre abierto. Aviso editable: `/sys_register_invite` (sembrado). Panel → COMANDOS → card
+  **"👤 Registro de clientes"** (`loadRegistrationMode` / `saveRegistrationMode`, `GET/POST /api/admin/registration-mode`).
+  PWA: `GET /api/config/access` ahora devuelve `registrationMode`, `registerInviteText` y `features.stories`;
+  `auth.js` (`_applyRegistrationMode`) pone `body.reg-invite` → se esconde "Registrarse" (`#registerBtnWrap`) y se
+  muestra `#lgInviteNote`, salvo que haya `?ref=`/código de referido cargado o atribución de publicidad. El OTP manda
+  `referralCode` y `campaignCode`.
+- Diferencias con PICA ROJA, a propósito: allá hay 3 modos (`quick`/`sms`/`invite`) + "pantalla de ingreso = login" +
+  "regalos para el registro abierto"; acá el registro siempre fue usuario+clave+SMS, así que el tilde es uno solo
+  (abierto / sólo con invitación). Allá las funciones no tienen interruptor (siempre ON, se apagan por env): acá TODO
+  pasa por `featureFlags`.
+- SW `v130`. Sin cambios de modelos. `node --check` + `check-tdz` OK.
+- **Pendiente de las próximas tandas:** 2) Alertas de estafa + Datos IA · 3) Historias · 4) Centro de avisos +
+  piloto automático (usan historias). Después, lo mismo en AUTOGIROXcompartido, giroxNARDOnuevoo, PAUTANUEVAsantino,
+  SANTINOGANAMOS, VIPCARGASANTINOagostonuevo (JUGAYGANA) y AUTOREEMBOLSOSjygactivo (JUGAYGANA, sin git).
 
 ## Sesión 2026-10-21
 

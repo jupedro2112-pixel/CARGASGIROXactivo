@@ -151,6 +151,12 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   (`claimAutoPromoPercent` → bonus de la MISMA operación con tope `_loteBonusAmount` →
   `settle`/`revert`). Una carga = como mucho UN bono automático. Las fichas de un lote
   por tiempo se acreditan recién cuando el cliente toca 🎁 RECLAMAR (`/api/gift/claim`).
+- **Funciones replicadas de PICA ROJA (#208, 2026-10-26):** TODAS arrancan APAGADAS y se prenden desde COMANDOS →
+  "🧩 Funciones" (`src/services/featureFlags.js`, `Config['features']`). Toda ruta/cron de Datos IA, Alertas de
+  estafa, Centro de avisos, piloto automático e historias tiene que consultar `featureFlags.isOn(...)`; un ítem nuevo
+  del menú del panel lleva `data-feature="x"`. El sistema de notificaciones automáticas ANTERIOR (reglas, encuesta,
+  `ScheduledNotif`) corre sólo con `legacyNotifs` ON. El registro es `Config['registrationMode']` `'open'|'invite'`
+  (`_inviteOnlyBlocks`; también en el envío del OTP).
 - **Pushes con la RULETA** (2026-09-07 → #206): `notificationService.isRouletteText` bloquea el
   envío en las 5 funciones (`blocked:'roulette'`) y el seed del boot migra reglas/plantillas
   SOLO si la ruleta diaria está APAGADA en el panel (`setRouletteActive`, lo setea
