@@ -21,7 +21,7 @@
   (`META_PIXEL_PUBLISHER_n` o el alcance del panel: códigos de campaña / nombre del publicista; `*` o sin alcance = todo; sin token = sólo
   navegador). Antes acá la CAPI sólo mandaba al propio y al `_2`, y el `_2` recibía los eventos de TODOS los clientes. `pixelIdsForCampaign`
   (navegador de la landing, `/api/meta-pixel-id`) también toma los del panel. Contadores por píxel en memoria (`stats()`),
-  `destinationsSummary()` para el log de arranque. Mismo `prefsFilter`… no: el servicio de Meta no cambia nada de notificaciones.
+  `destinationsSummary()` para el log de arranque.
 - Política: se manda **cada carga** (no sólo la primera) a los píxeles con alcance, como pidió el owner para PICA ROJA. Si algún día se
   quiere "sólo alta + FTD" para partners, está en PAUTANUEVAsantino (`opts.firstDeposit`).
 - admin-sw v53. Sólo servidor + panel (la app no cambia). `node --check` + `check-tdz` OK.
