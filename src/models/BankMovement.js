@@ -18,8 +18,9 @@ const bankMovementSchema = new mongoose.Schema({
   // id interno del movimiento que manda hgcash (UUID). Único → dedupe de webhooks.
   movementId: { type: String, required: true, unique: true, index: true },
   // #217 Banco que lo originó: 'hgcash' (webhook; default para lo histórico) | 'finpro'
-  // (verificación por comprobante `verify/incoming` o, a futuro, webhook/listado;
-  // movementId = 'fp:<notification.id>' o 'fp:coelsa:<coelsa>' / 'fp:auth:<autorización>').
+  // (#220 webhook secundario `eventType 'finpro.webhook'`, o verificación por comprobante
+  // `verify/incoming` `eventType 'finpro.verify'`; movementId = 'fp:<notification_id>' o
+  // 'fp:coelsa:<coelsa>' / 'fp:auth:<autorización>'; además se dedupea por coelsaCode).
   provider: { type: String, default: 'hgcash', index: true },
   // #217 Orígenes/eventos ya procesados de este movimiento ('finpro.verify', 'finpro.webhook'…)
   // → un aviso repetido se descarta (dedupe por evento + id).

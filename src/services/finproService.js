@@ -19,11 +19,16 @@
  *     (coelsa_id, response_code) sale después por `processes/{id}/result`. La doc pide
  *     mandar las transferencias de un mismo from_cvu de a UNA (si no, error 2454):
  *     `withCvuLock` las encola por proceso.
- *   • Cargas: Finpro NO nos avisa (todavía) cuando entra plata: se CONSULTA con
- *     `POST /transfers/verify/incoming` (coelsa_id | authorization_code | monto+fecha+
- *     ventana+CVU) a partir del comprobante del cliente. Solo valida acreditadas: NO
- *     detecta reversiones. Webhooks y "listado para conciliación" quedan para cuando el
- *     owner mande esa parte de la doc (`_finproIngestIncoming` en server.js).
+ *   • Cargas: desde #220 llegan por el WEBHOOK SECUNDARIO de Finpro (eventos bancarios
+ *     de nuestros CVUs: `transfer_type 'E'` = entrante; `POST /api/finpro/webhook` en
+ *     server.js). Como respaldo sigue la CONSULTA `POST /transfers/verify/incoming`
+ *     (coelsa_id | authorization_code | monto+fecha+ventana+CVU) a partir del
+ *     comprobante del cliente. verify solo valida acreditadas: NO detecta reversiones.
+ *   • Webhooks (doc "Webhooks"): firmados con HMAC-SHA256 sobre `timestamp + "." +
+ *     body crudo` → headers `X-Webhook-Signature` (hex) y `X-Webhook-Timestamp` (Unix s).
+ *     `verifyWebhookSignature` / `signWebhook` abajo. El PRINCIPAL (resultado de los
+ *     retiros) llega al `callback_url` de cada transferencia; el SECUNDARIO a la URL
+ *     que se le informa a Finpro en el alta.
  *   • Titular/CVU de un alias o CVU: `POST /accounts/information` (Coelsa).
  *   • Saldo: `POST /accounts/balance` (campos no documentados → parseo defensivo + raw).
  *
@@ -35,7 +40,12 @@
  *   FINPRO_BANK_ID      `{bankId}` de los paths (doc: `creedence`)
  *   FINPRO_ACCOUNT      número de cuenta interno de Finpro (para el saldo)
  *   FINPRO_FROM_CVU     nuestro CVU (origen de los retiros / destino de las cargas)
+ *   FINPRO_EXTRA_CVUS   otros CVUs nuestros del mismo Cliente API (coma; #220: un Cliente
+ *                       Finpro agrupa 1..N cuentas/CVUs y el webhook identifica la cuenta
+ *                       por CVU y por id interno → las entrantes a CUALQUIERA cuentan)
  *   FINPRO_TIMEOUT_MS   (default 20000)
+ *   FINPRO_WEBHOOK_SECRET          secreto de firma de los webhooks (respaldo del panel)
+ *   FINPRO_WEBHOOK_MAX_AGE_SEC     ventana del timestamp de la firma (default 300; 0 = sin ventana)
  *
  * ⚠️ Nunca loguear ni devolver la key/secret/token: los helpers solo exponen last4.
  */
@@ -66,8 +76,14 @@ function setSettingsOverride(s) {
     baseUrl: typeof o.baseUrl === 'string' ? o.baseUrl.trim() : '',
     bankId: typeof o.bankId === 'string' ? o.bankId.trim() : '',
     account: typeof o.account === 'string' ? o.account.trim() : '',
-    fromCvu: typeof o.fromCvu === 'string' ? o.fromCvu.replace(/\D/g, '') : ''
+    fromCvu: typeof o.fromCvu === 'string' ? o.fromCvu.replace(/\D/g, '') : '',
+    extraCvus: _parseCvuList(o.extraCvus)
   };
+}
+/** Lista de CVUs (string con comas/espacios o array) → array de CVUs de 22 dígitos, sin repetidos. */
+function _parseCvuList(v) {
+  const parts = Array.isArray(v) ? v : String(v || '').split(/[,;\s]+/);
+  return Array.from(new Set(parts.map((x) => String(x || '').replace(/\D/g, '')).filter((x) => x.length === 22)));
 }
 function _envCreds() {
   const k = String(process.env.FINPRO_API_KEY || '').trim();
@@ -81,6 +97,12 @@ function baseUrl() { return String(_settingsOverride.baseUrl || process.env.FINP
 function bankId() { return String(_settingsOverride.bankId || process.env.FINPRO_BANK_ID || DEFAULT_BANK_ID).trim(); }
 function account() { return String(_settingsOverride.account || process.env.FINPRO_ACCOUNT || '').trim(); }
 function fromCvu() { return String(_settingsOverride.fromCvu || process.env.FINPRO_FROM_CVU || '').replace(/\D/g, ''); }
+/** Otros CVUs nuestros del mismo Cliente API (panel > FINPRO_EXTRA_CVUS). */
+function extraCvus() { return (_settingsOverride.extraCvus && _settingsOverride.extraCvus.length) ? _settingsOverride.extraCvus : _parseCvuList(process.env.FINPRO_EXTRA_CVUS); }
+/** TODOS nuestros CVUs (principal + extras), sin repetidos. */
+function ourCvus() { return Array.from(new Set([fromCvu()].concat(extraCvus()).filter((x) => x.length === 22))); }
+/** ¿Este CVU/CBU es de una cuenta nuestra? (compara dígitos) */
+function isOurCvu(cvu) { const c = String(cvu || '').replace(/\D/g, ''); return c.length === 22 && ourCvus().includes(c); }
 /** ¿La URL apunta al ambiente de DESARROLLO? (host de la doc: mw-dev.finpro.com.ar) */
 function isDevUrl(u) {
   try { return /dev|sandbox|test|staging/i.test(new URL(u || baseUrl()).hostname); } catch (_) { return /dev/i.test(String(u || baseUrl())); }
@@ -91,7 +113,7 @@ function isReadyForPayouts() { return isEnabled() && fromCvu().length === 22; }
 function isReadyForIncoming() { return isEnabled() && (fromCvu().length === 22 || !!account()); }
 function settingsPublic() {
   return {
-    baseUrl: baseUrl(), bankId: bankId(), account: account(), fromCvu: fromCvu(),
+    baseUrl: baseUrl(), bankId: bankId(), account: account(), fromCvu: fromCvu(), extraCvus: extraCvus(),
     dev: isDevUrl(), source: _settingsOverride.baseUrl || _settingsOverride.bankId || _settingsOverride.account || _settingsOverride.fromCvu ? 'panel' : 'env'
   };
 }
@@ -425,6 +447,158 @@ async function verifyIncoming({ coelsaId, authorizationCode, amount, occurredAt,
   });
 }
 
+// ───────────────────────── webhooks: firma HMAC-SHA256 (#220) ─────────────────────────
+// Doc "Webhooks": `signature = HMAC-SHA256(timestamp + "." + payload_json, secret)` en hex,
+// donde payload_json es el body EXACTO que mandó Finpro (por eso server.js guarda
+// `req.rawBody`). Headers: `X-Webhook-Signature` y `X-Webhook-Timestamp` (Unix en segundos).
+// La doc no fija una ventana de validez del timestamp → DECISIÓN: 5 min (configurable con
+// FINPRO_WEBHOOK_MAX_AGE_SEC; 0 desactiva la ventana), tolerando el mismo margen hacia el
+// futuro por desfase de relojes.
+const WEBHOOK_MAX_AGE_SEC_DEFAULT = 300;
+function webhookMaxAgeSec() {
+  const v = process.env.FINPRO_WEBHOOK_MAX_AGE_SEC;
+  if (v === undefined || v === null || v === '') return WEBHOOK_MAX_AGE_SEC_DEFAULT;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : WEBHOOK_MAX_AGE_SEC_DEFAULT;
+}
+/** Firma un body crudo (string|Buffer) como lo hace Finpro. Para tests y para el botón de prueba. */
+function signWebhook(rawBody, secret, ts) {
+  const body = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody == null ? '' : rawBody), 'utf8');
+  const t = String(ts == null ? Math.floor(Date.now() / 1000) : ts);
+  const sig = crypto.createHmac('sha256', String(secret)).update(Buffer.concat([Buffer.from(t + '.', 'utf8'), body])).digest('hex');
+  return { timestamp: t, signature: sig };
+}
+function _hexEqual(a, b) {
+  const x = String(a || '').trim().toLowerCase().replace(/^sha256=/, '');
+  const y = String(b || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(x) || !/^[0-9a-f]{64}$/.test(y)) return false;
+  return crypto.timingSafeEqual(Buffer.from(x, 'hex'), Buffer.from(y, 'hex'));
+}
+/**
+ * Verifica la firma de un webhook de Finpro. Acepta CUALQUIERA de los secretos de la lista
+ * (panel y SSM, para no perder avisos mientras se rota). Devuelve { ok, reason }:
+ * reason ∈ sin_secreto | sin_firma | sin_timestamp | timestamp_invalido | timestamp_vencido | firma_invalida.
+ */
+function verifyWebhookSignature({ rawBody, timestamp, signature, secrets, maxAgeSec, now } = {}) {
+  const list = (Array.isArray(secrets) ? secrets : [secrets]).filter((x) => typeof x === 'string' && x.length > 0);
+  if (!list.length) return { ok: false, reason: 'sin_secreto' };
+  if (!signature) return { ok: false, reason: 'sin_firma' };
+  const ts = String(timestamp == null ? '' : timestamp).trim();
+  if (!ts) return { ok: false, reason: 'sin_timestamp' };
+  if (!/^\d{9,13}$/.test(ts)) return { ok: false, reason: 'timestamp_invalido' };
+  const maxAge = maxAgeSec == null ? webhookMaxAgeSec() : Number(maxAgeSec);
+  if (maxAge > 0) {
+    const tsSec = ts.length > 10 ? Math.floor(Number(ts) / 1000) : Number(ts); // tolera milisegundos
+    const nowSec = Math.floor((now == null ? Date.now() : Number(now)) / 1000);
+    if (Math.abs(nowSec - tsSec) > maxAge) return { ok: false, reason: 'timestamp_vencido', ageSec: nowSec - tsSec };
+  }
+  const body = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody == null ? '' : rawBody), 'utf8');
+  for (const sec of list) {
+    const expected = crypto.createHmac('sha256', sec).update(Buffer.concat([Buffer.from(ts + '.', 'utf8'), body])).digest('hex');
+    if (_hexEqual(signature, expected)) return { ok: true, reason: null };
+  }
+  return { ok: false, reason: 'firma_invalida' };
+}
+
+// ───────────────────────── webhooks: parseo de payloads (#220) ─────────────────────────
+/**
+ * Webhook SECUNDARIO (eventos bancarios de nuestros CVUs; la MISMA URL recibe entrantes y
+ * salientes). Normaliza:
+ * { notificationId, bankId, webhookType, notificationType, receivedAt, transferType, incoming,
+ *   coelsaId, amount, cbuFrom, cbuTo, fromName, fromCuit, toName, toCuit, concept, reference,
+ *   accountId, raw }. `incoming` = transfer_type 'E' (entrante).
+ * La doc ("Cómo funciona") dice que el aviso lleva los datos de la transferencia tal como
+ * figuran (CVU/CBU origen y destino, titular, CUIT/CUIL, monto, fecha, concepto/referencia) y
+ * el id interno de la cuenta Finpro; el ejemplo solo mostró cbu_from/cbu_to/amount/coelsa_id →
+ * se leen con varias claves posibles y pueden venir null.
+ */
+function parseIncomingWebhook(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  const td = b.transaction_data && typeof b.transaction_data === 'object' ? b.transaction_data : (b.transactionData && typeof b.transactionData === 'object' ? b.transactionData : {});
+  const nid = b.notification_id != null ? String(b.notification_id).trim() : (b.notificationId != null ? String(b.notificationId).trim() : '');
+  const tt = _pickString(td, ['transfer_type', 'transferType', 'type']);
+  const amount = _pickNumber(td, ['amount', 'monto']);
+  const both = Object.assign({}, b, td); // claves de primer nivel o dentro de transaction_data
+  const cuitOf = (v) => { const d = String(v || '').replace(/\D/g, ''); return d.length >= 11 ? d : (v ? String(v).trim() : null); };
+  return {
+    fromName: _pickString(td, ['cbu_from_name', 'from_name', 'origin_name', 'titular_origen', 'nombre_origen', 'payer_name', 'titular', 'holder', 'nombre', 'from_holder', 'origin_holder']),
+    fromCuit: cuitOf(_pickString(td, ['cbu_from_cuit', 'from_cuit', 'origin_cuit', 'cuit_origen', 'origin_document', 'from_document', 'payer_cuit', 'cuit', 'cuil', 'document', 'origin_cuil'])),
+    toName: _pickString(td, ['cbu_to_name', 'to_name', 'destination_name', 'titular_destino', 'nombre_destino', 'to_holder', 'destination_holder']),
+    toCuit: cuitOf(_pickString(td, ['cbu_to_cuit', 'to_cuit', 'destination_cuit', 'cuit_destino', 'destination_document', 'to_document'])),
+    concept: _pickString(td, ['concepto', 'concept', 'description', 'descripcion', 'motivo']),
+    reference: _pickString(td, ['referencia', 'reference', 'external_reference', 'descripcion_referencia']),
+    accountId: _pickString(both, ['account_id', 'finpro_account_id', 'id_cuenta', 'cuenta_id', 'accountId', 'account_number', 'account']),
+    occurredAt: _pickString(td, ['occurred_at', 'date', 'fecha', 'transaction_date', 'credited_at', 'created_at']),
+    notificationId: nid || null,
+    bankId: _pickString(b, ['bank_id', 'bankId']),
+    webhookType: (_pickString(b, ['webhook_type', 'webhookType']) || '').toLowerCase() || null,
+    notificationType: _pickString(b, ['notification_type', 'notificationType']),
+    receivedAt: _pickString(b, ['received_at', 'receivedAt', 'occurred_at', 'created_at']),
+    transferType: tt ? tt.toUpperCase() : null,
+    incoming: !!tt && tt.toUpperCase() === 'E',
+    coelsaId: _pickString(td, ['coelsa_id', 'coelsaId']),
+    amount: Number.isFinite(amount) ? amount : null,
+    amountRaw: td.amount != null ? String(td.amount) : null,
+    cbuFrom: String(_pickString(td, ['cbu_from', 'from_cvu', 'cbuFrom']) || '').replace(/\D/g, '') || null,
+    cbuTo: String(_pickString(td, ['cbu_to', 'to_cvu', 'cbuTo']) || '').replace(/\D/g, '') || null,
+    authorizationCode: _pickString(td, ['authorization_code', 'authorizationCode']),
+    raw: b
+  };
+}
+/**
+ * Webhook PRINCIPAL (resultado de un lote de transferencias salientes = nuestros retiros).
+ * { processId, transactionId, status ('completed'|'failed'|otro), successCount, failCount,
+ *   rows: [{ transactionId, coelsaId, responseCode, amount, cbuFrom, cbuTo, authorizationCode, raw }], hasRows }
+ */
+function parsePayoutCallback(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  const list = Array.isArray(b.data) ? b.data : (Array.isArray(b.transactions) ? b.transactions : []);
+  const rows = list.filter((t) => t && typeof t === 'object').map((t) => ({
+    transactionId: _pickString(t, ['transaction_id', 'transactionId']),
+    coelsaId: _pickString(t, ['coelsa_id', 'coelsaId']),
+    responseCode: _pickString(t, ['response_code', 'responseCode', 'code']),
+    responseDescription: _pickString(t, ['response_description', 'responseDescription', 'description', 'message']),
+    amount: _pickNumber(t, ['amount', 'monto']),
+    cbuFrom: _pickString(t, ['cbu_from', 'from_cvu']),
+    cbuTo: _pickString(t, ['cbu_to', 'to_cvu']),
+    authorizationCode: _pickString(t, ['authorization_code', 'authorizationCode']),
+    raw: t
+  }));
+  const st = _pickString(b, ['status', 'state']);
+  return {
+    processId: String(b.process_id || b.processId || '').trim() || null,
+    transactionId: _pickString(b, ['transaction_id', 'transactionId']),
+    status: st ? st.toLowerCase() : null,
+    successCount: _pickNumber(b, ['transaction_success_count', 'success_count']),
+    failCount: _pickNumber(b, ['transaction_fail_count', 'fail_count']),
+    rows, hasRows: rows.length > 0
+  };
+}
+
+// ───────────────────────── titular de un CVU pagador (cache 24 h, #220) ─────────────────────────
+// El webhook secundario NO trae nombre ni CUIT del pagador (solo cbu_from): se consulta
+// `accounts/information` por CVU y se cachea por 24 h (el mismo cliente transfiere muchas
+// veces; evita gastar el token y la red). Una falla es NO fatal: se devuelve { found:false }.
+const PAYER_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const PAYER_CACHE_MAX = 2000;
+const _payerCache = new Map(); // cvu → { at, nombre, cuit, found }
+async function lookupPayerCached({ cvu, creds, force } = {}) {
+  const c = String(cvu || '').replace(/\D/g, '');
+  if (c.length !== 22) return { ok: false, found: false, error: 'CVU inválido' };
+  const hit = _payerCache.get(c);
+  if (!force && hit && Date.now() - hit.at < PAYER_CACHE_TTL_MS) return Object.assign({ ok: true, cached: true }, hit);
+  let r;
+  try { r = await getAccountInformation({ cvu: c, creds }); } catch (e) { r = { ok: false, found: false, error: e.message }; }
+  if (r && r.ok && r.found) {
+    const entry = { at: Date.now(), nombre: r.nombre, cuit: r.cuit || null, found: true };
+    if (_payerCache.size >= PAYER_CACHE_MAX) _payerCache.delete(_payerCache.keys().next().value); // FIFO
+    _payerCache.set(c, entry);
+    return Object.assign({ ok: true, cached: false }, entry);
+  }
+  return { ok: false, found: false, error: (r && (r.error || r.description)) || 'sin titular', httpStatus: r && r.httpStatus };
+}
+function payerCacheSize() { return _payerCache.size; }
+
 module.exports = {
   // config
   setCredentialsOverride, setSettingsOverride, getCredentialSource, isEnabled, baseUrl, bankId, account, fromCvu,
@@ -435,5 +609,8 @@ module.exports = {
   getBalance, getAccountInformation, createCvuTransfer, getProcessStatus, getProcessResult, verifyIncoming,
   // helpers
   withCvuLock, describeCode, isErrorCode, isTransientCode, transactionIdFor, isoWithOffsetAR, newTrace, newRetrieval,
+  // webhooks (#220)
+  verifyWebhookSignature, signWebhook, webhookMaxAgeSec, parseIncomingWebhook, parsePayoutCallback,
+  lookupPayerCached, payerCacheSize, extraCvus, ourCvus, isOurCvu,
   DEFAULT_BASE_URL, DEFAULT_BANK_ID
 };

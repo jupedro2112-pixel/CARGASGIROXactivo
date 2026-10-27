@@ -8,6 +8,88 @@
 
 ## Sesión 2026-10-27
 
+### 220. Finpro — WEBHOOKS: las cargas llegan solas (webhook secundario) y el callback de retiros viene firmado (webhook principal) — admin-sw v57
+- **Doc oficial "Webhooks" + "Cómo funciona" (app.finpro.com.ar/docs, transcripción del owner):** las credenciales son de un **Cliente API**
+  (UNA API Key + Secret + UNA config de webhooks) que agrupa 1..N cuentas/CVUs; cada aviso identifica la cuenta por CVU/CBU y por id interno
+  de Finpro. Dos webhooks. **Principal** = resultado de las transferencias SALIENTES iniciadas por API (llega al `callback_url` de cada
+  transferencia; Finpro tiene que habilitarlo al cliente). **Secundario** = eventos bancarios de los CVUs del cliente: Finpro configura DOS
+  URLs por Cliente API (una para ENTRANTES y otra para SALIENTES) — acá se le da la MISMA (`/api/finpro/webhook` despacha por
+  `transfer_type`). El aviso lleva los datos "tal como figuran" en la transferencia (CVU/CBU origen y destino, titular, CUIT/CUIL, monto,
+  fecha, concepto/referencia), aunque el ejemplo solo mostró `cbu_from/cbu_to/amount/coelsa_id`. **"Si no hay dirección configurada, el
+  aviso no se envía, pero la transferencia queda en el portal"** → sin el alta del webhook las cargas por Finpro entran SOLO por la
+  verificación del comprobante (#219). Los dos webhooks firmados con
+  **HMAC-SHA256 hex de `timestamp + "." + body_crudo`** (headers `X-Webhook-Signature`, `X-Webhook-Timestamp` en segundos Unix); hay que
+  responder 2xx (`{ success:true }`) en 10 s o reintenta hasta 3 veces con backoff → hay que tolerar REENTREGAS.
+- **`finproService.js` (#220 extiende la copia del gemelo; portar al gemelo):** `verifyWebhookSignature({ rawBody, timestamp, signature,
+  secrets, maxAgeSec })` (timingSafeEqual, acepta cualquiera de la lista de secretos, tolera prefijo `sha256=` y timestamp en ms),
+  `signWebhook(rawBody, secret, ts)` (tests / futuro botón de prueba), `parseIncomingWebhook(body)` (secundario: `notification_id`,
+  `webhook_type`, `notification_type`, `received_at`, `transaction_data.{transfer_type, coelsa_id, amount, cbu_from, cbu_to}`;
+  `incoming` = `transfer_type 'E'`; además lee DEFENSIVAMENTE, con varias claves posibles, titular/CUIT-CUIL del origen y destino,
+  concepto/referencia y el id interno de la cuenta — `titular|holder|nombre|origin_name|cbu_from_name`, `cuit|cuil|document|
+  origin_document`, `concepto|concept|referencia|reference|description`, `account_id|finpro_account_id|id_cuenta` — todos pueden venir
+  null), `parsePayoutCallback(body)` (principal: `status completed|failed`, `process_id`, `transaction_id`,
+  contadores, `data[]` con `coelsa_id`/`response_code`/`amount`/`cbu_from`/`cbu_to`/`authorization_code`) y `lookupPayerCached({cvu})`
+  (titular + CUIT del CVU pagador por `accounts/information`, cache en memoria 24 h, máx. 2000 CVUs; falla NO fatal), más
+  `extraCvus()/ourCvus()/isOurCvu()` (**multi-CVU**: `fromCvu` + "Otros CVUs nuestros" del panel — `Config['finproCredentials'].extraCvus`,
+  coma — o env `FINPRO_EXTRA_CVUS`). **DECISIÓN (la doc
+  no fija ventana del timestamp): 5 min, configurable con `FINPRO_WEBHOOK_MAX_AGE_SEC` (0 = sin ventana), mismo margen hacia el futuro.**
+  Test en frío: `node scripts/test-finpro-webhook.js` (17 pruebas; stubea axios/logger porque en Tails no hay node_modules).
+- **Secreto de firma:** como el resto de las credenciales → PANEL (`Config['finproCredentials'].webhookSecretEnc` cifrado con
+  `_credEncrypt`, `webhookSecretLast4` visible; campo nuevo en "🔐 Cuenta Finpro conectada", vacío = no cambiar, mínimo 16 caracteres)
+  > SSM `FINPRO_WEBHOOK_SECRET`. `_finproWebhookSecrets()` devuelve `[panel, ssm]` (se aceptan los dos mientras se rota; distinto de hgcash
+  #193 donde el panel anula el de SSM — acá no hay cuenta vieja que rechazar). El body crudo ya estaba (`express.json({ verify })` →
+  `req.rawBody`, lo usa el webhook de hgcash): no se tocó el parser.
+- **`POST /api/finpro/webhook` (NUEVO, público, rate-limit 240/min `finpro-wh`) = webhook SECUNDARIO.** Firma: sin secreto en producción
+  → 503 fail-closed (en dev se avisa y sigue); firma inválida → 401 (log con ip/ua/notification_id/motivo); válida → 200 `{success:true}`
+  en el acto y el resto corre aparte. `webhook_type` ≠ `notification` o sin datos de transferencia → se loguea y 200 (`ignored`).
+  **Dedupe atómico:** `movementId 'fp:<notification_id>'` (índice único; reentrega → solo `$addToSet processedEvents 'finpro.webhook'`)
+  y además por **COELSA entre canales** dentro de `_finproIngestIncoming`: si ya hay un `BankMovement provider:'finpro'` Inbound con el
+  mismo `coelsaCode` (lo creó verify antes, o al revés) se toma ESE movimiento, se completan datos y nunca se crea un segundo → nunca dos
+  cargas. **Entrante a UN CVU NUESTRO** (`transfer_type 'E'` y `cbu_to` ∈ `finpro.ourCvus()` comparando dígitos — NO se asume un
+  solo CVU; si no hay ninguno configurado se toma como propio con warning): el pagador sale PRIMERO de lo que trae el aviso (titular
+  "tal como figura" + CUIT/CUIL, si Finpro los manda) y, si no vino el nombre, de `lookupPayerCached(cbu_from)` → `fromName`/`fromCUIT`
+  (+ `fromKey` para la multicuenta bancaria del #184, igual que el webhook de hgcash) → `_finproIngestIncoming(n, 'webhook')`
+  (`provider:'finpro'`, `status 'done'`, `coelsaCode`, `fromCBU/toCBU`, `toName/toCUIT` del aviso, `accountId` = id interno de la
+  cuenta Finpro si vino (si no, el n° de cuenta del panel), `date` = fecha de la transferencia o `received_at`, `eventType
+  'finpro.webhook'`; concepto/referencia quedan en `raw`) →
+  **`hgcashMatchFromMovement`** = el MISMO pipeline que hgcash (modo sombra/auto de Finpro vía `_bankCfgForMovement`, ventana corta de
+  comprobantes, candados, `_pendingBonusFor/_settlePendingBonuses`, reference `vip-hg-<coelsa>`, vínculos del #183). Si el titular no se
+  pudo leer, el match sale por COELSA (N° de operación del comprobante) o cuando el comprobante dispare verify (que dedupea al mismo
+  movimiento). **Entrante a OTRO CVU** o **saliente** (`transfer_type` ≠ 'E' o `cbu_from` nuestro) → `_finproIngestLedger` (NUEVO):
+  BankMovement `ignored` para la bandeja "hoy" y el cierre, sin matchear; las salientes se clasifican `outKind 'payout'` +
+  `externalId = payout.id` si el coelsa es el `fpCoelsaId` de un retiro nuestro (mismo cruce que hgcash en `bankCloseService` y
+  `_bankEnrichMovements`); si el pago se confirma DESPUÉS, `handlePayoutStatusWebhook('finpro')` retro-vincula la salida por coelsa.
+  Una salida sin pago conocido queda `outKind 'unknown'` → el cierre la marca "salida sin origen" (correcto: es para auditar).
+  Contadores `_finproWebhookStats` (recibidos/aceptados/rechazados/entrantes/salientes/otro CVU/repetidos/ignorados, último evento,
+  último rechazo, última entrante) en `GET /api/admin/finpro/diag` → 🔎 Diagnóstico.
+- **Comprobante DESPUÉS del webhook:** `hgcashMatchFromComprobante` ya encuentra el movimiento pendiente (por coelsa o por nombre +
+  destino). Si no matchea y dispara `_finproVerifyComprobante` con un N° de operación con pinta de coelsa, ahora hay **atajo local**: si
+  existe un movimiento Finpro con ese coelsa NO se consulta a Finpro — `pending` + mismo monto → `hgcashAutoCarga` directo; `pending` con
+  otro monto → `needs_review` + nota; ya cargado/otro estado → `finproVerifyStatus 'resolved'` (no se carga dos veces). **Webhook DESPUÉS
+  del verify:** dedupe por `notification_id` (verify devuelve la misma notificación) o por coelsa → solo marca el evento.
+- **`POST /api/finpro/callback` (webhook PRINCIPAL) ahora valida la firma.** Firma válida + `data[]` → se decide DESDE EL PAYLOAD: payout
+  por `fpProcessId` = `process_id` o `fpTransactionId` = `transaction_id`; `status 'completed'` + fila con `response_code` que no es de
+  error (`'0200'` = OK, confirma lo que ya asumía `_finproSyncPayout`) + `coelsa_id` → `handlePayoutStatusWebhook({status:'DONE',
+  coelsaId}, 'finpro')`; `'failed'` o código de error → `ERROR` con `finpro.describeCode` + `fpAccepted:false`. **DECISIÓN:** sin secreto
+  configurado, firma inválida (puede que Finpro firme el principal con otro secreto: no se descarta el aviso) o payload legacy de solo
+  contadores → sigue la PISTA de siempre (`_finproSyncPayout` consulta `processes/status` + `result` con nuestras credenciales). Nunca se
+  decide plata con un body sin firma válida. Responde siempre 200 `{success:true}`. Contadores nuevos: `signed`, `badSignature`,
+  `confirmedFromPayload`, `lastSignature`.
+- **Panel:** campo "Secreto de firma de los webhooks" + estado (fuente y last4) + caja "🔗 URLs para darle a Finpro" (secundario
+  `…/api/finpro/webhook` = entrantes, hay que cargarla; principal `…/api/finpro/callback` = retiros, va como `callback_url`) + texto del
+  alta ("activar el webhook principal (callback_url) y el secundario hacia la URL de entrantes, con este secreto de firma"); línea de estado
+  de Finpro en "Bancos automáticos" dice `webhook + comprobantes` o `solo verificando comprobantes` y `firma webhook ✅ / sin secreto`;
+  `POST /api/admin/banks` devuelve `warning` (no bloquea) si Finpro recibe cargas sin secreto; diag con los contadores de los dos webhooks,
+  secreto, ventana, cache de titulares y última entrante por webhook; `bankProviderBadge` agrega en chico `webhook` / `verif.` según
+  `eventType` (movimientos y bandeja). admin-sw **v57**.
+- **Alta en Finpro (qué pedirles):** (1) activar el webhook PRINCIPAL para nuestro Cliente API (usamos `callback_url` en cada
+  transferencia); (2) dar de alta el webhook SECUNDARIO con la MISMA URL `https://<dominio>/api/finpro/webhook` para ENTRANTES y para
+  SALIENTES; (3) el secreto de firma: lo genera Finpro o lo definimos nosotros (≥16 chars) — el MISMO va en el panel; (4) si el Cliente
+  API tiene más de un CVU, cargar los otros en "Otros CVUs nuestros". Test: 17 pruebas. `node --check` (server.js, finproService.js, admin.js, admin-sw.js,
+  test) + `check-tdz` + `test-finpro-webhook` OK. **Back necesita deploy.** PROBAR: cargar el secreto → transferir a nuestro CVU → fila
+  Finpro·webhook en la bandeja con titular (o sin, si Coelsa no lo dio) → comprobante → carga (auto) o nota (sombra); mandar el mismo
+  aviso dos veces → un solo movimiento; retiro → callback firmado → PAGADO con COELSA sin consulta extra.
+
 ### 219. Finpro — CARGAS sin webhook: verificación por comprobante (`verify/incoming`) + re-verificación cada 2 min (réplica #370 del gemelo)
 - Finpro (hoy) NO avisa las transferencias entrantes; las docs de Webhooks y "Listado para conciliación" las manda el owner después.
   Mientras tanto la carga nace del COMPROBANTE: `hgcashMatchFromComprobante`, si ningún movimiento pendiente matchea y Finpro recibe

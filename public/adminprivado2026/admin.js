@@ -7573,8 +7573,9 @@ function _bankStatusTxt(key, b) {
     b = b || {};
     if (key === 'finpro') {
         const cred = b.credentials === 'panel' ? 'credenciales PANEL' : (b.credentials === 'ssm' ? 'credenciales AWS' : '<span style="color:#ff8080;">sin credenciales</span>');
-        return '<b style="color:#b388ff;">Finpro</b>: ' + (b.enabled ? '🟢 recibe cargas (verificando comprobantes)' : '⚪ no recibe cargas') +
+        return '<b style="color:#b388ff;">Finpro</b>: ' + (b.enabled ? '🟢 recibe cargas (' + (b.webhookSecret ? 'webhook + comprobantes' : 'solo verificando comprobantes') + ')' : '⚪ no recibe cargas') +
             ' · modo ' + (b.mode === 'auto' ? '<b>AUTO</b> (carga sola)' : 'SOMBRA (no carga)') + ' · ' + cred +
+            ' · ' + (b.webhookSecret ? 'firma webhook ✅' : '<span style="color:#ffb74d;">sin secreto del webhook (las entrantes no llegan solas)</span>') +
             ' · ' + (b.fromCvu ? 'CVU ' + escapeHtml(b.fromCvu) : '<span style="color:#ff8080;">sin CVU</span>') +
             (b.readyPayouts ? '' : ' · <span style="color:#ffb74d;">no puede pagar retiros</span>') +
             (b.dev ? ' · <span style="color:#ffd479;">URL de la doc (confirmar con Finpro)</span>' : '');
@@ -7626,13 +7627,19 @@ async function saveBanks() {
         const j = await r.json().catch(function () { return {}; });
         if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } if (_banksState) _renderBanks(_banksState); return; }
         _renderBanks(j);
-        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado'; }
+        if (m) { m.style.color = j.warning ? '#ffb74d' : '#66ff99'; m.textContent = j.warning ? '⚠️ Guardado. ' + j.warning : '✅ Guardado'; }
         showToast('Bancos guardados', 'success');
+        if (j.warning) showToast(j.warning, 'warning');
         // La card de hgcash muestra el mismo "enabled": se relee para que no quede desfasada.
         try { const en = document.getElementById('hgcashEnabled'); if (en && j.hgcash) en.checked = !!j.hgcash.enabled; } catch (_) {}
     } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
 }
 // ====== #217 FINPRO: bloque del banco (modo, credenciales, cuenta, diagnóstico, verificación manual) ======
+// #220: las dos URLs que se le dan a Finpro (webhook secundario = entrantes; principal = callback de retiros).
+function _finproSetUrls(j) {
+    const u = document.getElementById('finproCallbackUrl'); if (u) u.textContent = (j && j.callbackUrl) || '';
+    const w = document.getElementById('finproWebhookUrl'); if (w) w.textContent = (j && j.webhookUrl) || '';
+}
 function _finproDevWarn(j) {
     const w = document.getElementById('finproDevWarn'); if (!w) return;
     const url = j && j.settings && j.settings.baseUrl ? j.settings.baseUrl : '';
@@ -7649,7 +7656,7 @@ async function loadFinproCard() {
         if (header) header.style.display = '';
         const j = await r.json();
         const md = document.getElementById('finproMode'); if (md) md.value = j.mode === 'auto' ? 'auto' : 'shadow';
-        const u = document.getElementById('finproCallbackUrl'); if (u) u.textContent = j.callbackUrl || '';
+        _finproSetUrls(j);
         _finproDevWarn(j);
         loadFinproCredentials();
     } catch (_) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
@@ -7685,7 +7692,16 @@ async function finproDiag() {
             ' · <b>bankId:</b> ' + escapeHtml((j.settings || {}).bankId || '—') +
             ' · <b>CVU:</b> ' + ((j.settings || {}).fromCvu ? '…' + escapeHtml(String(j.settings.fromCvu).slice(-6)) : '<span style="color:#ff8080;">sin CVU</span>') +
             ' · <b>cuenta:</b> ' + ((j.settings || {}).account ? '✅' : '<span style="color:#ff8080;">sin número</span>');
-        h += '<br><b>📞 Callbacks de pagos recibidos</b> (esta instancia): ' + (cb.received || 0) + ' (de nuestros procesos: ' + (cb.matched || 0) + ')' + (cb.lastAt ? ' · último ' + _fpFecha(cb.lastAt) + ' process ' + escapeHtml(cb.lastProcessId || '—') + ' status ' + escapeHtml(cb.lastStatus || '—') : '');
+        h += '<br><b>📞 Webhook principal (callbacks de retiros)</b> (esta instancia): ' + (cb.received || 0) + ' recibidos · ' + (cb.matched || 0) + ' de nuestros procesos · ' + (cb.signed || 0) + ' firmados OK · ' + (cb.badSignature || 0) + ' con firma inválida · ' + (cb.confirmedFromPayload || 0) + ' resueltos desde el aviso' + (cb.lastAt ? ' · último ' + _fpFecha(cb.lastAt) + ' process ' + escapeHtml(cb.lastProcessId || '—') + ' status ' + escapeHtml(cb.lastStatus || '—') + ' firma ' + escapeHtml(cb.lastSignature || '—') : '');
+        // #220 webhook secundario (entrantes)
+        const wh = j.webhooks || {};
+        h += '<br><b>📥 Webhook secundario (entrantes)</b> (esta instancia): <b>' + (wh.received || 0) + '</b> recibidos · <span style="color:#66ff99;">' + (wh.accepted || 0) + ' aceptados</span> · <span style="color:' + ((wh.rejected || 0) > 0 ? '#ff8080' : '#aaa') + ';">' + (wh.rejected || 0) + ' rechazados</span> · ' + (wh.incoming || 0) + ' entrantes a nuestro CVU · ' + (wh.outgoing || 0) + ' salientes · ' + (wh.foreign || 0) + ' a otro CVU · ' + (wh.duplicates || 0) + ' repetidos · ' + (wh.ignored || 0) + ' ignorados' +
+            ' · secreto: ' + (j.webhookSecret === 'panel' ? '<b style="color:#66ff99;">PANEL</b>' : (j.webhookSecret === 'ssm' ? '<b style="color:#ffd479;">AWS</b>' : '<b style="color:#ff8080;">NINGUNO (los avisos se rechazan)</b>')) + ' · ventana ' + (j.webhookMaxAgeSec != null ? j.webhookMaxAgeSec : 300) + ' s · titulares en cache: ' + (wh.payerCacheSize || 0);
+        if (wh.lastEvent) h += '<br><small>Último evento ' + _fpFecha(wh.lastEvent.at) + ': ' + escapeHtml(wh.lastEvent.webhookType || '?') + '/' + escapeHtml(wh.lastEvent.notificationType || '?') + ' tipo ' + escapeHtml(wh.lastEvent.transferType || '?') + (wh.lastEvent.amount != null ? ' $' + Number(wh.lastEvent.amount).toLocaleString('es-AR') : '') + ' coelsa ' + escapeHtml(wh.lastEvent.coelsaId || '—') + ' (notification ' + escapeHtml(wh.lastEvent.notificationId || '—') + ')</small>';
+        if (wh.lastReject) h += '<br><small style="color:#ff8080;">Último rechazo ' + _fpFecha(wh.lastReject.at) + ': ' + escapeHtml(wh.lastReject.reason || '?') + ' (ip ' + escapeHtml(wh.lastReject.ip || '?') + ')</small>';
+        const li = wh.lastIncomingMovement;
+        if (li) h += '<br><small>Última entrante ingresada por webhook: ' + _fpFecha(li.date || li.createdAt) + ' $' + Number(li.amount || 0).toLocaleString('es-AR') + ' de ' + escapeHtml(li.fromName || '(titular no leído)') + ' coelsa ' + escapeHtml(li.coelsaCode || '—') + ' → ' + hgcashStatusBadge(li.matchStatus) + (li.matchedUsername ? ' @' + escapeHtml(li.matchedUsername) : '') + '</small>';
+        else h += '<br><small style="color:#aaa;">Todavía no entró ninguna transferencia por webhook' + (j.webhookSecret === 'none' ? ' (falta el secreto de firma)' : '') + '.</small>';
         h += '<br><b>🧾 Comprobantes en re-verificación:</b> ' + (vf.pending || 0) + ' (cada ' + (vf.everyMin || 2) + ' min, hasta ' + (vf.maxMin || 90) + ' min; ventana por monto ' + (vf.windowMin || 180) + ' min)';
         const rec = vf.recent || [];
         if (rec.length) {
@@ -7703,8 +7719,8 @@ async function finproDiag() {
         const movs = j.movements || [];
         h += '<br><b>⬇️ Últimas transferencias registradas por Finpro:</b> ' + (movs.length ? '' : 'ninguna todavía');
         if (movs.length) {
-            h += '<table style="width:100%;font-size:11px;margin-top:4px;border-collapse:collapse;"><tr style="color:#aaa;"><td>Cuándo</td><td>Monto</td><td>Origen</td><td>COELSA</td><td>Estado</td><td>Usuario</td></tr>';
-            for (const m of movs) h += '<tr style="border-top:1px solid rgba(255,255,255,0.08);"><td>' + _fpFecha(m.date || m.createdAt) + '</td><td>$' + Number(m.amount || 0).toLocaleString('es-AR') + '</td><td>' + escapeHtml(m.fromName || '—') + '</td><td>' + escapeHtml(m.coelsaCode || m.externalId || '—') + '</td><td>' + hgcashStatusBadge(m.matchStatus) + '</td><td>' + (m.matchedUsername ? '@' + escapeHtml(m.matchedUsername) : '—') + '</td></tr>';
+            h += '<table style="width:100%;font-size:11px;margin-top:4px;border-collapse:collapse;"><tr style="color:#aaa;"><td>Cuándo</td><td>Dir.</td><td>Monto</td><td>Origen</td><td>COELSA</td><td>Estado</td><td>Usuario</td></tr>';
+            for (const m of movs) h += '<tr style="border-top:1px solid rgba(255,255,255,0.08);"><td>' + _fpFecha(m.date || m.createdAt) + '</td><td>' + (m.direction === 'Outbound' ? '⬆️' : '⬇️') + ' <small>' + _finproSourceLabel(m) + '</small></td><td>$' + Number(m.amount || 0).toLocaleString('es-AR') + '</td><td>' + escapeHtml(m.fromName || '—') + '</td><td>' + escapeHtml(m.coelsaCode || m.externalId || '—') + '</td><td>' + (m.direction === 'Outbound' ? (m.outKind === 'payout' ? 'pago a cliente' : 'salida') : hgcashStatusBadge(m.matchStatus)) + '</td><td>' + (m.matchedUsername ? '@' + escapeHtml(m.matchedUsername) : '—') + '</td></tr>';
             h += '</table>';
         }
         const pays = j.payouts || [];
@@ -7737,18 +7753,24 @@ async function loadFinproCredentials() {
         const s = j.settings || {};
         const src = j.credentials === 'panel' ? '<b style="color:#66ff99;">PANEL</b> (key …' + escapeHtml(j.apiKeyLast4 || '????') + ' · secret …' + escapeHtml(j.apiSecretLast4 || '????') + ')'
             : j.credentials === 'ssm' ? '<b style="color:#ffd479;">AWS (SSM)</b>' : '<b style="color:#ff8080;">NINGUNA — Finpro no opera</b>';
+        // #220 secreto de firma de los webhooks
+        const whs = j.webhookSecret === 'panel' ? '<b style="color:#66ff99;">PANEL</b> (…' + escapeHtml(j.webhookSecretLast4 || '????') + ')'
+            : (j.webhookSecret === 'ssm' ? '<b style="color:#ffd479;">AWS (SSM)</b>' : '<b style="color:#ff8080;">NINGUNO — los avisos de Finpro se rechazan; las cargas solo entran por comprobante</b>');
         let h = 'Credenciales en uso: ' + src + (j.decryptError ? ' <span style="color:#ff8080;">(las del panel no se pudieron descifrar: ¿cambió JWT_SECRET? Se usan las de AWS)</span>' : '') +
             (j.updatedBy ? ' · cargadas por ' + escapeHtml(j.updatedBy) + (j.updatedAt ? ' el ' + _fpFecha(j.updatedAt) : '') : '') +
             (j.ssmKey || j.ssmSecret ? '<br><small style="color:#888;">En AWS hay ' + (j.ssmKey && j.ssmSecret ? 'key y secret' : (j.ssmKey ? 'solo la key' : 'solo el secret')) + ' de respaldo.</small>' : '') +
             '<br>Datos de la cuenta (' + (s.source === 'panel' ? 'panel' : 'AWS/por defecto') + '): bankId <b>' + escapeHtml(s.bankId || '—') + '</b> · cuenta ' + (s.account ? '<b>…' + escapeHtml(String(s.account).slice(-4)) + '</b>' : '<span style="color:#ff8080;">sin número</span>') +
             ' · nuestro CVU ' + (s.fromCvu ? '<b>…' + escapeHtml(String(s.fromCvu).slice(-6)) + '</b>' : '<span style="color:#ff8080;">sin CVU (no se puede pagar ni verificar por CVU)</span>') +
+            (Array.isArray(s.extraCvus) && s.extraCvus.length ? ' (+' + s.extraCvus.length + ' CVU' + (s.extraCvus.length > 1 ? 's' : '') + ' más: ' + s.extraCvus.map(function (c) { return '…' + escapeHtml(String(c).slice(-6)); }).join(', ') + ')' : '') +
             ' · URL <code>' + escapeHtml(s.baseUrl || '') + '</code>' + (j.dev ? ' <span style="color:#ff8080;font-weight:800;">DESARROLLO</span>' : '');
-        h += '<br>Listo para: retiros ' + (j.ready && j.ready.payouts ? '✅' : '❌') + ' · cargas ' + (j.ready && j.ready.incoming ? '✅' : '❌');
+        h += '<br>Secreto de firma de los webhooks: ' + whs + (j.ssmWebhookSecret && j.webhookSecret === 'panel' ? ' <small style="color:#888;">(también hay uno en AWS: se aceptan los dos)</small>' : '');
+        h += '<br>Listo para: retiros ' + (j.ready && j.ready.payouts ? '✅' : '❌') + ' · cargas ' + (j.ready && j.ready.incoming ? '✅' : '❌') + ' · entrantes por webhook ' + (j.webhookSecret !== 'none' && j.ready && j.ready.incoming ? '✅' : '❌');
         if (st) st.innerHTML = h;
         const setv = function (id, v) { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = v || ''; };
         setv('finproCredBankId', s.source === 'panel' ? s.bankId : ''); setv('finproCredAccount', s.source === 'panel' ? s.account : '');
         setv('finproCredFromCvu', s.source === 'panel' ? s.fromCvu : ''); setv('finproCredBaseUrl', s.source === 'panel' ? s.baseUrl : '');
-        const u = document.getElementById('finproCallbackUrl'); if (u) u.textContent = j.callbackUrl || '';
+        setv('finproCredExtraCvus', s.source === 'panel' && Array.isArray(s.extraCvus) ? s.extraCvus.join(', ') : '');
+        _finproSetUrls(j);
         _finproDevWarn(j);
         if (j.credentials !== 'none') loadFinproAccount(); else if (box) box.innerHTML = '';
     } catch (_) { if (st) st.textContent = 'Error de conexión'; }
@@ -7777,7 +7799,7 @@ async function loadFinproAccount() {
 }
 async function saveFinproCredentials() {
     const g = function (id) { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
-    const body = { apiKey: g('finproCredKey'), apiSecret: g('finproCredSecret'), bankId: g('finproCredBankId'), account: g('finproCredAccount'), fromCvu: g('finproCredFromCvu').replace(/\D/g, ''), baseUrl: g('finproCredBaseUrl') };
+    const body = { apiKey: g('finproCredKey'), apiSecret: g('finproCredSecret'), webhookSecret: g('finproCredWebhookSecret'), bankId: g('finproCredBankId'), account: g('finproCredAccount'), fromCvu: g('finproCredFromCvu').replace(/\D/g, ''), extraCvus: g('finproCredExtraCvus'), baseUrl: g('finproCredBaseUrl') };
     const m = document.getElementById('finproCredMsg');
     if ((body.apiKey && !body.apiSecret) || (!body.apiKey && body.apiSecret)) { showToast('Cargá la API Key y el API Secret juntos (o dejá los dos vacíos para no cambiarlos)', 'error'); return; }
     if (body.fromCvu && body.fromCvu.length !== 22) { showToast('Nuestro CVU tiene que tener 22 dígitos', 'error'); return; }
@@ -7792,6 +7814,7 @@ async function saveFinproCredentials() {
         if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado. Token OK' + (av != null ? ' · saldo $' + Number(av).toLocaleString('es-AR') : (j.balanceError ? ' · ' + j.balanceError : '')) + (j.holder && j.holder.nombre ? ' · titular ' + j.holder.nombre : ''); }
         document.getElementById('finproCredKey').value = '';
         document.getElementById('finproCredSecret').value = '';
+        const ws = document.getElementById('finproCredWebhookSecret'); if (ws) ws.value = '';
         loadFinproCredentials(); loadBanks();
     } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
 }
@@ -7846,11 +7869,20 @@ window.loadBanks = loadBanks; window.saveBanks = saveBanks;
 window.loadFinproCard = loadFinproCard; window.saveFinproConfig = saveFinproConfig; window.finproDiag = finproDiag;
 window.loadFinproCredentials = loadFinproCredentials; window.saveFinproCredentials = saveFinproCredentials; window.clearFinproCredentials = clearFinproCredentials;
 window.finproVerifyManual = finproVerifyManual; window.loadFinproAccount = loadFinproAccount;
-// Badge del banco de un movimiento (lista de movimientos y bandeja).
+// #220 Por dónde entró el movimiento de Finpro: webhook (llegó solo) o verificación del comprobante.
+function _finproSourceLabel(m) {
+    const ev = String((m && (m.eventType || m.topic)) || '');
+    return ev === 'finpro.webhook' ? 'webhook' : (ev === 'finpro.verify' ? 'verif.' : (ev === 'finpro.list' ? 'listado' : ''));
+}
+// Badge del banco de un movimiento (lista de movimientos y bandeja). Para Finpro agrega
+// en chico si vino por webhook o por la verificación del comprobante (#220).
 function bankProviderBadge(m) {
-    return m && m.provider === 'finpro'
-        ? ' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:rgba(179,136,255,0.22);color:#b388ff;font-weight:800;" title="Finpro (verificado por comprobante)">Finpro</span>'
-        : ' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:rgba(212,175,55,0.2);color:#d4af37;font-weight:800;" title="hgcash">HG</span>';
+    if (m && m.provider === 'finpro') {
+        const src = _finproSourceLabel(m);
+        return ' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:rgba(179,136,255,0.22);color:#b388ff;font-weight:800;" title="Finpro' + (src === 'webhook' ? ' (llegó sola por el webhook)' : (src === 'verif.' ? ' (verificada por comprobante)' : '')) + '">Finpro</span>' +
+            (src ? ' <span style="font-size:9px;color:#aaa;">' + src + '</span>' : '');
+    }
+    return ' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:rgba(212,175,55,0.2);color:#d4af37;font-weight:800;" title="hgcash">HG</span>';
 }
 window.bankProviderBadge = bankProviderBadge;
 
