@@ -1076,11 +1076,48 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                             </div>
                             <div id="fireMilestonesMsg" style="font-size:12px;margin-top:8px;color:#aaa;"></div>
                         </div>
+                        <!-- ============================================================
+                             BANCOS AUTOMÁTICOS (#217, réplica del #333/#368 de AUTOGIROXcompartido): una
+                             sección general con las DOS decisiones (por dónde ENTRAN las cargas y por dónde
+                             SALEN los retiros) y, abajo, cada banco en su propio bloque (hgcash 🟡 / Finpro 🟣).
+                             ============================================================ -->
+                        <div class="panel-subheader" style="margin-top: 24px;" id="banksHeader">
+                            <h3>🏦 Bancos automáticos</h3>
+                        </div>
+                        <div class="cbu-form" id="banksForm">
+                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
+                                Hay dos bancos con API: <b style="color:#d4af37;">hgcash</b> y <b style="color:#b388ff;">Finpro</b>. Acá elegís
+                                <b>por cuál entran las cargas</b> (uno, los dos a la vez, o ninguno) y <b>por cuál salen los retiros</b>. Cada
+                                banco se configura en su propio bloque más abajo (modo, cuenta y credenciales).
+                            </p>
+                            <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                                <div style="flex:1;min-width:260px;padding:12px;background:rgba(255,255,255,0.03);border-radius:10px;">
+                                    <div style="font-weight:bold;font-size:13px;margin-bottom:8px;">📥 Recibir CARGAS (transferencias) por</div>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksIncoming" value="hgcash" style="width:auto;"> Solo <b style="color:#d4af37;">hgcash</b></label>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksIncoming" value="finpro" style="width:auto;"> Solo <b style="color:#b388ff;">Finpro</b> (se verifica cada comprobante contra Finpro)</label>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksIncoming" value="both" style="width:auto;"> <b>Los dos a la vez</b> (cada uno con su CBU; el comprobante dice de cuál vino)</label>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksIncoming" value="none" style="width:auto;"> Ninguno (carga automática apagada: todo a mano)</label>
+                                </div>
+                                <div style="flex:1;min-width:260px;padding:12px;background:rgba(255,255,255,0.03);border-radius:10px;">
+                                    <div style="font-weight:bold;font-size:13px;margin-bottom:8px;">💸 Pagar RETIROS por</div>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksPayouts" value="hgcash" style="width:auto;"> <b style="color:#d4af37;">hgcash</b> (acepta alias; manda comprobante PDF)</label>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="banksPayouts" value="finpro" style="width:auto;"> <b style="color:#b388ff;">Finpro</b> (acepta alias vía Coelsa; el comprobante es el código COELSA; un pago por vez desde nuestro CVU)</label>
+                                    <small style="color:#aaa;font-size:11px;display:block;margin-top:6px;">Un solo banco paga los retiros. Se puede cambiar cuando quieras; los pagos ya en curso siguen por el banco con el que salieron.</small>
+                                </div>
+                            </div>
+                            <div id="banksSummary" style="font-size:12px;color:#ccc;line-height:1.7;margin:10px 0;"></div>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                <button type="button" class="btn-primary" onclick="saveBanks()">💾 Guardar bancos</button>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="loadBanks()" title="Releer">🔄</button>
+                                <span id="banksMsg" style="font-size:12px;color:#aaa;"></span>
+                            </div>
+                        </div>
+
                         <!-- Banco automático (hgcash / Urbana) -->
                         <div class="panel-subheader" style="margin-top: 24px;">
-                            <h3>🏦 Banco automático (hgcash)</h3>
+                            <h3 style="color:#d4af37;">🟡 Banco automático (hgcash)</h3>
                         </div>
-                        <div class="cbu-form" id="hgcashConfigForm">
+                        <div class="cbu-form" id="hgcashConfigForm" style="border-left:4px solid #d4af37;">
                             <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 8px;">
                                 Carga automática cuando un cliente transfiere al CBU de hgcash y manda el comprobante por el chat.
                                 Matchea por <b>monto + CBU de origen + tiempo</b>. Empezá en <b>modo sombra</b> (detecta y avisa sin cargar)
@@ -1165,10 +1202,105 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                                 </div>
                             </div>
                         </div>
-                        <!-- Movimientos del banco automático (hgcash) -->
+                        <!-- ===================== Finpro (#217, segundo banco con API) ===================== -->
+                        <div class="panel-subheader" style="margin-top: 24px;" id="finproHeader">
+                            <h3 style="color:#b388ff;">🟣 Finpro</h3>
+                        </div>
+                        <div class="cbu-form" id="finproForm" style="border-left:4px solid #b388ff;">
+                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 8px;">
+                                Segundo banco con API, independiente de hgcash. Finpro <b>no avisa</b> cuando entra una transferencia: cuando el
+                                cliente manda el comprobante, el sistema le <b>pregunta a Finpro</b> si esa transferencia ya está acreditada (por
+                                código COELSA o por monto + fecha) y, si la confirma, la carga con el <b>mismo matcheo y los mismos candados</b>
+                                que hgcash (bandeja del banco y cierre diario incluidos). Si todavía no acreditó, la vuelve a consultar cada 2 min
+                                durante 90 min. Si entra o no por este banco se elige arriba, en "Bancos automáticos". ⚠️ Finpro no informa
+                                reversiones: una transferencia confirmada se da por firme.
+                            </p>
+                            <div id="finproDevWarn" style="display:none;margin:0 0 10px;padding:8px 10px;border-radius:8px;background:rgba(255,80,80,0.12);border:1px solid rgba(255,80,80,0.5);color:#ff9d9d;font-size:12px;font-weight:700;"></div>
+                            <div id="finproStatusLine" style="font-size:12px;margin-bottom:10px;color:#aaa;"></div>
+                            <div class="form-group">
+                                <label>Modo:</label>
+                                <select id="finproMode" style="width:100%;">
+                                    <option value="shadow">Sombra (detecta y avisa, NO carga)</option>
+                                    <option value="auto">Auto (carga sola cuando Finpro confirma la transferencia)</option>
+                                </select>
+                            </div>
+                            <button type="button" class="btn-primary" onclick="saveFinproConfig()">💾 Guardar Finpro</button>
+                            <button type="button" class="btn-secondary" onclick="finproDiag()">🔎 Diagnóstico</button>
+                            <span id="finproCfgMsg" style="font-size:12px;color:#aaa;margin-left:8px;"></span>
+                            <div id="finproDiagBox" style="display:none;margin-top:10px;padding:10px;border-radius:8px;background:rgba(0,0,0,0.35);font-size:12px;line-height:1.6;max-height:520px;overflow:auto;"></div>
+
+                            <div id="finproCredBox" style="margin-top:18px;padding:14px;border:1px solid rgba(179,136,255,0.45);border-radius:10px;background:rgba(179,136,255,0.05);">
+                                <h4 style="margin:0 0 6px;color:#b388ff;font-size:14px;">🔐 Cuenta Finpro conectada (API Key, Secret y datos de la cuenta)</h4>
+                                <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
+                                    En Finpro → API: generá la <b>API Key</b> y el <b>API Secret</b> (el Secret se muestra UNA sola vez; si lo regenerás, el anterior
+                                    deja de servir). Cargalos acá junto con el <b>número de cuenta</b> interno de Finpro, <b>nuestro CVU</b> (22 dígitos: de ahí salen
+                                    los retiros y ahí entran las cargas) y, cuando Finpro te dé la <b>URL de producción</b>, la URL base. Se guardan cifrados y mandan
+                                    sobre AWS (SSM). Antes de guardar se prueba el token y el saldo.
+                                </p>
+                                <div id="finproCredStatus" style="font-size:12px;color:#ccc;margin-bottom:10px;line-height:1.6;">Cargando…</div>
+                                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                    <div class="form-group" style="flex:1;min-width:220px;">
+                                        <label>API Key:</label>
+                                        <input type="password" id="finproCredKey" placeholder="(dejar vacío para no cambiarla)" autocomplete="off" style="width:100%;">
+                                    </div>
+                                    <div class="form-group" style="flex:1;min-width:220px;">
+                                        <label>API Secret:</label>
+                                        <input type="password" id="finproCredSecret" placeholder="(dejar vacío para no cambiarlo)" autocomplete="off" style="width:100%;">
+                                    </div>
+                                </div>
+                                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                    <div class="form-group" style="flex:1;min-width:180px;">
+                                        <label>Banco (bankId de la API):</label>
+                                        <input type="text" id="finproCredBankId" placeholder="creedence" autocomplete="off" style="width:100%;">
+                                    </div>
+                                    <div class="form-group" style="flex:1;min-width:180px;">
+                                        <label>N° de cuenta (interno de Finpro, para el saldo):</label>
+                                        <input type="text" id="finproCredAccount" placeholder="número de cuenta" autocomplete="off" style="width:100%;">
+                                    </div>
+                                </div>
+                                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                    <div class="form-group" style="flex:1;min-width:220px;">
+                                        <label>Nuestro CVU (22 dígitos):</label>
+                                        <input type="text" id="finproCredFromCvu" maxlength="22" inputmode="numeric" placeholder="0000000000000000000000" autocomplete="off" style="width:100%;">
+                                    </div>
+                                    <div class="form-group" style="flex:1;min-width:220px;">
+                                        <label>URL base de la API:</label>
+                                        <input type="text" id="finproCredBaseUrl" placeholder="https://mw-dev.finpro.com.ar" autocomplete="off" style="width:100%;">
+                                        <small style="color:#aaa;font-size:11px;">La de la doc es la de DESARROLLO (mw-dev). Para producción, la que informe Finpro.</small>
+                                    </div>
+                                </div>
+                                <small style="color:#aaa;font-size:11px;display:block;margin-bottom:8px;">Dirección de aviso (callback) de los pagos: se la mandamos a Finpro en cada lote, no hay que cargarla en ningún lado: <code id="finproCallbackUrl">…</code></small>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                    <button class="btn-primary" onclick="saveFinproCredentials()">🔐 Probar y guardar</button>
+                                    <button class="btn btn-secondary btn-sm" onclick="clearFinproCredentials()" title="Borra lo cargado acá y vuelve a usar las credenciales/datos de AWS (SSM)">↩️ Volver a usar AWS (SSM)</button>
+                                    <span id="finproCredMsg" style="font-size:12px;color:#aaa;"></span>
+                                </div>
+                                <div id="finproAccountBox" style="margin-top:12px;font-size:12px;color:#ccc;line-height:1.6;"></div>
+                            </div>
+
+                            <div id="finproVerifyBox" style="margin-top:14px;padding:12px;border:1px dashed rgba(179,136,255,0.45);border-radius:10px;">
+                                <h4 style="margin:0 0 6px;color:#b388ff;font-size:13px;">🔎 Verificar una transferencia a mano</h4>
+                                <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 8px;">Le pregunta a Finpro si una transferencia entrante ya está acreditada. Solo consulta y muestra: no carga nada. Con el código COELSA es exacto; con monto + fecha busca en la ventana.</p>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+                                    <div class="form-group" style="flex:2;min-width:220px;margin:0;"><label>Código COELSA:</label><input type="text" id="finproVfCoelsa" placeholder="22 alfanuméricos" autocomplete="off" style="width:100%;"></div>
+                                    <div class="form-group" style="flex:1;min-width:160px;margin:0;"><label>o código de autorización:</label><input type="text" id="finproVfAuth" autocomplete="off" style="width:100%;"></div>
+                                </div>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:8px;">
+                                    <div class="form-group" style="flex:1;min-width:120px;margin:0;"><label>o monto ($):</label><input type="number" id="finproVfAmount" min="1" step="0.01" style="width:100%;"></div>
+                                    <div class="form-group" style="flex:1;min-width:180px;margin:0;"><label>fecha/hora aprox.:</label><input type="datetime-local" id="finproVfDate" style="width:100%;"></div>
+                                    <div class="form-group" style="flex:0 0 110px;margin:0;"><label>ventana (min):</label><input type="number" id="finproVfWindow" value="180" min="1" max="1440" style="width:100%;"></div>
+                                    <button type="button" class="btn-secondary" onclick="finproVerifyManual()">🔎 Verificar en Finpro</button>
+                                    <span id="finproVfMsg" style="font-size:12px;color:#aaa;"></span>
+                                </div>
+                                <div id="finproVfResult" style="display:none;margin-top:10px;padding:10px;border-radius:8px;background:rgba(0,0,0,0.35);font-size:12px;line-height:1.6;max-height:360px;overflow:auto;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Movimientos del banco (hgcash y Finpro) -->
                         <div id="hgcashMovementsPanel">
                             <div class="panel-subheader" style="margin-top: 24px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                                 <h3 style="margin:0;">🏦 Movimientos del banco</h3>
+                                <select id="hgcashMovBank" onchange="loadHgcashMovements(1)" style="background:rgba(0,0,0,0.40);border:1px solid rgba(212,175,55,0.40);color:#fff;padding:5px 9px;border-radius:6px;font-size:12px;"><option value="">Los dos bancos</option><option value="hgcash">🟡 hgcash</option><option value="finpro">🟣 Finpro</option></select>
                                 <select id="hgcashMovFilter" onchange="loadHgcashMovements(1)" style="background:rgba(0,0,0,0.40);border:1px solid rgba(212,175,55,0.40);color:#fff;padding:5px 9px;border-radius:6px;font-size:12px;">
                                     <option value="">Todos</option>
                                     <option value="pending">Pendientes (sin match)</option>

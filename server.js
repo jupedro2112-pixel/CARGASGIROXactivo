@@ -81,6 +81,7 @@ const CashierSnapshot = require('./src/models/CashierSnapshot'); // #183 saldo d
 const bankClose = require('./src/services/bankCloseService');  // #183 cruces del cierre
 const telegramAlert = require('./src/services/telegramAlertService'); // #183 Telegram (bajadas + cierre)
 const hgcashPay = require('./src/services/hgcashService');
+const finpro = require('./src/services/finproService'); // #217: Finpro, segundo banco con API paralelo a hgcash (réplica #368 de AUTOGIROXcompartido)
 const pdfImage = require('./src/services/pdfImageService');
 const { generateReferralCode } = require('./src/utils/referralCode');
 const { setRedisClient, getRedisClient } = require('./src/utils/redisClient');
@@ -1962,6 +1963,54 @@ async function getHgcashConfig() {
   return merged;
 }
 
+// ============================================================
+// #217 FINPRO — banco con API PARALELO a hgcash (réplica de #368–#370 del gemelo
+// AUTOGIROXcompartido; acá nunca hubo GH Wallet, Finpro es el primer segundo banco).
+// ------------------------------------------------------------
+// • Config['finpro'] = { enabled, mode } — interruptor y modo (sombra/auto) PROPIOS.
+//   El resto de los parámetros del matcheo (ventana, mínimo, guard de duplicados,
+//   moneda) se comparten con la card de hgcash (son del pipeline, no del banco).
+//   Credenciales y datos de la cuenta (api key/secret, bankId, cuenta, CVU, URL) van en
+//   Config['finproCredentials'] cifrado — ver _loadFinproCredentials.
+// • Config['bankProvider'] = 'hgcash' | 'finpro' — qué banco PAGA los retiros
+//   (selector "🏦 Bancos automáticos" del panel). Default hgcash.
+// • Finpro NO avisa (todavía) las transferencias entrantes: se VERIFICAN con
+//   `transfers/verify/incoming` a partir del comprobante del cliente
+//   (`_finproVerifyComprobante`) y, si está acreditada, se crea el BankMovement
+//   (`provider:'finpro'`, `_finproIngestIncoming`) que entra al MISMO pipeline que
+//   hgcash: `hgcashAutoCarga` con los mismos candados (HgcashCharge por coelsa, guard de
+//   duplicados, multicuenta bancaria, bonos pendientes `_pendingBonusFor`), la misma
+//   reference `vip-hg-<coelsa>` y los mismos vínculos en las dos direcciones del #183
+//   (`BankMovement.transactionId` + `chargeSource`, `Transaction.metadata.movementId`) →
+//   la bandeja y el cierre diario lo ven como a cualquier movimiento. Sin webhook no hay
+//   detección de reversiones (verify solo valida acreditadas).
+// ============================================================
+const FINPRO_DEFAULTS = { enabled: false, mode: 'shadow' };
+async function getFinproConfig() {
+  const cfg = await getConfig('finpro', null);
+  const merged = Object.assign({}, FINPRO_DEFAULTS, cfg || {});
+  merged.enabled = merged.enabled === true;
+  merged.mode = merged.mode === 'auto' ? 'auto' : 'shadow';
+  merged.acceptStatuses = ['done']; // verify/incoming solo devuelve transferencias ACREDITADAS
+  return merged;
+}
+const BANK_PROVIDERS = ['hgcash', 'finpro'];
+async function getBankProvider() {
+  const v = String(await getConfig('bankProvider', 'hgcash') || 'hgcash').toLowerCase();
+  return BANK_PROVIDERS.includes(v) ? v : 'hgcash';
+}
+function _bankLabel(provider) { return provider === 'finpro' ? 'Finpro' : 'hgcash'; }
+// Config efectiva para un movimiento según su banco: enabled/mode del banco dueño
+// + los parámetros compartidos del pipeline (de la card de hgcash).
+async function _bankCfgForMovement(movement) {
+  const base = await getHgcashConfig();
+  if (movement && movement.provider === 'finpro') {
+    const fp = await getFinproConfig();
+    return Object.assign({}, base, { enabled: fp.enabled, mode: fp.mode, acceptStatuses: fp.acceptStatuses });
+  }
+  return base;
+}
+
 // Sólo dígitos (para comparar CBUs sin importar formato/espacios).
 function _digits(s) { return String(s || '').replace(/\D/g, ''); }
 
@@ -2048,6 +2097,17 @@ function _destConsistentOk(comprobante, movement, cfg) {
   if (movement) {
     if (comprobante.destCbu && movement.toCBU && _digits(comprobante.destCbu) === _digits(movement.toCBU)) return true;
     if (comprobante.destHolder && movement.toName && _nameMatch(comprobante.destHolder, movement.toName)) return true;
+    // #217: el movimiento de Finpro nace de verify/incoming sobre NUESTRO CVU; se compara
+    // con el CVU/titular configurados (`_finproAccountCache`, accounts/information). Si el
+    // titular todavía no se pudo leer, se acepta: la verificación ya prueba que la plata
+    // entró a nuestra cuenta de Finpro.
+    if (movement.provider === 'finpro') {
+      const ourCvu = finpro.fromCvu();
+      if (comprobante.destCbu && ourCvu && _digits(comprobante.destCbu) === ourCvu) return true;
+      const holder = _finproAccountCache.holder;
+      if (comprobante.destHolder && holder && _nameMatch(comprobante.destHolder, holder)) return true;
+      if (!holder) return true;
+    }
   }
   if (_comprobanteToOurBank(comprobante, cfg)) return true;
   return false;
@@ -2725,7 +2785,7 @@ async function hgcashAutoCarga({ movement, comprobante, mode, assign = null }) {
 // MONTO + NOMBRE de origen. Si hay varios candidatos (ambigüedad) → NO carga.
 async function hgcashMatchFromMovement(movement) {
   try {
-    const cfg = await getHgcashConfig();
+    const cfg = await _bankCfgForMovement(movement); // #217: cada movimiento se gatea con la config de SU banco
     if (!cfg.enabled) return;
     if (!movement || movement.direction !== 'Inbound' || movement.matchStatus !== 'pending') return;
     if (!_statusAccredited(movement.status, cfg)) return; // todavía no acreditado (status != done)
@@ -2765,21 +2825,30 @@ async function hgcashMatchFromMovement(movement) {
 async function hgcashMatchFromComprobante(comprobante) {
   try {
     const cfg = await getHgcashConfig();
-    if (!cfg.enabled) return;
+    const fpCfg = await getFinproConfig(); // #217
+    if (!cfg.enabled && !fpCfg.enabled) return;
     if (!comprobante || !comprobante.isComprobante || comprobante.autoCharged) return;
 
     // Buscamos un movimiento entrante que corresponda (por N° de transacción/coelsa,
     // o por nombre de origen + destino). NO dependemos de la config de cuenta: el
     // match se valida contra el movimiento real (sirve para cualquier banco/cuenta).
+    // #217: un movimiento de Finpro VIEJO (su `date` viene con zona, ISO) que se
+    // registró recién no es candidato: esa plata ya se cargó a mano en su momento. El
+    // `date` de hgcash viene como hora local sin zona (queda 3 h corrido) y NO sirve
+    // para filtrar.
     const since = new Date(Date.now() - (cfg.windowMinutes || 60) * 60 * 1000);
     const candidates = await BankMovement.find({
-      direction: 'Inbound', matchStatus: 'pending', createdAt: { $gte: since }
+      direction: 'Inbound', matchStatus: 'pending', createdAt: { $gte: since },
+      $or: [{ provider: { $in: ['hgcash', null] } }, { date: null }, { date: { $exists: false } }, { date: { $gte: since } }]
     }).sort({ createdAt: -1 }).limit(80).lean();
 
-    const matches = candidates.filter(m =>
-      _statusAccredited(m.status, cfg) &&
-      _comprobanteMatchesMovement(comprobante, m, cfg)
-    );
+    // #217: cada movimiento se evalúa con la config de SU banco (un banco apagado no
+    // aporta candidatos).
+    const _cfgOf = (m) => (m.provider === 'finpro' ? Object.assign({}, cfg, { enabled: fpCfg.enabled, mode: fpCfg.mode, acceptStatuses: fpCfg.acceptStatuses }) : cfg);
+    const matches = candidates.filter(m => {
+      const c = _cfgOf(m);
+      return c.enabled && _statusAccredited(m.status, c) && _comprobanteMatchesMovement(comprobante, m, c);
+    });
     if (matches.length === 0) {
       logger.info(`[hgcash] comprobante SIN movimiento aún: $${comprobante.amount} op=${comprobante.operationNumber || '-'} de "${comprobante.originHolder || '?'}" — ${candidates.length} movimientos pendientes en ventana`);
       return; // todavía no llegó el movimiento; el webhook lo matcheará al llegar
@@ -2790,7 +2859,7 @@ async function hgcashMatchFromComprobante(comprobante) {
         `🏦 Hay ${matches.length} transferencias que coinciden con este comprobante (mismo monto y nombre en la ventana). Verificá y cargá a mano.`);
       return;
     }
-    await hgcashAutoCarga({ movement: matches[0], comprobante, mode: cfg.mode });
+    await hgcashAutoCarga({ movement: matches[0], comprobante, mode: _cfgOf(matches[0]).mode });
   } catch (e) {
     logger.warn(`[hgcash] match desde comprobante falló: ${e.message}`);
   }
@@ -2855,6 +2924,129 @@ function _hgcashWebhookSecrets() {
   if (_hgcashPanelSecret) return [_hgcashPanelSecret];
   return [process.env.HGCASH_WEBHOOK_SECRET || null].filter(Boolean);
 }
+
+// ============================================
+// #217 FINPRO — credenciales desde el panel + ingesta de entrantes + callback
+// ============================================
+// Mismo esquema que hgcash (#192): Config['finproCredentials'] = { apiKeyEnc, apiSecretEnc,
+// apiKeyLast4, apiSecretLast4, bankId, account, fromCvu, baseUrl, updatedBy, updatedAt },
+// key/secret cifrados con la MISMA clave derivada de JWT_SECRET (`_credEncrypt`); panel > SSM
+// (FINPRO_API_KEY / FINPRO_API_SECRET / FINPRO_BANK_ID / FINPRO_ACCOUNT / FINPRO_FROM_CVU /
+// FINPRO_API_URL). Cada instancia lo carga en memoria al arrancar y cada 60 s.
+// ⚠️ La base URL por defecto es la de DESARROLLO de la doc (mw-dev.finpro.com.ar): la de
+// producción no está documentada → se carga desde el panel cuando Finpro la informe.
+let _finproCredMeta = null; // { apiKeyLast4, apiSecretLast4, updatedBy, updatedAt, decryptError }
+// Titular/CUIT de NUESTRO CVU en Finpro (accounts/information): destino de los movimientos
+// y consistencia con el comprobante. Se refresca cada hora y al cambiar credenciales.
+const _finproAccountCache = { holder: null, cuit: null, cvu: null, at: 0, tag: null };
+async function _refreshFinproAccount(force) {
+  try {
+    const cvu = finpro.fromCvu();
+    if (!finpro.isEnabled() || cvu.length !== 22) { _finproAccountCache.holder = null; _finproAccountCache.cuit = null; _finproAccountCache.cvu = null; return; }
+    const tag = finpro.getCredentialSource() + ':' + cvu + ':' + finpro.baseUrl();
+    if (!force && _finproAccountCache.tag === tag && Date.now() - _finproAccountCache.at < 60 * 60 * 1000) return;
+    const r = await finpro.getAccountInformation({ cvu });
+    if (r.ok && r.found) {
+      _finproAccountCache.holder = r.nombre; _finproAccountCache.cuit = r.cuit || null; _finproAccountCache.cvu = cvu;
+      _finproAccountCache.at = Date.now(); _finproAccountCache.tag = tag;
+    }
+  } catch (_) {}
+}
+async function _loadFinproCredentials() {
+  try {
+    const v = await getConfig('finproCredentials', null);
+    if (!v || (!v.apiKeyEnc && !v.apiSecretEnc && !v.bankId && !v.account && !v.fromCvu && !v.baseUrl)) {
+      finpro.setCredentialsOverride(null); finpro.setSettingsOverride({}); _finproCredMeta = null; return;
+    }
+    let apiKey = null, apiSecret = null, decryptError = false;
+    try { apiKey = v.apiKeyEnc ? _credDecrypt(v.apiKeyEnc) : null; } catch (_) { decryptError = true; }
+    try { apiSecret = v.apiSecretEnc ? _credDecrypt(v.apiSecretEnc) : null; } catch (_) { decryptError = true; }
+    finpro.setCredentialsOverride(apiKey && apiSecret ? { apiKey, apiSecret } : null);
+    finpro.setSettingsOverride({ baseUrl: v.baseUrl || '', bankId: v.bankId || '', account: v.account || '', fromCvu: v.fromCvu || '' });
+    _finproCredMeta = { apiKeyLast4: v.apiKeyLast4 || null, apiSecretLast4: v.apiSecretLast4 || null, updatedBy: v.updatedBy || null, updatedAt: v.updatedAt || null, decryptError };
+    if (decryptError) logger.error('[finpro] credenciales del panel NO se pudieron descifrar (¿cambió JWT_SECRET?) — se usa SSM');
+  } catch (e) { logger.warn(`[finpro] no se pudieron leer las credenciales del panel: ${e.message}`); }
+}
+setTimeout(() => { _loadFinproCredentials(); }, 9 * 1000);
+setInterval(() => { _loadFinproCredentials(); }, 60 * 1000);
+setTimeout(() => { _refreshFinproAccount(true); }, 20 * 1000);
+setInterval(() => { _refreshFinproAccount(false); }, 10 * 60 * 1000);
+function _finproCallbackUrl() { return `${getPublicBaseUrl()}/api/finpro/callback`; }
+
+// ── Ingesta de una transferencia ENTRANTE de Finpro → BankMovement → pipeline ──────
+// PUNTO DE EXTENSIÓN: hoy la llama la verificación por comprobante (`source:'verify'`,
+// con la `notification` de verify/incoming). Cuando el owner mande la doc de Webhooks /
+// "Listado para conciliación", esos flujos solo tienen que armar la notificación
+// `{ id, amount, coelsaId, authorizationCode, toCvu, fromCvu, fromName, fromCuit,
+// occurredAt, raw }` y llamar a esta función (source 'webhook' | 'list'), y después a
+// `hgcashMatchFromMovement(movement)` si vino sin comprobante.
+// Idempotente por movementId: 'fp:<notification.id>' (o 'fp:coelsa:<coelsa>' /
+// 'fp:auth:<autorización>' si la notificación no trae id). Status SIEMPRE 'done': verify
+// solo devuelve acreditadas y no hay reversiones por este canal.
+// `extra.coelsaId` / `extra.amount` completan lo que la notificación no trae (p. ej. el
+// coelsa del comprobante con el que Finpro confirmó la coincidencia).
+// #183: deja `fromKey` (identidad bancaria normalizada) como el webhook de hgcash, para
+// que la multicuenta por banco y el retro-vínculo por titular funcionen igual.
+async function _finproIngestIncoming(n, source, extra) {
+  if (!n) return { movement: null, isNew: false, error: 'sin notificación' };
+  const ex = extra || {};
+  const coelsa = n.coelsaId || ex.coelsaId || null;
+  const key = n.id ? String(n.id) : (coelsa ? 'coelsa:' + coelsa : (n.authorizationCode ? 'auth:' + n.authorizationCode : null));
+  if (!key) return { movement: null, isNew: false, error: 'notificación sin id / coelsa / autorización' };
+  const amountNum = Number(n.amount);
+  const exAmount = Number(ex.amount);
+  const ev = 'finpro.' + (source || 'verify');
+  const doc = {
+    movementId: 'fp:' + key,
+    provider: 'finpro',
+    externalId: n.authorizationCode || null,
+    coelsaCode: coelsa,
+    amount: Number.isFinite(amountNum) && amountNum > 0 ? amountNum : (Number.isFinite(exAmount) && exAmount > 0 ? exAmount : null),
+    amountRaw: n.amount != null ? String(n.amount) : null,
+    currency: 'ARS',
+    direction: 'Inbound',
+    status: 'done',
+    type: 'transfer',
+    accountId: finpro.account() || null,
+    fromName: n.fromName || null,
+    fromKey: _bankFromKey(n.fromName),
+    fromCBU: n.fromCvu || null,
+    fromCUIT: n.fromCuit || null,
+    toName: _finproAccountCache.holder || null,
+    toCBU: n.toCvu || finpro.fromCvu() || null,
+    date: n.occurredAt ? new Date(n.occurredAt) : null,
+    topic: ev,
+    eventType: ev,
+    raw: n.raw || n
+  };
+  if (doc.date && isNaN(doc.date.getTime())) doc.date = null;
+  let isNew = false;
+  try {
+    await BankMovement.create({ ...doc, matchStatus: 'pending', processedEvents: [ev], createdAt: new Date() });
+    isNew = true;
+  } catch (e) { if (!e || e.code !== 11000) throw e; }
+  if (isNew) {
+    _emitHgcashUpdate('movimiento', doc.movementId);
+    logger.info(`[finpro] transferencia entrante registrada (${source || 'verify'}): ${doc.movementId} $${doc.amount} de "${doc.fromName || '?'}" coelsa=${doc.coelsaCode || '-'}`);
+  } else {
+    // Completar datos que antes no teníamos (coelsa / origen) sin tocar el estado del matcheo.
+    const set = {};
+    if (doc.coelsaCode) set.coelsaCode = doc.coelsaCode;
+    if (doc.fromName) { set.fromName = doc.fromName; if (doc.fromKey) set.fromKey = doc.fromKey; }
+    if (doc.fromCBU) set.fromCBU = doc.fromCBU;
+    if (doc.fromCUIT) set.fromCUIT = doc.fromCUIT;
+    if (doc.externalId) set.externalId = doc.externalId;
+    await BankMovement.updateOne({ movementId: doc.movementId }, { $set: set, $addToSet: { processedEvents: ev } });
+  }
+  const movement = await BankMovement.findOne({ movementId: doc.movementId }).lean();
+  return { movement, isNew };
+}
+// Parámetros de la verificación por comprobante (#219) y contadores del callback de pagos
+// (#218): viven acá para que el 🔎 Diagnóstico del panel los pueda leer.
+const FINPRO_VERIFY_WINDOW_MIN = 180;
+const FINPRO_REVERIFY_EVERY_MS = 2 * 60 * 1000;
+const FINPRO_REVERIFY_MAX_MS = 90 * 60 * 1000;
+const _finproCallbackStats = { received: 0, matched: 0, lastAt: null, lastProcessId: null, lastIp: null, lastStatus: null };
 
 // ============================================
 // FAN-OUT del webhook hgcash → autoreembolsos
@@ -17895,6 +18087,262 @@ app.post('/api/admin/webhooks/:id/test', authMiddleware, adminMiddleware, async 
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
 
+// ============================================
+// #217 BANCOS AUTOMÁTICOS — endpoints del panel (solo admin general)
+// ============================================
+// Sección general "🏦 Bancos automáticos": por cuál(es) banco ENTRAN las cargas y por cuál
+// SALEN los retiros. Escribe hgcash.enabled / finpro.enabled / bankProvider. (El checkbox
+// "Activar integración" de la card de hgcash sigue escribiendo hgcash.enabled: son dos
+// vistas de la misma llave.)
+async function _banksPayload() {
+  const [hg, fp, provider] = await Promise.all([getHgcashConfig(), getFinproConfig(), getBankProvider()]);
+  const incoming = hg.enabled && fp.enabled ? 'both' : (hg.enabled ? 'hgcash' : (fp.enabled ? 'finpro' : 'none'));
+  return {
+    incoming, payouts: provider,
+    hgcash: { enabled: !!hg.enabled, mode: hg.mode, token: hgcashPay.getTokenSource(), secret: _hgcashWebhookSecrets().length > 0, accountName: hg.accountName || '', cbu: hg.cbu || '' },
+    finpro: { enabled: fp.enabled, mode: fp.mode, credentials: finpro.getCredentialSource(), readyPayouts: finpro.isReadyForPayouts(), readyIncoming: finpro.isReadyForIncoming(), dev: finpro.isDevUrl(), fromCvu: finpro.fromCvu() ? '…' + finpro.fromCvu().slice(-6) : '', account: !!finpro.account() }
+  };
+}
+app.get('/api/admin/banks', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    res.json(await _banksPayload());
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/banks', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const b = req.body || {};
+    const incoming = String(b.incoming || '').toLowerCase();
+    const payouts = String(b.payouts || '').toLowerCase();
+    if (!['hgcash', 'finpro', 'both', 'none'].includes(incoming)) return res.status(400).json({ error: 'Opción de cargas inválida' });
+    if (!BANK_PROVIDERS.includes(payouts)) return res.status(400).json({ error: 'Banco de retiros inválido' });
+    const hgOn = incoming === 'hgcash' || incoming === 'both';
+    const fpOn = incoming === 'finpro' || incoming === 'both';
+    const hg = await getHgcashConfig();
+    if (hgOn && !hg.accountName && !hg.cbu) return res.status(400).json({ error: 'Para recibir por hgcash cargá primero el NOMBRE de la cuenta (o el CBU) en la card de hgcash.' });
+    if (fpOn && !finpro.isEnabled()) return res.status(400).json({ error: 'Para recibir por Finpro cargá primero su API Key y API Secret en el bloque de Finpro ("Probar y guardar").' });
+    if (fpOn && !finpro.isReadyForIncoming()) return res.status(400).json({ error: 'Para recibir por Finpro cargá también NUESTRO CVU (22 dígitos) o el número de cuenta en el bloque de Finpro: sin eso no se puede verificar a qué cuenta entró la plata.' });
+    if (payouts === 'finpro' && !finpro.isEnabled()) return res.status(400).json({ error: 'Para pagar retiros por Finpro cargá primero su API Key y API Secret en el bloque de Finpro.' });
+    if (payouts === 'finpro' && !finpro.isReadyForPayouts()) return res.status(400).json({ error: 'Para pagar retiros por Finpro cargá NUESTRO CVU de origen (22 dígitos) en el bloque de Finpro.' });
+    if (hgOn !== !!hg.enabled) await setConfig('hgcash', Object.assign({}, hg, { enabled: hgOn }));
+    const fp = await getFinproConfig();
+    if (fpOn !== fp.enabled) await Config.set('finpro', { enabled: fpOn, mode: fp.mode }, req.user.username);
+    await Config.set('bankProvider', payouts, req.user.username);
+    logger.info(`[banks] ${req.user.username}: cargas por ${incoming} · retiros por ${_bankLabel(payouts)}`);
+    res.json(Object.assign({ success: true }, await _banksPayload()));
+  } catch (e) {
+    logger.error(`[banks] guardar falló: ${e.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+app.get('/api/admin/bank-provider', authMiddleware, adminMiddleware, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+  res.json({ provider: await getBankProvider(), options: BANK_PROVIDERS, hgcashReady: hgcashPay.isEnabled(), finproReady: finpro.isReadyForPayouts() });
+});
+app.post('/api/admin/bank-provider', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const v = String((req.body && req.body.provider) || '').toLowerCase();
+    if (!BANK_PROVIDERS.includes(v)) return res.status(400).json({ error: 'Banco inválido' });
+    if (v === 'finpro' && !finpro.isReadyForPayouts()) return res.status(400).json({ error: 'Finpro no está listo para pagar: cargá API Key/Secret y nuestro CVU de origen en el bloque de Finpro.' });
+    await Config.set('bankProvider', v, req.user.username);
+    logger.info(`[bank-provider] ${req.user.username}: los retiros salen por ${_bankLabel(v)}`);
+    res.json({ success: true, provider: v });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+
+// ============================================
+// #217 FINPRO — endpoints del panel (solo admin general)
+// ============================================
+function _finproPublicState() {
+  const st = finpro.settingsPublic();
+  return {
+    credentials: finpro.getCredentialSource(),
+    ready: { payouts: finpro.isReadyForPayouts(), incoming: finpro.isReadyForIncoming() },
+    settings: { baseUrl: st.baseUrl, bankId: st.bankId, account: st.account, fromCvu: st.fromCvu, source: st.source },
+    dev: st.dev,
+    defaultBaseUrl: finpro.DEFAULT_BASE_URL,
+    callbackUrl: _finproCallbackUrl(),
+    holder: _finproAccountCache.holder ? { nombre: _finproAccountCache.holder, cuit: _finproAccountCache.cuit, at: _finproAccountCache.at ? new Date(_finproAccountCache.at) : null } : null
+  };
+}
+app.get('/api/admin/finpro/config', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const cfg = await getFinproConfig();
+    res.json(Object.assign({ enabled: cfg.enabled, mode: cfg.mode }, _finproPublicState()));
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/finpro/config', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const b = req.body || {};
+    const cur = await getFinproConfig();
+    const next = { enabled: cur.enabled, mode: b.mode === 'auto' ? 'auto' : 'shadow' };
+    await Config.set('finpro', next, req.user.username);
+    logger.info(`[finpro] config: ${req.user.username} → ${next.enabled ? 'ACTIVO' : 'apagado'} modo ${next.mode}`);
+    res.json(Object.assign({ success: true }, next, _finproPublicState()));
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.get('/api/admin/finpro/credentials', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    await _loadFinproCredentials();
+    _refreshFinproAccount(true).catch(() => {});
+    const m = _finproCredMeta || {};
+    res.json(Object.assign({
+      apiKeyLast4: m.apiKeyLast4 || null, apiSecretLast4: m.apiSecretLast4 || null,
+      updatedBy: m.updatedBy || null, updatedAt: m.updatedAt || null, decryptError: !!m.decryptError,
+      ssmKey: !!process.env.FINPRO_API_KEY, ssmSecret: !!process.env.FINPRO_API_SECRET,
+      env: { baseUrl: process.env.FINPRO_API_URL || null, bankId: process.env.FINPRO_BANK_ID || null, account: process.env.FINPRO_ACCOUNT ? '…' + String(process.env.FINPRO_ACCOUNT).slice(-4) : null, fromCvu: process.env.FINPRO_FROM_CVU ? '…' + String(process.env.FINPRO_FROM_CVU).slice(-6) : null }
+    }, _finproPublicState()));
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+// Guarda credenciales + datos de la cuenta. Antes de guardar PRUEBA: token de cliente y,
+// si hay número de cuenta, el saldo. Los campos vacíos conservan lo que ya había.
+app.post('/api/admin/finpro/credentials', authMiddleware, adminMiddleware, async (req, res) => {
+  const prevSettings = Object.assign({}, finpro.settingsPublic());
+  let settingsTouched = false;
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    if (!_credKey()) return res.status(503).json({ error: 'No se puede cifrar ahora (falta JWT_SECRET). Usá SSM.' });
+    const b = req.body || {};
+    const cur = (await getConfig('finproCredentials', null)) || {};
+    const apiKeyNew = typeof b.apiKey === 'string' ? b.apiKey.trim() : '';
+    const apiSecretNew = typeof b.apiSecret === 'string' ? b.apiSecret.trim() : '';
+    if (/\s/.test(apiKeyNew) || /\s/.test(apiSecretNew)) return res.status(400).json({ error: 'La API Key / Secret no pueden tener espacios.' });
+    if (apiKeyNew.length > 400 || apiSecretNew.length > 400) return res.status(400).json({ error: 'La API Key / Secret no parecen válidos (demasiado largos).' });
+    const fromCvu = b.fromCvu !== undefined ? String(b.fromCvu || '').replace(/\D/g, '') : String(cur.fromCvu || '');
+    if (fromCvu && fromCvu.length !== 22) return res.status(400).json({ error: 'Nuestro CVU tiene que tener 22 dígitos.' });
+    const account = b.account !== undefined ? String(b.account || '').trim().slice(0, 40) : String(cur.account || '');
+    const bankId = b.bankId !== undefined ? String(b.bankId || '').trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) : String(cur.bankId || '');
+    let baseUrl = b.baseUrl !== undefined ? String(b.baseUrl || '').trim().replace(/\/+$/, '') : String(cur.baseUrl || '');
+    if (baseUrl && !/^https:\/\/[a-z0-9.-]+(:\d+)?(\/.*)?$/i.test(baseUrl)) return res.status(400).json({ error: 'La URL base tiene que empezar con https:// (ej: https://mw-dev.finpro.com.ar).' });
+    // Credenciales a probar: las nuevas, o las vigentes del panel, o las de SSM.
+    let apiKey = apiKeyNew, apiSecret = apiSecretNew;
+    if (!apiKey || !apiSecret) {
+      let curKey = null, curSecret = null;
+      try { curKey = cur.apiKeyEnc ? _credDecrypt(cur.apiKeyEnc) : null; curSecret = cur.apiSecretEnc ? _credDecrypt(cur.apiSecretEnc) : null; } catch (_) {}
+      apiKey = apiKey || curKey || process.env.FINPRO_API_KEY || '';
+      apiSecret = apiSecret || curSecret || process.env.FINPRO_API_SECRET || '';
+    }
+    if (!apiKey || !apiSecret) return res.status(400).json({ error: 'Faltan la API Key y el API Secret de Finpro (los dos).' });
+    // Probar con los settings NUEVOS (se aplican en memoria y se restauran si falla).
+    const restore = () => { finpro.setSettingsOverride(prevSettings.source === 'panel' ? { baseUrl: cur.baseUrl || '', bankId: cur.bankId || '', account: cur.account || '', fromCvu: cur.fromCvu || '' } : {}); settingsTouched = false; };
+    finpro.setSettingsOverride({ baseUrl, bankId, account, fromCvu });
+    settingsTouched = true;
+    const creds = { apiKey, apiSecret };
+    const tok = await finpro.getClientToken({ creds, force: true });
+    if (!tok.ok) {
+      restore();
+      return res.status(400).json({ error: `Finpro rechazó las credenciales (${tok.httpStatus ? 'HTTP ' + tok.httpStatus + ' ' : ''}${tok.error || 'sin token'}). No se guardó nada.`, httpStatus: tok.httpStatus || 0 });
+    }
+    let balance = null, balanceError = null;
+    if (account) {
+      const bal = await finpro.getBalance({ account, creds });
+      if (!bal.ok) {
+        restore();
+        return res.status(400).json({ error: `El token anduvo pero el saldo de la cuenta "${account}" falló (${bal.httpStatus ? 'HTTP ' + bal.httpStatus + ' ' : ''}${bal.error || bal.description || 'sin detalle'}). Revisá el número de cuenta. No se guardó nada.` });
+      }
+      balance = { balance: bal.balance, available: bal.available, currency: bal.currency, raw: bal.data };
+    } else balanceError = 'sin número de cuenta: no se consultó el saldo';
+    let holder = null;
+    if (fromCvu) { try { const h = await finpro.getAccountInformation({ cvu: fromCvu, creds }); if (h.ok && h.found) holder = { nombre: h.nombre, cuit: h.cuit }; } catch (_) {} }
+    const next = {
+      apiKeyEnc: apiKeyNew ? _credEncrypt(apiKeyNew) : (cur.apiKeyEnc || null),
+      apiSecretEnc: apiSecretNew ? _credEncrypt(apiSecretNew) : (cur.apiSecretEnc || null),
+      apiKeyLast4: apiKeyNew ? apiKeyNew.slice(-4) : (cur.apiKeyLast4 || null),
+      apiSecretLast4: apiSecretNew ? apiSecretNew.slice(-4) : (cur.apiSecretLast4 || null),
+      bankId, account, fromCvu, baseUrl,
+      updatedBy: req.user.username, updatedAt: new Date().toISOString()
+    };
+    await Config.set('finproCredentials', next, req.user.username);
+    await _loadFinproCredentials();
+    settingsTouched = false;
+    _refreshFinproAccount(true).catch(() => {});
+    logger.warn(`[finpro] credenciales/cuenta del panel actualizadas por ${req.user.username} (${apiKeyNew ? 'key' : ''}${apiKeyNew && apiSecretNew ? '+' : ''}${apiSecretNew ? 'secret' : ''}${fromCvu ? ' cvu…' + fromCvu.slice(-4) : ''}${baseUrl ? ' url=' + baseUrl : ''})`);
+    res.json(Object.assign({ success: true, token: { ok: true, expiresAt: tok.expiresAt ? new Date(tok.expiresAt) : null }, balance, balanceError, holder }, _finproPublicState()));
+  } catch (e) {
+    if (settingsTouched) { try { await _loadFinproCredentials(); } catch (_) {} }
+    logger.error(`[finpro] guardar credenciales falló: ${e.message}`);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+app.delete('/api/admin/finpro/credentials', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    await Config.deleteOne({ key: 'finprocredentials' }); // el modelo guarda la key en minúsculas
+    await _loadFinproCredentials();
+    _refreshFinproAccount(true).catch(() => {});
+    logger.warn(`[finpro] credenciales del panel borradas por ${req.user.username} (vuelve a SSM/env)`);
+    res.json(Object.assign({ success: true }, _finproPublicState()));
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+// Cuenta: saldo (accounts/balance) + titular de nuestro CVU (accounts/information).
+app.get('/api/admin/finpro/account', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    if (!finpro.isEnabled()) return res.json(Object.assign({ enabled: false, balance: null }, _finproPublicState()));
+    await _refreshFinproAccount(req.query.fresh === '1');
+    let balance = null, balanceError = null;
+    if (finpro.account()) {
+      const bal = await finpro.getBalance();
+      if (bal.ok) balance = { balance: bal.balance, available: bal.available, currency: bal.currency, raw: bal.data };
+      else balanceError = (bal.httpStatus ? 'HTTP ' + bal.httpStatus + ' ' : '') + (bal.error || bal.description || 'sin detalle');
+    } else balanceError = 'Falta el número de cuenta de Finpro (bloque Finpro → "Probar y guardar").';
+    res.json(Object.assign({ enabled: true, balance, balanceError }, _finproPublicState()));
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+// Diagnóstico: últimas llamadas a Finpro (por instancia), estado del token, callbacks
+// recibidos, comprobantes en re-verificación y últimos movimientos/pagos de Finpro.
+app.get('/api/admin/finpro/diag', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const since = new Date(Date.now() - 24 * 3600 * 1000);
+    const [pendingVerify, recentVerify, movements, payouts] = await Promise.all([
+      Comprobante.countDocuments({ finproVerifyStatus: 'pending' }),
+      Comprobante.find({ finproVerifyStatus: { $ne: null }, createdAt: { $gte: since } }).sort({ createdAt: -1 }).limit(15)
+        .select('id username amount operationNumber createdAt finproVerifyStatus finproVerify.attempts finproVerify.lastAt finproVerify.last finproVerify.nextAt finproVerify.movementId bankMatchStatus autoCharged').lean(),
+      BankMovement.find({ provider: 'finpro' }).sort({ createdAt: -1 }).limit(10).select('movementId amount fromName coelsaCode externalId matchStatus matchedUsername createdAt date').lean(),
+      PendingPayout.find({ paidVia: 'finpro' }).sort({ createdAt: -1 }).limit(10).select('id username amount status hgStatus fpProcessId fpTransactionId fpCoelsaId fpAccepted error createdAt paidAt').lean()
+    ]);
+    res.json(Object.assign({
+      service: finpro.getDiag(),
+      callbacks: Object.assign({}, _finproCallbackStats),
+      verify: { pending: pendingVerify, recent: recentVerify, everyMin: FINPRO_REVERIFY_EVERY_MS / 60000, maxMin: FINPRO_REVERIFY_MAX_MS / 60000, windowMin: FINPRO_VERIFY_WINDOW_MIN },
+      movements, payouts
+    }, _finproPublicState()));
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+// Verificación MANUAL de una transferencia entrante (coelsa | autorización | monto+fecha).
+// Solo consulta y muestra: no crea movimientos ni carga (eso lo hace el flujo del comprobante).
+app.post('/api/admin/finpro/verify', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    if (!finpro.isEnabled()) return res.status(400).json({ error: 'Finpro no está configurado (API Key/Secret).' });
+    const b = req.body || {};
+    const input = {};
+    if (b.coelsaId) input.coelsaId = String(b.coelsaId).trim().toUpperCase();
+    else if (b.authorizationCode) input.authorizationCode = String(b.authorizationCode).trim();
+    else {
+      input.amount = Number(b.amount);
+      if (!(input.amount > 0)) return res.status(400).json({ error: 'Poné el código COELSA, el código de autorización, o el monto (y la fecha).' });
+      const d = b.occurredAt ? new Date(b.occurredAt) : new Date();
+      if (isNaN(d.getTime())) return res.status(400).json({ error: 'Fecha inválida.' });
+      input.occurredAt = d;
+      input.windowMinutes = Math.min(1440, Math.max(1, Number(b.windowMinutes) || FINPRO_VERIFY_WINDOW_MIN));
+    }
+    const r = await finpro.verifyIncoming(input);
+    logger.info(`[finpro] verificación manual por ${req.user.username} (${r.requestKind}) → ${r.ok ? (r.status || 'sin estado') : 'HTTP ' + r.httpStatus + ' ' + (r.error || '')}`);
+    res.json({
+      ok: r.ok, httpStatus: r.httpStatus, status: r.status, matchedBy: r.matchedBy, confidence: r.confidence,
+      notification: r.notification, matches: r.matches, searchedScope: r.searchedScope, error: r.error || null,
+      request: Object.assign({}, r.requestBody), raw: r.data
+    });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+
 app.get('/api/admin/hgcash/config', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
@@ -17952,6 +18400,8 @@ app.get('/api/admin/hgcash/movements', authMiddleware, adminMiddleware, async (r
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
     const q = {};
     if (req.query.status) q.matchStatus = String(req.query.status);
+    if (req.query.provider === 'finpro') q.provider = 'finpro'; // #217 filtro por banco
+    else if (req.query.provider === 'hgcash') q.provider = { $in: ['hgcash', null] };
     const total = await BankMovement.countDocuments(q);
     const movements = await BankMovement.find(q)
       .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean();
@@ -18293,7 +18743,8 @@ app.get('/api/admin/bank/tray', authMiddleware, adminMiddleware, async (req, res
     if (tab === 'pending') movements = movements.filter(m => _statusAccredited(m.status, cfg));
     movements = await _bankEnrichMovements(movements);
     const pendingCount = await BankMovement.countDocuments({ direction: 'Inbound', matchStatus: { $in: BANK_TRAY_OPEN_STATES }, status: { $in: (cfg.acceptStatuses || ['done']) } });
-    res.json({ movements, pendingCount, hgcashEnabled: !!cfg.enabled, mode: cfg.mode || 'shadow', canAssign: _bankCanAssign(req), canSweep: _bankCanSweep(req), isAdmin: req.user.role === 'admin' });
+    const fpCfgTray = await getFinproConfig(); // #217: la bandeja muestra los dos bancos
+    res.json({ movements, pendingCount, hgcashEnabled: !!cfg.enabled, finproEnabled: fpCfgTray.enabled, mode: cfg.mode || 'shadow', canAssign: _bankCanAssign(req), canSweep: _bankCanSweep(req), isAdmin: req.user.role === 'admin' });
   } catch (error) {
     logger.error(`[bank] tray: ${error.message}`);
     res.status(500).json({ error: 'Error del servidor' });

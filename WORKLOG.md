@@ -4,7 +4,54 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-26**
+> **Última actualización: 2026-10-27**
+
+## Sesión 2026-10-27
+
+### 217. FINPRO como SEGUNDO BANCO con API, paralelo a hgcash (servicio, credenciales, "🏦 Bancos automáticos" del panel) — admin-sw v55
+- **Qué es:** réplica de #368 de AUTOGIROXcompartido. Allá Finpro REEMPLAZÓ a GH Wallet; acá nunca hubo segundo banco (solo hgcash con la
+  bandeja/cierre del #183), así que se AGREGA todo lo que el gemelo ya tenía de "dos bancos": el selector general, `BankMovement.provider`,
+  `_bankCfgForMovement`, y la integración Finpro completa. Doc: app.finpro.com.ar/docs (transcripción del owner; Webhooks y "Listado para
+  conciliación" todavía NO los mandó).
+- **`src/services/finproService.js` (nuevo, copia 1:1 del gemelo — no divergir):** headers `X-API-Key`/`X-API-Secret` en todo; token de
+  cliente (`POST /api/banks/{bankId}/auth/token/client`, `x-access-token`, 1 h) cacheado en memoria, renovado con < 120 s o ante 401
+  (`_withToken`); `getBalance` (`accounts/balance`, campos no documentados → parseo defensivo + raw), `getAccountInformation`
+  (`accounts/information`, alias → CVU + titular + CUIT por Coelsa), `createCvuTransfer`, `getProcessStatus`, `getProcessResult`,
+  `verifyIncoming` (normalizan respuestas con `_pickString/_pickNumber`), `withCvuLock` (cola secuencial por from_cvu), tabla de códigos del
+  banco en español (`describeCode`, `isErrorCode` = tabla + forma 2xxx/04xx/05xx), `transactionIdFor` ('P' + 10 hex del sha1 del payout =
+  11 chars), `isoWithOffsetAR`, ring buffer de llamadas (`getDiag`). Nunca loguea ni devuelve key/secret/token (solo last4).
+- **Config:** `Config['finpro']` `{enabled, mode}` (`getFinproConfig`, `acceptStatuses` fijo `['done']`, arranca APAGADO y en sombra) +
+  `Config['finproCredentials']` = key/secret cifrados con `_credEncrypt` (la MISMA clave derivada de JWT_SECRET que hgcash #192) + `bankId`,
+  `account`, `fromCvu`, `baseUrl` en claro; `_loadFinproCredentials` a los 9 s y cada 60 s → `finpro.setCredentialsOverride/setSettingsOverride`;
+  panel > SSM (`FINPRO_API_KEY/SECRET/API_URL/BANK_ID/ACCOUNT/FROM_CVU`). **DECISIÓN (igual que el gemelo): la URL base por defecto es la de
+  la doc, `https://mw-dev.finpro.com.ar` = DESARROLLO** (la de producción no está documentada): el panel muestra un aviso ROJO mientras la URL
+  contenga dev/sandbox/test/staging y pide cargar la de producción. `Config['bankProvider']` ∈ `BANK_PROVIDERS = ['hgcash','finpro']`
+  (`getBankProvider`, default hgcash: hasta que el owner lo cambie los retiros siguen por hgcash). `_finproAccountCache` = titular/CUIT de
+  NUESTRO CVU (`accounts/information`, refresco 10 min / 1 h) → `_destConsistentOk` compara el destino del comprobante con nuestro CVU/titular
+  (si no se leyó, acepta: la verificación ya prueba que entró a nuestra cuenta). `_bankLabel('finpro')` = "Finpro".
+- **Pipeline compartido (adaptación a ESTA página):** `BankMovement.provider` ('hgcash' default | 'finpro', `movementId 'fp:<id>'`) +
+  `processedEvents`. `hgcashMatchFromMovement` gatea con `_bankCfgForMovement(movement)` (enabled/mode del banco dueño + ventana/mínimo/guard
+  compartidos de la card de hgcash). `hgcashMatchFromComprobante` corre si CUALQUIERA de los dos bancos recibe cargas, evalúa cada candidato
+  con la config de SU banco y descarta movimientos de Finpro con `date` (con zona) fuera de la ventana. `_finproIngestIncoming(notification,
+  source, extra)` crea el BankMovement `provider:'finpro'` (status 'done', `externalId` = authorization_code, `coelsaCode`, `fromKey` como el
+  webhook de hgcash para la multicuenta bancaria del #184) — idempotente por movementId; es el PUNTO DE EXTENSIÓN para webhook/listado. Todo
+  lo que sigue (carga, candados, bonos `_pendingBonusFor/_settlePendingBonuses`, vínculos `BankMovement.transactionId`/`chargeSource` +
+  `Transaction.metadata.movementId` del #183, bandeja, cierre diario) es `hgcashAutoCarga` tal cual: NO se tocó.
+- **Panel (COMANDOS):** sección **"🏦 Bancos automáticos"** ARRIBA de la card de hgcash: radios cargas hgcash / Finpro / los dos / ninguno y
+  retiros hgcash / Finpro (`GET/POST /api/admin/banks` rechaza activar Finpro sin credenciales + CVU/cuenta y elegirlo para retiros sin CVU de
+  origen; `GET/POST /api/admin/bank-provider` ídem). El checkbox "Activar integración" de la card de hgcash sigue escribiendo `hgcash.enabled`
+  (misma llave, dos vistas; al guardar los bancos se sincroniza). Bloque **"🟣 Finpro"** debajo de la card de hgcash: aviso de URL de
+  desarrollo, línea de estado, modo sombra/auto (`GET/POST /api/admin/finpro/config`), credenciales (API Key, API Secret, bankId default
+  `creedence`, n° de cuenta, nuestro CVU, URL base; "🔐 Probar y guardar" = `POST /api/admin/finpro/credentials` pide el token y, con cuenta,
+  el saldo ANTES de guardar; "↩️ Volver a usar AWS (SSM)" = DELETE; GET = estado), caja de cuenta (saldo + titular del CVU,
+  `GET /api/admin/finpro/account`), URL del callback de pagos, "🔎 Diagnóstico" (`GET /api/admin/finpro/diag`: últimas llamadas, token,
+  callbacks, re-verificaciones, últimos movimientos y pagos Finpro) y "Verificar una transferencia a mano" (`POST /api/admin/finpro/verify`:
+  coelsa | autorización | monto+fecha+ventana; solo consulta). "Movimientos del banco": badge **HG / Finpro** en la columna Dir. y filtro
+  por banco (`?provider=`); la **bandeja 🏦 Banco** muestra el mismo badge (`bankProviderBadge`) y `/api/admin/bank/tray` devuelve
+  `finproEnabled`. Banner de retiro del chat: nombre del banco en el botón Pagar, titular según el banco (`lookupName`) y COELSA del pago.
+- Cierre diario (`bankCloseService`): no asume hgcash — cuenta entradas por `status 'done'` (el de Finpro siempre lo es) y cruza por
+  `transactionId`/`metadata.movementId`; el cruce "pago sin movimiento saliente" sigue sólo para `paidVia 'hgcash'` (Finpro no genera
+  movimientos salientes: no hay webhook). `node --check` + `check-tdz` OK. **Back necesita deploy.** Retiros en #218, cargas en #219.
 
 ## Sesión 2026-10-26
 

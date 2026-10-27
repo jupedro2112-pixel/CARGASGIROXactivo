@@ -1,8 +1,9 @@
 /**
- * Modelo de Movimiento Bancario (hgcash / Urbana)
+ * Modelo de Movimiento Bancario (hgcash / Urbana, y Finpro desde #217)
  *
- * Registro PERMANENTE de cada movimiento que el banco con API (hgcash) nos
- * notifica por su webhook `account-movement`. Sólo nos interesan los Inbound
+ * Registro PERMANENTE de cada movimiento que un banco con API nos informa: hgcash
+ * por su webhook `account-movement`, Finpro (`provider:'finpro'`) por la verificación
+ * de la transferencia a partir del comprobante (`verify/incoming`). Sólo nos interesan los Inbound
  * (acreditaciones entrantes) para hacer la carga automática, pero guardamos
  * todos para auditoría.
  *
@@ -16,6 +17,13 @@ const mongoose = require('mongoose');
 const bankMovementSchema = new mongoose.Schema({
   // id interno del movimiento que manda hgcash (UUID). Único → dedupe de webhooks.
   movementId: { type: String, required: true, unique: true, index: true },
+  // #217 Banco que lo originó: 'hgcash' (webhook; default para lo histórico) | 'finpro'
+  // (verificación por comprobante `verify/incoming` o, a futuro, webhook/listado;
+  // movementId = 'fp:<notification.id>' o 'fp:coelsa:<coelsa>' / 'fp:auth:<autorización>').
+  provider: { type: String, default: 'hgcash', index: true },
+  // #217 Orígenes/eventos ya procesados de este movimiento ('finpro.verify', 'finpro.webhook'…)
+  // → un aviso repetido se descarta (dedupe por evento + id).
+  processedEvents: { type: [String], default: [] },
   externalId: { type: String, default: null },     // id externo del banco/red
   coelsaCode: { type: String, default: null, index: true },
 

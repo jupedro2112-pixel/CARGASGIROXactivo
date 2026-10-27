@@ -3060,9 +3060,11 @@ async function loadPayoutBanner(userId) {
         const debitWarn = debitUnconfirmed
             ? '<div style="margin-top:5px;font-size:11px;font-weight:800;color:#ffe08a;background:rgba(0,0,0,0.32);padding:5px 8px;border-radius:6px;">⚠️ Descuento NO confirmado en 1girox — verificá el saldo real antes de pagar. Si rechazás, NO se devuelven fichas automáticamente.</div>'
             : '';
+        // #217: el pago sale por el banco elegido en "Bancos automáticos" (hgcash o Finpro).
+        const bankName = j.bankProvider === 'finpro' ? 'Finpro' : 'hgcash';
         const payBtn = j.payEnabled
-            ? '<button onclick="payPayout(\'' + escapeHtml(p.id) + '\')" style="background:#0f8a2f;color:#fff;border:none;border-radius:7px;padding:7px 13px;font-weight:800;font-size:12px;cursor:pointer;">💸 Pagar ' + monto + '</button>'
-            : '<span style="color:#ffd;font-size:11px;">Pago automático no configurado (falta token). Pagá manual.</span>';
+            ? '<button onclick="payPayout(\'' + escapeHtml(p.id) + '\')" title="Sale por ' + bankName + '" style="background:#0f8a2f;color:#fff;border:none;border-radius:7px;padding:7px 13px;font-weight:800;font-size:12px;cursor:pointer;">💸 Pagar ' + monto + ' <small style="opacity:.8;">(' + bankName + ')</small></button>'
+            : '<span style="color:#ffd;font-size:11px;">Pago automático por ' + bankName + ' no configurado (' + (j.bankProvider === 'finpro' ? 'faltan credenciales o nuestro CVU' : 'falta token') + '). Pagá manual.</span>';
         // "Descartar": SOLO admin general. Limpia un pago viejo ya resuelto SIN devolver fichas ni avisar al cliente.
         const dismissBtn = (currentAdmin?.role === 'admin')
             ? '<button onclick="dismissPayout(\'' + escapeHtml(p.id) + '\')" title="Limpiar pago viejo ya resuelto: no devuelve fichas ni avisa al cliente" style="background:rgba(0,0,0,0.35);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:7px;padding:7px 11px;font-size:11.5px;cursor:pointer;">🗑️ Descartar</button>'
@@ -3070,7 +3072,7 @@ async function loadPayoutBanner(userId) {
         el.innerHTML = '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:#fff;font-size:12.5px;">' +
             '<span style="font-size:18px;">💸</span>' +
             '<div style="flex:1;min-width:160px;"><strong>RETIRO PENDIENTE: ' + monto + '</strong>' +
-            '<div style="font-size:11px;opacity:0.92;">Titular: ' + titular + ' · CBU/alias: ' + dest + '</div>' +
+            '<div style="font-size:11px;opacity:0.92;">Titular: ' + titular + ' · CBU/alias: ' + dest + (p.lookupName ? ' · titular según el banco: <b>' + escapeHtml(p.lookupName) + '</b>' : '') + (p.fpCoelsaId ? ' · COELSA ' + escapeHtml(p.fpCoelsaId) : '') + '</div>' +
             '<div style="font-size:10.5px;opacity:0.8;">Verificá los datos antes de pagar.</div>' + debitWarn + '</div>' +
             payBtn +
             '<button onclick="payOtherBank(\'' + escapeHtml(p.id) + '\')" style="background:#1f6feb;color:#fff;border:none;border-radius:7px;padding:7px 11px;font-size:11.5px;font-weight:700;cursor:pointer;">🏦 Pagar con otro banco</button>' +
@@ -3089,7 +3091,7 @@ async function payPayout(id) {
         const r = await authFetch('/api/admin/payouts/' + encodeURIComponent(id) + '/pay', { method: 'POST' });
         const j = await r.json();
         if (r.ok && j.success) {
-            showToast(j.status === 'paid' ? 'Pago realizado ✅' : 'Pago iniciado ⏳', 'success');
+            showToast((j.status === 'paid' ? 'Pago realizado ✅' : 'Pago iniciado ⏳') + (j.lookupName ? ' · a ' + j.lookupName : '') + (j.message ? ' · ' + j.message : ''), 'success');
             if (el) { el.style.display = 'none'; el.innerHTML = ''; }
         } else if (r.ok && j.insufficient) {
             // El cliente se jugó las fichas: no se descontó ni se pagó. Se avisó y se cerró el chat.
@@ -3166,7 +3168,7 @@ async function syncPayout(id) {
         const r = await authFetch('/api/admin/payouts/' + encodeURIComponent(id) + '/sync', { method: 'POST' });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) { showToast(j.error || 'No se pudo sincronizar', 'error'); return; }
-        showToast('Estado actualizado: ' + (j.status || j.hgStatus || 'ok'), 'success');
+        showToast('Estado actualizado: ' + (j.status || j.hgStatus || 'ok') + (j.coelsaId ? ' · COELSA ' + j.coelsaId : '') + (j.note ? ' · ' + j.note : ''), 'success');
         if (selectedUserId) loadPayoutBanner(selectedUserId);
     } catch (e) { showToast('Error al sincronizar', 'error'); }
 }
@@ -7413,6 +7415,8 @@ async function loadHgcashConfig() {
         startHgcashLive();
         loadHgcashCredentials(); // #320
         loadHgcashFanout(); // #326
+        loadFinproCard(); // #217
+        loadBanks(); // #217
         const j = await r.json();
         const c = j.config || {};
         const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
@@ -7559,6 +7563,297 @@ async function clearHgcashFanout() {
 }
 window.loadHgcashFanout = loadHgcashFanout; window.saveHgcashFanout = saveHgcashFanout; window.clearHgcashFanout = clearHgcashFanout;
 
+// ====== #217 BANCOS AUTOMÁTICOS: sección general (hgcash / Finpro) — réplica del #333/#368 de AUTOGIROXcompartido ======
+// La sección general ("Bancos automáticos") decide por cuál(es) entran las cargas y
+// por cuál salen los retiros (GET/POST /api/admin/banks). Cada banco tiene su bloque
+// con modo, cuenta y credenciales. (El checkbox "Activar integración" de la card de
+// hgcash escribe la misma llave: después de guardar acá se relee esa card.)
+let _banksState = null;
+function _bankStatusTxt(key, b) {
+    b = b || {};
+    if (key === 'finpro') {
+        const cred = b.credentials === 'panel' ? 'credenciales PANEL' : (b.credentials === 'ssm' ? 'credenciales AWS' : '<span style="color:#ff8080;">sin credenciales</span>');
+        return '<b style="color:#b388ff;">Finpro</b>: ' + (b.enabled ? '🟢 recibe cargas (verificando comprobantes)' : '⚪ no recibe cargas') +
+            ' · modo ' + (b.mode === 'auto' ? '<b>AUTO</b> (carga sola)' : 'SOMBRA (no carga)') + ' · ' + cred +
+            ' · ' + (b.fromCvu ? 'CVU ' + escapeHtml(b.fromCvu) : '<span style="color:#ff8080;">sin CVU</span>') +
+            (b.readyPayouts ? '' : ' · <span style="color:#ffb74d;">no puede pagar retiros</span>') +
+            (b.dev ? ' · <span style="color:#ff8080;font-weight:800;">URL DE DESARROLLO</span>' : '');
+    }
+    const tok = b.token === 'panel' ? 'token PANEL' : (b.token === 'ssm' ? 'token AWS' : '<span style="color:#ff8080;">sin token</span>');
+    const sec = b.secret ? 'firma ✅' : '<span style="color:#ff8080;">sin secreto del webhook</span>';
+    return '<b style="color:#d4af37;">hgcash</b>: ' + (b.enabled ? '🟢 recibe cargas' : '⚪ no recibe cargas') +
+        ' · modo ' + (b.mode === 'auto' ? '<b>AUTO</b> (carga sola)' : 'SOMBRA (no carga)') + ' · ' + tok + ' · ' + sec;
+}
+function _renderBanks(j) {
+    _banksState = j;
+    const inc = document.querySelector('input[name="banksIncoming"][value="' + j.incoming + '"]'); if (inc) inc.checked = true;
+    const pay = document.querySelector('input[name="banksPayouts"][value="' + j.payouts + '"]'); if (pay) pay.checked = true;
+    const sum = document.getElementById('banksSummary');
+    if (sum) {
+        sum.innerHTML = _bankStatusTxt('hgcash', j.hgcash) + '<br>' + _bankStatusTxt('finpro', j.finpro) +
+            '<br>💸 Retiros: salen por <b>' + (j.payouts === 'finpro' ? 'Finpro' : 'hgcash') + '</b>' +
+            ((j.payouts === 'finpro' && !(j.finpro && j.finpro.readyPayouts)) || (j.payouts === 'hgcash' && j.hgcash && j.hgcash.token === 'none') ? ' <span style="color:#ff8080;">(ese banco no está listo para pagar: el botón Pagar va a fallar)</span>' : '');
+    }
+    const fl = document.getElementById('finproStatusLine');
+    if (fl) fl.innerHTML = _bankStatusTxt('finpro', j.finpro);
+}
+async function loadBanks() {
+    const form = document.getElementById('banksForm');
+    const header = document.getElementById('banksHeader');
+    try {
+        const r = await authFetch('/api/admin/banks');
+        if (!r.ok) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; return; }
+        if (form) form.style.display = '';
+        if (header) header.style.display = '';
+        _renderBanks(await r.json());
+    } catch (_) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
+}
+async function saveBanks() {
+    const inc = document.querySelector('input[name="banksIncoming"]:checked');
+    const pay = document.querySelector('input[name="banksPayouts"]:checked');
+    if (!inc || !pay) { showToast('Elegí por dónde entran las cargas y por dónde salen los retiros', 'error'); return; }
+    const incTxt = { hgcash: 'solo hgcash', finpro: 'solo Finpro', both: 'los DOS bancos a la vez', none: 'NINGUNO (carga automática apagada)' }[inc.value];
+    const payTxt = pay.value === 'finpro' ? 'Finpro' : 'hgcash';
+    const prev = _banksState || {};
+    let aviso = 'Cargas: se reciben por ' + incTxt + '.\nRetiros: salen por ' + payTxt + '.';
+    const modoAuto = (inc.value === 'hgcash' || inc.value === 'both') && prev.hgcash && prev.hgcash.mode === 'auto' || (inc.value === 'finpro' || inc.value === 'both') && prev.finpro && prev.finpro.mode === 'auto';
+    if (modoAuto) aviso += '\n\n⚠️ Hay un banco en modo AUTO: las transferencias que matcheen se cargan solas.';
+    if (!confirm(aviso + '\n\n¿Guardar?')) { if (_banksState) _renderBanks(_banksState); return; }
+    const m = document.getElementById('banksMsg');
+    if (m) { m.style.color = '#aaa'; m.textContent = '⏳ Guardando…'; }
+    try {
+        const r = await authFetch('/api/admin/banks', { method: 'POST', body: JSON.stringify({ incoming: inc.value, payouts: pay.value }) });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } if (_banksState) _renderBanks(_banksState); return; }
+        _renderBanks(j);
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado'; }
+        showToast('Bancos guardados', 'success');
+        // La card de hgcash muestra el mismo "enabled": se relee para que no quede desfasada.
+        try { const en = document.getElementById('hgcashEnabled'); if (en && j.hgcash) en.checked = !!j.hgcash.enabled; } catch (_) {}
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+// ====== #217 FINPRO: bloque del banco (modo, credenciales, cuenta, diagnóstico, verificación manual) ======
+function _finproDevWarn(j) {
+    const w = document.getElementById('finproDevWarn'); if (!w) return;
+    const url = j && j.settings && j.settings.baseUrl ? j.settings.baseUrl : '';
+    if (j && j.dev) { w.style.display = ''; w.innerHTML = '⚠️ La URL base de Finpro (<code>' + escapeHtml(url) + '</code>) es la del ambiente de <b>DESARROLLO</b> de la doc: ahí no hay plata real. Cuando Finpro te dé la URL de producción, cargala abajo en "URL base de la API" y guardá.'; }
+    else { w.style.display = 'none'; w.innerHTML = ''; }
+}
+async function loadFinproCard() {
+    const form = document.getElementById('finproForm');
+    const header = document.getElementById('finproHeader');
+    try {
+        const r = await authFetch('/api/admin/finpro/config');
+        if (!r.ok) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; return; }
+        if (form) form.style.display = '';
+        if (header) header.style.display = '';
+        const j = await r.json();
+        const md = document.getElementById('finproMode'); if (md) md.value = j.mode === 'auto' ? 'auto' : 'shadow';
+        const u = document.getElementById('finproCallbackUrl'); if (u) u.textContent = j.callbackUrl || '';
+        _finproDevWarn(j);
+        loadFinproCredentials();
+    } catch (_) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
+}
+async function saveFinproConfig() {
+    const m = document.getElementById('finproCfgMsg');
+    const mode = document.getElementById('finproMode').value;
+    if (mode === 'auto' && !confirm('Finpro en modo AUTOMÁTICO: cuando reciba cargas, cada comprobante que Finpro confirme como transferencia acreditada se carga solo. ¿Confirmás?')) return;
+    try {
+        const r = await authFetch('/api/admin/finpro/config', { method: 'POST', body: JSON.stringify({ mode }) });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } return; }
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado'; }
+        showToast('Finpro guardado', 'success');
+        loadBanks();
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+function _diagVal(v) { if (v === null || v === undefined) return '—'; if (typeof v === 'object') return escapeHtml(JSON.stringify(v)); return escapeHtml(String(v)); }
+function _fpFecha(v) { try { return v ? fmtFechaHoraAR(v) : '—'; } catch (_) { return '—'; } }
+// Diagnóstico: últimas llamadas a Finpro, token, callbacks, comprobantes en re-verificación,
+// últimos movimientos y pagos por Finpro.
+async function finproDiag() {
+    const box = document.getElementById('finproDiagBox'); if (!box) return;
+    box.style.display = ''; box.innerHTML = '⏳ Consultando…';
+    try {
+        const r = await authFetch('/api/admin/finpro/diag');
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { box.innerHTML = '<span style="color:#ff8080;">' + escapeHtml(j.error || 'No se pudo leer') + '</span>'; return; }
+        const sv = j.service || {}; const tk = sv.token || {}; const cb = j.callbacks || {}; const vf = j.verify || {};
+        let h = '<b>🔑 Credenciales:</b> ' + (j.credentials === 'panel' ? 'PANEL' : (j.credentials === 'ssm' ? 'AWS (SSM)' : '<span style="color:#ff8080;">NINGUNA</span>')) +
+            ' · <b>token:</b> ' + (tk.has ? 'vigente, vence en ' + Math.round((tk.secondsLeft || 0) / 60) + ' min' : 'sin token todavía (se pide al usarlo)') +
+            ' · <b>URL:</b> <code>' + escapeHtml((j.settings || {}).baseUrl || '') + '</code>' + (j.dev ? ' <span style="color:#ff8080;font-weight:800;">DEV</span>' : '') +
+            ' · <b>bankId:</b> ' + escapeHtml((j.settings || {}).bankId || '—') +
+            ' · <b>CVU:</b> ' + ((j.settings || {}).fromCvu ? '…' + escapeHtml(String(j.settings.fromCvu).slice(-6)) : '<span style="color:#ff8080;">sin CVU</span>') +
+            ' · <b>cuenta:</b> ' + ((j.settings || {}).account ? '✅' : '<span style="color:#ff8080;">sin número</span>');
+        h += '<br><b>📞 Callbacks de pagos recibidos</b> (esta instancia): ' + (cb.received || 0) + ' (de nuestros procesos: ' + (cb.matched || 0) + ')' + (cb.lastAt ? ' · último ' + _fpFecha(cb.lastAt) + ' process ' + escapeHtml(cb.lastProcessId || '—') + ' status ' + escapeHtml(cb.lastStatus || '—') : '');
+        h += '<br><b>🧾 Comprobantes en re-verificación:</b> ' + (vf.pending || 0) + ' (cada ' + (vf.everyMin || 2) + ' min, hasta ' + (vf.maxMin || 90) + ' min; ventana por monto ' + (vf.windowMin || 180) + ' min)';
+        const rec = vf.recent || [];
+        if (rec.length) {
+            h += '<table style="width:100%;font-size:11px;margin-top:4px;border-collapse:collapse;"><tr style="color:#aaa;"><td>Cuándo</td><td>Cliente</td><td>Monto</td><td>Código</td><td>Estado</td><td>Intentos</td><td>Último</td></tr>';
+            for (const c of rec) {
+                const fv = c.finproVerify || {}; const last = fv.last || {};
+                const stColor = c.finproVerifyStatus === 'confirmed' ? '#66ff99' : (c.finproVerifyStatus === 'pending' ? '#ffb74d' : (c.finproVerifyStatus === 'ambiguous' || c.finproVerifyStatus === 'error' ? '#ff8080' : '#aaa'));
+                h += '<tr style="border-top:1px solid rgba(255,255,255,0.08);"><td>' + _fpFecha(c.createdAt) + '</td><td>@' + escapeHtml(c.username || '?') + '</td><td>$' + Number(c.amount || 0).toLocaleString('es-AR') + '</td><td>' + escapeHtml(c.operationNumber || '—') + '</td>' +
+                    '<td style="color:' + stColor + ';font-weight:700;">' + escapeHtml(c.finproVerifyStatus || '—') + (c.autoCharged ? ' · cargado' : (c.bankMatchStatus && c.bankMatchStatus !== 'none' ? ' · ' + escapeHtml(c.bankMatchStatus) : '')) + '</td>' +
+                    '<td>' + (fv.attempts || 0) + (fv.nextAt && c.finproVerifyStatus === 'pending' ? '<br><small>próx. ' + _fpFecha(fv.nextAt) + '</small>' : '') + '</td>' +
+                    '<td>' + escapeHtml(last.kind || '') + ' → ' + escapeHtml(last.status || (last.error ? 'HTTP ' + (last.httpStatus || '?') + ' ' + last.error : '—')) + (last.confidence ? ' (' + escapeHtml(last.confidence) + ')' : '') + (last.note ? '<br><small>' + escapeHtml(last.note) + '</small>' : '') + '</td></tr>';
+            }
+            h += '</table>';
+        }
+        const movs = j.movements || [];
+        h += '<br><b>⬇️ Últimas transferencias registradas por Finpro:</b> ' + (movs.length ? '' : 'ninguna todavía');
+        if (movs.length) {
+            h += '<table style="width:100%;font-size:11px;margin-top:4px;border-collapse:collapse;"><tr style="color:#aaa;"><td>Cuándo</td><td>Monto</td><td>Origen</td><td>COELSA</td><td>Estado</td><td>Usuario</td></tr>';
+            for (const m of movs) h += '<tr style="border-top:1px solid rgba(255,255,255,0.08);"><td>' + _fpFecha(m.date || m.createdAt) + '</td><td>$' + Number(m.amount || 0).toLocaleString('es-AR') + '</td><td>' + escapeHtml(m.fromName || '—') + '</td><td>' + escapeHtml(m.coelsaCode || m.externalId || '—') + '</td><td>' + hgcashStatusBadge(m.matchStatus) + '</td><td>' + (m.matchedUsername ? '@' + escapeHtml(m.matchedUsername) : '—') + '</td></tr>';
+            h += '</table>';
+        }
+        const pays = j.payouts || [];
+        h += '<br><b>💸 Últimos retiros por Finpro:</b> ' + (pays.length ? '' : 'ninguno todavía');
+        if (pays.length) {
+            h += '<table style="width:100%;font-size:11px;margin-top:4px;border-collapse:collapse;"><tr style="color:#aaa;"><td>Cuándo</td><td>Cliente</td><td>Monto</td><td>Estado</td><td>Proceso</td><td>COELSA</td><td>Detalle</td></tr>';
+            for (const p of pays) {
+                const col = p.status === 'paid' ? '#66ff99' : (p.status === 'failed' ? '#ff8080' : '#ffb74d');
+                h += '<tr style="border-top:1px solid rgba(255,255,255,0.08);"><td>' + _fpFecha(p.createdAt) + '</td><td>@' + escapeHtml(p.username || '?') + '</td><td>$' + Number(p.amount || 0).toLocaleString('es-AR') + '</td><td style="color:' + col + ';font-weight:700;">' + escapeHtml(p.status || '') + (p.hgStatus ? '<br><small>' + escapeHtml(p.hgStatus) + '</small>' : '') + '</td><td><small>' + escapeHtml(p.fpProcessId || '—') + '</small>' + (p.fpAccepted === false ? '<br><small style="color:#ff8080;">rechazado</small>' : '') + '</td><td>' + escapeHtml(p.fpCoelsaId || '—') + '</td><td>' + escapeHtml(p.error || '') + '</td></tr>';
+            }
+            h += '</table>';
+        }
+        const calls = sv.lastCalls || [];
+        h += '<br><b>📡 Últimas llamadas a la API</b> (esta instancia): ' + (calls.length ? '' : 'ninguna todavía');
+        if (calls.length) {
+            h += '<table style="width:100%;font-size:11px;margin-top:4px;border-collapse:collapse;"><tr style="color:#aaa;"><td>Cuándo</td><td>Qué</td><td>HTTP</td><td>code</td><td>ms</td><td>Error</td></tr>';
+            for (const c of calls) h += '<tr style="border-top:1px solid rgba(255,255,255,0.08);"><td>' + _fpFecha(c.at) + '</td><td>' + escapeHtml(c.kind || c.path || '') + '</td><td style="color:' + (c.ok ? '#66ff99' : '#ff8080') + ';">' + (c.httpStatus || 'red') + '</td><td>' + escapeHtml(c.code || '—') + '</td><td>' + (c.ms || 0) + '</td><td>' + escapeHtml(c.error || '') + '</td></tr>';
+            h += '</table>';
+        }
+        box.innerHTML = h;
+    } catch (e) { box.innerHTML = '<span style="color:#ff8080;">Error de conexión</span>'; }
+}
+async function loadFinproCredentials() {
+    const st = document.getElementById('finproCredStatus');
+    const box = document.getElementById('finproAccountBox');
+    try {
+        const r = await authFetch('/api/admin/finpro/credentials');
+        if (!r.ok) { if (st) st.textContent = 'Sin acceso'; return; }
+        const j = await r.json();
+        const s = j.settings || {};
+        const src = j.credentials === 'panel' ? '<b style="color:#66ff99;">PANEL</b> (key …' + escapeHtml(j.apiKeyLast4 || '????') + ' · secret …' + escapeHtml(j.apiSecretLast4 || '????') + ')'
+            : j.credentials === 'ssm' ? '<b style="color:#ffd479;">AWS (SSM)</b>' : '<b style="color:#ff8080;">NINGUNA — Finpro no opera</b>';
+        let h = 'Credenciales en uso: ' + src + (j.decryptError ? ' <span style="color:#ff8080;">(las del panel no se pudieron descifrar: ¿cambió JWT_SECRET? Se usan las de AWS)</span>' : '') +
+            (j.updatedBy ? ' · cargadas por ' + escapeHtml(j.updatedBy) + (j.updatedAt ? ' el ' + _fpFecha(j.updatedAt) : '') : '') +
+            (j.ssmKey || j.ssmSecret ? '<br><small style="color:#888;">En AWS hay ' + (j.ssmKey && j.ssmSecret ? 'key y secret' : (j.ssmKey ? 'solo la key' : 'solo el secret')) + ' de respaldo.</small>' : '') +
+            '<br>Datos de la cuenta (' + (s.source === 'panel' ? 'panel' : 'AWS/por defecto') + '): bankId <b>' + escapeHtml(s.bankId || '—') + '</b> · cuenta ' + (s.account ? '<b>…' + escapeHtml(String(s.account).slice(-4)) + '</b>' : '<span style="color:#ff8080;">sin número</span>') +
+            ' · nuestro CVU ' + (s.fromCvu ? '<b>…' + escapeHtml(String(s.fromCvu).slice(-6)) + '</b>' : '<span style="color:#ff8080;">sin CVU (no se puede pagar ni verificar por CVU)</span>') +
+            ' · URL <code>' + escapeHtml(s.baseUrl || '') + '</code>' + (j.dev ? ' <span style="color:#ff8080;font-weight:800;">DESARROLLO</span>' : '');
+        h += '<br>Listo para: retiros ' + (j.ready && j.ready.payouts ? '✅' : '❌') + ' · cargas ' + (j.ready && j.ready.incoming ? '✅' : '❌');
+        if (st) st.innerHTML = h;
+        const setv = function (id, v) { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = v || ''; };
+        setv('finproCredBankId', s.source === 'panel' ? s.bankId : ''); setv('finproCredAccount', s.source === 'panel' ? s.account : '');
+        setv('finproCredFromCvu', s.source === 'panel' ? s.fromCvu : ''); setv('finproCredBaseUrl', s.source === 'panel' ? s.baseUrl : '');
+        const u = document.getElementById('finproCallbackUrl'); if (u) u.textContent = j.callbackUrl || '';
+        _finproDevWarn(j);
+        if (j.credentials !== 'none') loadFinproAccount(); else if (box) box.innerHTML = '';
+    } catch (_) { if (st) st.textContent = 'Error de conexión'; }
+}
+async function loadFinproAccount() {
+    const box = document.getElementById('finproAccountBox'); if (!box) return;
+    box.innerHTML = '⏳ Consultando saldo y titular en Finpro…';
+    try {
+        const r = await authFetch('/api/admin/finpro/account');
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { box.innerHTML = '<span style="color:#ff8080;">' + escapeHtml(j.error || 'No se pudo leer la cuenta') + '</span>'; return; }
+        if (!j.enabled) { box.innerHTML = ''; return; }
+        let h = '';
+        if (j.balance) {
+            const av = j.balance.available != null ? j.balance.available : j.balance.balance;
+            h += '💰 Saldo Finpro: ' + (av != null ? '<b>$' + Number(av).toLocaleString('es-AR') + '</b> disponible' : '<i>(sin campo de saldo reconocible)</i>') +
+                (j.balance.balance != null && j.balance.balance !== av ? ' (total $' + Number(j.balance.balance).toLocaleString('es-AR') + ')' : '') +
+                ' <small style="color:#888;" title="' + escapeHtml(JSON.stringify(j.balance.raw || {})).slice(0, 800) + '">(respuesta cruda al pasar el mouse)</small>';
+        } else h += '💰 Saldo: <span style="color:#ff8080;">' + escapeHtml(j.balanceError || 'no disponible') + '</span>';
+        const s = j.settings || {};
+        h += '<br>🏦 Nuestro CVU: ' + (s.fromCvu ? '<b>' + escapeHtml(s.fromCvu) + '</b>' : '<span style="color:#ff8080;">sin cargar</span>') +
+            (j.holder ? ' · titular según Coelsa: <b>' + escapeHtml(j.holder.nombre || '') + '</b>' + (j.holder.cuit ? ' (CUIT ' + escapeHtml(j.holder.cuit) + ')' : '') : (s.fromCvu ? ' · <small style="color:#888;">titular todavía no leído (accounts/information)</small>' : ''));
+        h += '<br><small style="color:#aaa;">Esta es la cuenta a la que transfieren tus clientes por Finpro: cargala en la tarjeta del CBU de arriba cuando quieras que la vean.</small>';
+        box.innerHTML = h;
+    } catch (_) { box.innerHTML = '<span style="color:#ff8080;">Error de conexión</span>'; }
+}
+async function saveFinproCredentials() {
+    const g = function (id) { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
+    const body = { apiKey: g('finproCredKey'), apiSecret: g('finproCredSecret'), bankId: g('finproCredBankId'), account: g('finproCredAccount'), fromCvu: g('finproCredFromCvu').replace(/\D/g, ''), baseUrl: g('finproCredBaseUrl') };
+    const m = document.getElementById('finproCredMsg');
+    if ((body.apiKey && !body.apiSecret) || (!body.apiKey && body.apiSecret)) { showToast('Cargá la API Key y el API Secret juntos (o dejá los dos vacíos para no cambiarlos)', 'error'); return; }
+    if (body.fromCvu && body.fromCvu.length !== 22) { showToast('Nuestro CVU tiene que tener 22 dígitos', 'error'); return; }
+    if (body.baseUrl && !/^https:\/\//i.test(body.baseUrl)) { showToast('La URL base tiene que empezar con https://', 'error'); return; }
+    if (body.baseUrl && /dev|sandbox|test|staging/i.test(body.baseUrl) && !confirm('La URL que cargaste parece del ambiente de DESARROLLO de Finpro (no hay plata real ahí). ¿Guardarla igual?')) return;
+    if (m) { m.style.color = '#aaa'; m.textContent = '⏳ Probando contra Finpro (token + saldo)…'; }
+    try {
+        const r = await authFetch('/api/admin/finpro/credentials', { method: 'POST', body: JSON.stringify(body) });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo guardar'); } return; }
+        const av = j.balance ? (j.balance.available != null ? j.balance.available : j.balance.balance) : null;
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Guardado. Token OK' + (av != null ? ' · saldo $' + Number(av).toLocaleString('es-AR') : (j.balanceError ? ' · ' + j.balanceError : '')) + (j.holder && j.holder.nombre ? ' · titular ' + j.holder.nombre : ''); }
+        document.getElementById('finproCredKey').value = '';
+        document.getElementById('finproCredSecret').value = '';
+        loadFinproCredentials(); loadBanks();
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+async function clearFinproCredentials() {
+    if (!confirm('¿Borrar las credenciales y datos de Finpro cargados en el panel y volver a usar los de AWS (SSM)?')) return;
+    const m = document.getElementById('finproCredMsg');
+    try {
+        const r = await authFetch('/api/admin/finpro/credentials', { method: 'DELETE' });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo borrar'); } return; }
+        if (m) { m.style.color = '#66ff99'; m.textContent = '✅ Borrado: ahora se usa lo de AWS (' + (j.credentials === 'ssm' ? 'hay credenciales' : 'SIN credenciales: Finpro no opera') + ')'; }
+        loadFinproCredentials(); loadBanks();
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+// Verificación manual de una transferencia entrante (solo consulta y muestra).
+async function finproVerifyManual() {
+    const g = function (id) { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
+    const body = {};
+    if (g('finproVfCoelsa')) body.coelsaId = g('finproVfCoelsa');
+    else if (g('finproVfAuth')) body.authorizationCode = g('finproVfAuth');
+    else {
+        body.amount = Number(g('finproVfAmount'));
+        if (!(body.amount > 0)) { showToast('Poné el código COELSA, el de autorización, o el monto y la fecha', 'error'); return; }
+        if (g('finproVfDate')) body.occurredAt = new Date(g('finproVfDate')).toISOString();
+        body.windowMinutes = Number(g('finproVfWindow')) || 180;
+    }
+    const m = document.getElementById('finproVfMsg'); const out = document.getElementById('finproVfResult');
+    if (m) { m.style.color = '#aaa'; m.textContent = '⏳ Consultando…'; }
+    try {
+        const r = await authFetch('/api/admin/finpro/verify', { method: 'POST', body: JSON.stringify(body) });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ ' + (j.error || 'No se pudo verificar'); } return; }
+        if (m) m.textContent = '';
+        if (out) {
+            out.style.display = '';
+            let h;
+            if (!j.ok) h = '<span style="color:#ff8080;font-weight:800;">Finpro respondió HTTP ' + (j.httpStatus || 'red') + ': ' + escapeHtml(j.error || 'sin detalle') + '</span>' + (j.httpStatus === 403 ? ' — la clave no tiene el permiso "movements".' : (j.httpStatus === 401 ? ' — credenciales inválidas o cliente inactivo.' : ''));
+            else if (j.status === 'confirmed') {
+                const n = j.notification || {};
+                h = '<span style="color:#66ff99;font-weight:800;">✅ CONFIRMADA</span> — coincidencia por <b>' + escapeHtml(j.matchedBy || '?') + '</b>, confianza <b>' + escapeHtml(j.confidence || '?') + '</b>' +
+                    '<br>Monto <b>$' + Number(n.amount || 0).toLocaleString('es-AR') + '</b>' + (n.fromName ? ' de <b>' + escapeHtml(n.fromName) + '</b>' : '') + (n.fromCuit ? ' (CUIT ' + escapeHtml(n.fromCuit) + ')' : '') + (n.toCvu ? ' → CVU …' + escapeHtml(String(n.toCvu).slice(-6)) : '') +
+                    (n.coelsaId ? '<br>COELSA <code>' + escapeHtml(n.coelsaId) + '</code>' : '') + (n.authorizationCode ? ' · autorización <code>' + escapeHtml(n.authorizationCode) + '</code>' : '') + (n.id ? ' · id ' + escapeHtml(n.id) : '') + (n.occurredAt ? ' · ' + escapeHtml(n.occurredAt) : '');
+            } else if (j.status === 'not_found_yet') h = '<span style="color:#ffb74d;font-weight:800;">⏳ TODAVÍA NO</span> — Finpro no encuentra una transferencia acreditada con esos datos (no es un rechazo definitivo: puede estar en camino).';
+            else if (j.status === 'ambiguous') h = '<span style="color:#ff8080;font-weight:800;">⚠️ AMBIGUA</span> — hay ' + ((j.matches || []).length || 'varias') + ' transferencias compatibles: hace falta otro dato (el código COELSA).';
+            else h = 'Estado: <b>' + escapeHtml(j.status || 'desconocido') + '</b>';
+            h += '<br><small style="color:#888;">Pedido: ' + _diagVal(j.request) + '</small><br><small style="color:#888;">Respuesta cruda: ' + _diagVal(j.raw).slice(0, 1500) + '</small>';
+            out.innerHTML = h;
+        }
+    } catch (_) { if (m) { m.style.color = '#ff8080'; m.textContent = '❌ Error de conexión'; } }
+}
+window.loadBanks = loadBanks; window.saveBanks = saveBanks;
+window.loadFinproCard = loadFinproCard; window.saveFinproConfig = saveFinproConfig; window.finproDiag = finproDiag;
+window.loadFinproCredentials = loadFinproCredentials; window.saveFinproCredentials = saveFinproCredentials; window.clearFinproCredentials = clearFinproCredentials;
+window.finproVerifyManual = finproVerifyManual; window.loadFinproAccount = loadFinproAccount;
+// Badge del banco de un movimiento (lista de movimientos y bandeja).
+function bankProviderBadge(m) {
+    return m && m.provider === 'finpro'
+        ? ' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:rgba(179,136,255,0.22);color:#b388ff;font-weight:800;" title="Finpro (verificado por comprobante)">Finpro</span>'
+        : ' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:rgba(212,175,55,0.2);color:#d4af37;font-weight:800;" title="hgcash">HG</span>';
+}
+window.bankProviderBadge = bankProviderBadge;
+
 // Etiquetas legibles + color para el estado de match de un movimiento.
 function hgcashStatusBadge(st) {
     const map = {
@@ -7583,9 +7878,11 @@ async function loadHgcashMovements(page = 1) {
     if (!body) return;
     window._hgcashPage = page;
     const status = (document.getElementById('hgcashMovFilter') || {}).value || '';
+    const bank = (document.getElementById('hgcashMovBank') || {}).value || ''; // #217
     try {
         const qs = new URLSearchParams({ page: String(page) });
         if (status) qs.set('status', status);
+        if (bank) qs.set('provider', bank);
         const r = await authFetch('/api/admin/hgcash/movements?' + qs.toString());
         if (!r.ok) { body.innerHTML = '<tr><td colspan="10" style="color:#888;text-align:center;">Sin acceso o sin datos</td></tr>'; return; }
         const j = await r.json();
@@ -7596,8 +7893,13 @@ async function loadHgcashMovements(page = 1) {
             return;
         }
         body.innerHTML = movs.map(m => {
-            const fecha = m.createdAt ? fmtFechaHoraAR(m.createdAt) : '—';
-            const dir = m.direction === 'Inbound' ? '⬇️ Entra' : (m.direction === 'Outbound' ? '⬆️ Sale' : '—');
+            // #217: Finpro trae `date` con zona horaria (cuándo se hizo la transferencia); el de hgcash
+            // viene corrido 3 h → se usa createdAt. Si se registró mucho después, se aclara.
+            const isFp = m.provider === 'finpro';
+            const fecha = (isFp && m.date) ? fmtFechaHoraAR(m.date) : (m.createdAt ? fmtFechaHoraAR(m.createdAt) : '—');
+            const lateMin = isFp && m.date && m.createdAt ? Math.round((new Date(m.createdAt) - new Date(m.date)) / 60000) : 0;
+            const fechaExtra = lateMin > 15 ? '<br><small style="color:#ffb74d;" title="Se verificó ' + lateMin + ' min después de la transferencia">verificada +' + lateMin + ' min</small>' : '';
+            const dir = (m.direction === 'Inbound' ? '⬇️ Entra' : (m.direction === 'Outbound' ? '⬆️ Sale' : '—')) + bankProviderBadge(m);
             const monto = m.amount != null ? '$' + Number(m.amount).toLocaleString('es-AR') : (m.amountRaw || '—');
             const origen = m.fromName || '—';
             const cbuOrigen = m.fromCBU || '—';
@@ -7607,8 +7909,8 @@ async function loadHgcashMovements(page = 1) {
             const usuario = m.matchedUsername ? '@' + m.matchedUsername : (m.payoutUsername ? '@' + m.payoutUsername : '—');
             const op = m.coelsaCode || m.externalId || '—';
             return '<tr>' +
-                '<td style="white-space:nowrap;">' + escapeHtml(fecha) + '</td>' +
-                '<td>' + escapeHtml(dir) + '</td>' +
+                '<td style="white-space:nowrap;">' + escapeHtml(fecha) + fechaExtra + '</td>' +
+                '<td>' + dir + '</td>' +
                 '<td style="white-space:nowrap;">' + escapeHtml(monto) + '</td>' +
                 '<td>' + escapeHtml(origen) + '</td>' +
                 '<td style="font-size:11px;">' + escapeHtml(cbuOrigen) + '</td>' +
@@ -15331,7 +15633,7 @@ async function loadBankTray() {
 function _bankRowHtml(m) {
     const hora = m.createdAt ? fmtFechaHoraAR(m.createdAt) : '—';
     const isIn = m.direction === 'Inbound';
-    const dir = isIn ? '⬇️ Entra' : '⬆️ Sale';
+    const dir = (isIn ? '⬇️ Entra' : '⬆️ Sale') + bankProviderBadge(m); // #217 banco de origen
     const monto = m.amount != null ? _money(m.amount) : (m.amountRaw || '—');
     let quien = isIn ? (m.fromName || m.fromCBU || '—') : (m.outKind === 'sweep' ? '⬆️ BAJADA → ' + (m.sweepLabel || m.toName || m.toCBU || '') : (m.toName || m.toCBU || '—'));
     const ref = m.coelsaCode || m.externalId || '—';
