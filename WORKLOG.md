@@ -8,6 +8,44 @@
 
 ## Sesión 2026-10-27
 
+### 218. Finpro — RETIROS: un proceso por pago, secuencial por CVU, estado por consulta + callback (réplica #369 del gemelo)
+- **`_payPayoutViaFinpro`** (rama de `POST /api/admin/payouts/:id/pay` con `Config['bankProvider']='finpro'`; la rama hgcash quedó
+  INTACTA): si el pedido trae alias (no 22 dígitos) se resuelve por `accounts/information` de Finpro (CVU + titular real →
+  `resolvedCbu`/`lookupName`, el agente lo ve en el banner y en el toast); hgcash sigue con su `lookupAlias`. Claim atómico
+  pending_review/failed → paying; mismo `_deductChipsAtConfirm` con el guard `debitConfirmed !== true` (fix 2026-08-06);
+  `POST /api/banks/{bankId}/transfers/cvu` con UN lote de UNA transferencia: `process_id` uuid v4 (`PendingPayout.fpProcessId`),
+  `transaction_id` = `finpro.transactionIdFor(id)` (11 chars, `PendingPayout.fpTransactionId`), `from_cvu` = nuestro CVU del panel,
+  `concept 'VAR'`, `description "Retiro <usuario>"`, `callback_url` = `/api/finpro/callback`, `initial_datetime` ISO con -03:00.
+  **Secuencial por CVU** (la doc: si hay otra en curso → 2454): `finpro.withCvuLock` encola en la instancia, antes del POST espera
+  hasta 30 s a que termine el proceso anterior de ese CVU (`_finproWaitPreviousProcess`) y ante 2454 reintenta 4 veces cada 5 s.
+- **IDEMPOTENCIA (regla, idéntica al gemelo):** `code 0201` = lote aceptado → `fpAccepted:true`, status `paying`. Un reintento REUSA el
+  `process_id` solo si `fpAccepted:true` (no manda otro lote: lo consulta); si el POST fue rechazado (`fpAccepted:false`) genera uno
+  nuevo. Si el POST no respondió (red/timeout) NO se sabe si entró → queda `paying` con ese `process_id` (`hgStatus 'sin_respuesta'`) y
+  el poll pregunta por él: si Finpro no lo conoce (404 / lista vacía) → `failed` reintentable; si lo conoce, se sigue ese. Nunca se
+  reenvía a ciegas (pagaría dos veces). Rechazo en el acto → `failed` con el texto de `finpro.describeCode` (2449 saldo insuficiente,
+  2418 destino bloqueado, 2454 en curso, 2455 bad request / transaction_id largo, 0414 CVU no habilitado, 0416 CVU inválido, 0583
+  transitorio, 0500 genérico) y nota "las fichas YA fueron descontadas" si `deductAtPay`.
+- **Estado (`_finproSyncPayout`, usado por `_pollPayingPayouts` cada 45 s, `POST /payouts/:id/sync` y el callback):** `processes/status`
+  → si no terminó, `hgStatus` = status; si `finished` → `processes/{id}/result` y se busca la fila de nuestro `transaction_id`.
+  **DECISIÓN de éxito:** fila con `coelsa_id` y `response_code` que NO sea de error → `DONE` (`handlePayoutStatusWebhook` con
+  `provider 'finpro'`, guarda `fpCoelsaId` = comprobante para el operador; aviso al cliente `/sys_payout_paid`; sin PDF: Finpro no lo
+  tiene y `maybeSendPayoutReceipt` queda solo para hgcash). Código de la tabla o con forma 2xxx/04xx/05xx, o `transaction_fail_count > 0`
+  sin coelsa → `ERROR` en español y `fpAccepted:false` (un reintento usa process_id nuevo). Terminó con `success_count ≥ 1`, sin fallas ni
+  código de error pero SIN coelsa (campo no documentado) → se da por pagado con warning en el log. Otro caso → sigue `paying` con
+  `hgStatus 'finished_sin_resultado'` (revisar en Finpro).
+- **`POST /api/finpro/callback`** (público, rate-limit propio 120/min con `makeRateStore('finpro-cb')`, siempre 200): el body solo trae
+  contadores y la doc no describe firma → es una PISTA: se busca el payout por `process_id` y se confirma con `_finproSyncPayout`; nunca
+  se decide plata con el body. Contadores en `_finproCallbackStats` (diag del panel).
+- **Adaptación a esta página:** `handlePayoutStatusWebhook(p, provider)` acá además enruta las BAJADAS (`sweep-<id>`, #183): esa rama
+  y la búsqueda por `hgRequestId` quedan SOLO para `provider 'hgcash'`; con `'finpro'` busca por `fpProcessId` cuando no viene
+  `externalID` y guarda `coelsaId`. `/sync` ahora carga el payout ANTES de exigir el token de hgcash (si el pago salió por Finpro no
+  hace falta hgcash). `GET /api/admin/payouts` → `payEnabled = finpro.isReadyForPayouts()` cuando el banco es Finpro + `bankProvider`.
+  `_pollPayingPayouts` corre si CUALQUIERA de los dos bancos está configurado. El cierre diario no cruza "pago sin movimiento saliente"
+  para Finpro (no hay webhook de salientes): el COELSA del pago es el comprobante. Modelo `PendingPayout`: `fpProcessId` (index),
+  `fpTransactionId`, `fpCoelsaId` (index), `fpAccepted`; `paidVia` acepta `'finpro'`.
+  **Back necesita deploy.** PROBAR (en el ambiente de pruebas de Finpro): pagar un retiro con alias → ver titular; pagar dos seguidos →
+  el segundo espera; `/sync` → COELSA en el toast.
+
 ### 217. FINPRO como SEGUNDO BANCO con API, paralelo a hgcash (servicio, credenciales, "🏦 Bancos automáticos" del panel) — admin-sw v55
 - **Qué es:** réplica de #368 de AUTOGIROXcompartido. Allá Finpro REEMPLAZÓ a GH Wallet; acá nunca hubo segundo banco (solo hgcash con la
   bandeja/cierre del #183), así que se AGREGA todo lo que el gemelo ya tenía de "dos bancos": el selector general, `BankMovement.provider`,

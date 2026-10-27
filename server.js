@@ -2360,27 +2360,39 @@ async function maybeSendPayoutReceipt(payout) {
 
 // Procesa el webhook de estado de un cash-out (pago saliente). Matchea por externalID
 // (que es nuestro payout.id) o por el id de la transacción hgcash.
-async function handlePayoutStatusWebhook(p) {
+// #218: `provider` = 'hgcash' (default) | 'finpro'. Para Finpro lo llama `_finproSyncPayout`
+// con el estado REAL consultado (DONE con `coelsaId` / ERROR con el texto en español); se
+// busca por `fpProcessId` cuando no viene `externalID`. Mismo mapeo idempotente para los dos.
+async function handlePayoutStatusWebhook(p, provider) {
   try {
+    const prov = provider === 'finpro' ? 'finpro' : 'hgcash';
+    const isHg = prov === 'hgcash';
+    const bank = _bankLabel(prov);
+    const tag = `[${prov}-pay]`;
     const status = String(p.status || '').toUpperCase();
     const ext = p.externalID ? String(p.externalID) : null;
     const hgId = p.id ? String(p.id) : null;
-    if (ext && /^sweep-/.test(ext)) return _handleSweepStatusWebhook(p, ext.replace(/^sweep-/, '')); // #183 bajada
-    const query = ext ? { id: ext } : (hgId ? { hgTransactionId: hgId } : null);
+    if (isHg && ext && /^sweep-/.test(ext)) return _handleSweepStatusWebhook(p, ext.replace(/^sweep-/, '')); // #183 bajada
+    const idField = isHg ? 'hgTransactionId' : 'fpProcessId';
+    const query = ext ? { id: ext } : (hgId ? { [idField]: hgId } : null);
     if (!query) return;
     const payout = await PendingPayout.findOne(query);
-    if (!payout && hgId) {
+    if (!payout && hgId && isHg) {
       // ¿Es una bajada cuyo request no vino con externalID? (idempotencia por hgRequestId)
       const sw = await BankSweep.findOne({ hgRequestId: hgId }).select('id').lean();
       if (sw) return _handleSweepStatusWebhook(p, sw.id);
     }
     if (!payout) {
-      logger.warn(`[hgcash-pay] webhook de pago sin payout local: ext=${ext} hgId=${hgId} status=${status}`);
+      logger.warn(`${tag} webhook de pago sin payout local: ext=${ext} id=${hgId} status=${status}`);
       return;
     }
-    // Guardar el hgTransactionId si todavía no lo teníamos.
-    if (hgId && !payout.hgTransactionId) {
-      await PendingPayout.updateOne({ id: payout.id }, { $set: { hgTransactionId: hgId } });
+    // Guardar el id del banco si todavía no lo teníamos.
+    if (hgId && !payout[idField]) {
+      await PendingPayout.updateOne({ id: payout.id }, { $set: { [idField]: hgId } });
+    }
+    // #218: coelsa del pago en Finpro = el "número de comprobante" que ve el operador.
+    if (p.coelsaId && payout.fpCoelsaId !== String(p.coelsaId)) {
+      await PendingPayout.updateOne({ id: payout.id }, { $set: { fpCoelsaId: String(p.coelsaId) } });
     }
     // El webhook 'transaction_associated' trae el id de la TRANSACCIÓN real (≠ request)
     // → lo guardamos para poder pedir el comprobante PDF.
@@ -2393,23 +2405,23 @@ async function handlePayoutStatusWebhook(p) {
       if (payout.status === 'paid') return; // idempotente
       await PendingPayout.updateOne({ id: payout.id }, { $set: { status: 'paid', hgStatus: status, paidAt: new Date() } });
       await notifyPayoutPaid(payout);
-      maybeSendPayoutReceipt(payout).catch(() => {}); // comprobante PDF automático (con reintentos)
-      logger.info(`[hgcash-pay] PAGADO payout=${payout.id} user=${payout.username} $${payout.amount}`);
+      if (isHg) maybeSendPayoutReceipt(payout).catch(() => {}); // comprobante PDF automático (solo hgcash lo tiene; Finpro deja el COELSA)
+      logger.info(`${tag} PAGADO payout=${payout.id} user=${payout.username} $${payout.amount}${p.coelsaId ? ' coelsa=' + p.coelsaId : ''}`);
     } else if (status === 'ERROR' || status === 'CANCELLED') {
       const reason = p.errorCode || p.error || status;
       await PendingPayout.updateOne({ id: payout.id }, { $set: { status: 'failed', hgStatus: status, error: String(reason).slice(0, 300) } });
       // Si las fichas ya se descontaron (flujo nuevo confirmado), aclararlo: NO devolver.
       const yaDescontado = (payout.deductAtPay === true && payout.debitConfirmed === true);
       await _emitAdminOnlyChatNote(payout.userId, payout.username,
-        `💸 ⚠️ El PAGO automático FALLÓ en hgcash (${reason}) — $${Number(payout.amount).toLocaleString('es-AR')} a ${payout.titular || payout.cbu}. ` +
+        `💸 ⚠️ El PAGO automático FALLÓ en ${bank} (${reason}) — $${Number(payout.amount).toLocaleString('es-AR')} a ${payout.titular || payout.cbu}. ` +
         (yaDescontado ? 'Las fichas YA fueron descontadas: NO devuelvas. Pagá manual ("otro banco") o reintentá.' : 'Revisá y pagá manual.'));
-      logger.warn(`[hgcash-pay] FALLÓ payout=${payout.id} status=${status} reason=${reason}`);
+      logger.warn(`${tag} FALLÓ payout=${payout.id} status=${status} reason=${reason}`);
     } else {
       // PENDING / AWAITING_REVIEW / PROCESSING → sólo actualizar hgStatus.
       await PendingPayout.updateOne({ id: payout.id }, { $set: { hgStatus: status } });
     }
   } catch (e) {
-    logger.warn(`[hgcash-pay] handlePayoutStatusWebhook falló: ${e.message}`);
+    logger.warn(`[${provider === 'finpro' ? 'finpro' : 'hgcash'}-pay] handlePayoutStatusWebhook falló: ${e.message}`);
   }
 }
 
@@ -3239,6 +3251,33 @@ function _fanoutSendOne(url, rawBody, headers) {
     if (t.unref) t.unref();
   });
 }
+
+// ── #218 Callback de Finpro (fin de un lote de transferencias) ──────────────────────
+// `callback_url` del POST transfers/cvu. Llega { process_id, transaction_count,
+// transaction_success_count, transaction_fail_count, transaction_processed_count,
+// status:'finished' }: SOLO contadores, sin coelsa ni firma documentada → se toma como
+// PISTA: se busca el payout por process_id y se confirma con processes/{id}/result con
+// nuestras credenciales (`_finproSyncPayout`). Nunca se decide plata con el body.
+// Público (lo llama Finpro), rate-limit propio, siempre 200.
+const finproCallbackLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false,
+  store: makeRateStore('finpro-cb'), message: { error: 'Demasiadas solicitudes.' }
+});
+app.post('/api/finpro/callback', finproCallbackLimiter, async (req, res) => {
+  res.status(200).json({ ok: true });
+  try {
+    const p = req.body || {};
+    const pid = String(p.process_id || p.processId || '').trim();
+    _finproCallbackStats.received++; _finproCallbackStats.lastAt = new Date(); _finproCallbackStats.lastIp = req.ip;
+    _finproCallbackStats.lastProcessId = pid || null; _finproCallbackStats.lastStatus = p.status ? String(p.status).slice(0, 40) : null;
+    if (!pid || !/^[A-Za-z0-9-]{8,64}$/.test(pid)) return;
+    const payout = await PendingPayout.findOne({ fpProcessId: pid }).lean();
+    if (!payout) { logger.warn(`[finpro] callback de un proceso que no es nuestro: ${pid} (ip=${req.ip})`); return; }
+    _finproCallbackStats.matched++;
+    logger.info(`[finpro] callback process=${pid} payout=${payout.id} status=${p.status || '?'} ok=${p.transaction_success_count != null ? p.transaction_success_count : '?'} fail=${p.transaction_fail_count != null ? p.transaction_fail_count : '?'} — se confirma por consulta`);
+    if (payout.status === 'paying') await _finproSyncPayout(payout, 'callback');
+  } catch (e) { logger.warn(`[finpro] callback error: ${e.message}`); }
+});
 
 app.post('/api/hgcash/webhook', async (req, res) => {
   try {
@@ -19190,7 +19229,8 @@ app.get('/api/admin/payouts', authMiddleware, withdrawerMiddleware, async (req, 
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const total = await PendingPayout.countDocuments(q);
     const payouts = await PendingPayout.find(q).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean();
-    res.json({ payouts, total, page, totalPages: total === 0 ? 0 : Math.ceil(total / limit), payEnabled: hgcashPay.isEnabled() });
+    const _prov = await getBankProvider(); // #218: el botón Pagar depende del banco elegido
+    res.json({ payouts, total, page, totalPages: total === 0 ? 0 : Math.ceil(total / limit), payEnabled: _prov === 'finpro' ? finpro.isReadyForPayouts() : hgcashPay.isEnabled(), bankProvider: _prov });
   } catch (error) {
     console.error('Error listando payouts:', error);
     res.status(500).json({ error: 'Error del servidor' });
@@ -19312,10 +19352,201 @@ async function _deductChipsAtConfirm(payout, agentUser) {
   return { ok: true, balanceAfter: after };
 }
 
-// El agente CONFIRMA el pago → se ejecuta el cash-out automático en hgcash.
+// El agente CONFIRMA el pago → se ejecuta el cash-out automático en el banco elegido en el
+// panel (Config['bankProvider']): hgcash (rama de siempre, abajo) o Finpro (#218).
+// ── Retiro por FINPRO (#218, réplica del #369 del gemelo) ───────────────────────────
+// Un payout = UN proceso de Finpro (`process_id` uuid v4, `PendingPayout.fpProcessId`) con
+// UNA transferencia (`transaction_id` ≤ 11 chars, determinístico del id del payout,
+// `PendingPayout.fpTransactionId`). IDEMPOTENCIA: el process_id se REUSA en un reintento
+// SOLO si el POST anterior fue aceptado (code 0201 → `fpAccepted:true`): en ese caso no se
+// manda otro lote, se consulta el que ya está. Si el POST fue rechazado (fpAccepted false)
+// el reintento genera un process_id nuevo. Si el POST no respondió (red/timeout) NO se
+// sabe si entró → queda 'paying' con ese process_id y el poll pregunta por él: si Finpro
+// no lo conoce → failed (reintentable); si lo conoce → se sigue ese.
+// La doc pide mandar las transferencias de un mismo from_cvu de a UNA: `withCvuLock`
+// las encola y, antes de cada POST, espera (hasta 30 s) a que termine el proceso anterior
+// de ese CVU; un 2454 (ya hay una en curso) se reintenta hasta 4 veces cada 5 s.
+const _finproLastProcessByCvu = new Map(); // fromCvu → { processId, at } (por instancia)
+async function _finproWaitPreviousProcess(cvu) {
+  const prev = _finproLastProcessByCvu.get(cvu);
+  if (!prev || Date.now() - prev.at > 10 * 60 * 1000) return;
+  const deadline = Date.now() + 30 * 1000;
+  while (Date.now() < deadline) {
+    try {
+      const st = await finpro.getProcessStatus([prev.processId]);
+      if (!st.ok || st.finished || st.notFound) return;
+    } catch (_) { return; }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+}
+async function _payPayoutViaFinpro(req, res) {
+  try {
+    const { id } = req.params;
+    if (!finpro.isEnabled()) {
+      return res.status(400).json({ error: 'Finpro no está configurado (faltan API Key y Secret: panel → Finpro). Pagá manual.' });
+    }
+    const ourCvu = finpro.fromCvu();
+    if (ourCvu.length !== 22) {
+      return res.status(400).json({ error: 'Falta NUESTRO CVU de origen de Finpro (panel → Finpro → "Nuestro CVU"). Pagá manual o cargalo.' });
+    }
+    const payout = await PendingPayout.findOne({ id });
+    if (!payout) return res.status(404).json({ error: 'Pago no encontrado' });
+    if (!['pending_review', 'failed'].includes(payout.status)) {
+      return res.status(400).json({ error: `El pago ya está en estado "${payout.status}".` });
+    }
+    // Destino: CBU/CVU de 22 dígitos, o alias resuelto por Finpro (accounts/information,
+    // Coelsa) → se guarda el CVU y el titular REAL para que el agente lo vea. (hgcash sigue
+    // usando su propio `lookupAlias`.)
+    let resolvedCbu = String(payout.resolvedCbu || payout.cbu || '').replace(/\D/g, '');
+    let lookupName = payout.lookupName || null;
+    if (resolvedCbu.length !== 22) {
+      const alias = String(payout.alias || payout.cbu || '').trim();
+      if (!alias) return res.status(400).json({ error: 'El pedido no tiene CBU/CVU ni alias. Pedíselo al cliente.' });
+      const lk = await finpro.getAccountInformation({ alias });
+      if (lk.ok && lk.cvu && lk.cvu.length === 22) {
+        resolvedCbu = lk.cvu;
+        lookupName = lk.nombre || lookupName;
+      } else {
+        const why = lk.error || lk.description || (lk.ok ? 'Finpro no devolvió el CVU del alias' : 'sin respuesta');
+        return res.status(400).json({ error: `No se pudo resolver el alias "${alias}" en Finpro (${String(why).slice(0, 140)}). Pedile el CBU/CVU de 22 dígitos al cliente o pagá por otro banco.` });
+      }
+    } else if (!lookupName) {
+      try { const lk = await finpro.getAccountInformation({ cvu: resolvedCbu }); if (lk.ok && lk.found) lookupName = lk.nombre; } catch (_) {}
+    }
+
+    // Reclamo atómico: solo procede el que pase pending_review/failed → paying.
+    const claimed = await PendingPayout.findOneAndUpdate(
+      { id, status: { $in: ['pending_review', 'failed'] } },
+      { $set: { status: 'paying', resolvedCbu, lookupName, paidBy: req.user.username, error: null } },
+      { new: true }
+    );
+    if (!claimed) return res.status(409).json({ error: 'El pago ya está siendo procesado.' });
+
+    // Descontar las fichas AHORA (mismo flujo y mismo guard `debitConfirmed !== true` que hgcash, ver /pay).
+    if (claimed.deductAtPay === true && claimed.debitConfirmed !== true) {
+      const ded = await _deductChipsAtConfirm(claimed, req.user);
+      if (!ded.ok) {
+        if (ded.insufficient) {
+          return res.json({ success: false, insufficient: true, message: 'Saldo insuficiente: no se descontó ni se pagó. Se avisó al cliente y se cerró el chat.' });
+        }
+        return res.status(400).json({ error: ded.error || 'No se pudieron descontar las fichas.' });
+      }
+    }
+
+    // process_id: se reusa SOLO si el lote anterior fue aceptado (0201).
+    const reuse = !!(claimed.fpProcessId && claimed.fpAccepted === true);
+    const processId = reuse ? claimed.fpProcessId : uuidv4();
+    const transactionId = finpro.transactionIdFor(claimed.id);
+    await PendingPayout.updateOne({ id }, { $set: { fpProcessId: processId, fpTransactionId: transactionId, fpAccepted: reuse ? true : null, paidVia: 'finpro', hgStatus: reuse ? 'aceptado' : 'enviando' } });
+    if (reuse) {
+      setTimeout(function () { _pollPayingPayouts(); }, 3000);
+      logger.info(`[finpro-pay] payout=${id} ya tenía el lote ${processId} aceptado: se consulta, no se manda otro (por ${req.user.username})`);
+      return res.json({ success: true, status: 'paying', fpProcessId: processId, lookupName, message: 'Finpro ya tenía este pago aceptado: se consulta su estado (no se manda dos veces).' });
+    }
+
+    const result = await finpro.withCvuLock(ourCvu, async () => {
+      await _finproWaitPreviousProcess(ourCvu);
+      let r = null;
+      for (let i = 0; i < 4; i++) {
+        r = await finpro.createCvuTransfer({
+          processId, transactionId, fromCvu: ourCvu, toCvu: resolvedCbu, amount: claimed.amount,
+          description: `Retiro ${claimed.username}`.slice(0, 60), callbackUrl: _finproCallbackUrl()
+        });
+        if (r.accepted || r.network) break;
+        if (String(r.code) === '2454' || /already in progress|en curso/i.test(String(r.description || ''))) {
+          await new Promise((rs) => setTimeout(rs, 5000));
+          continue;
+        }
+        break;
+      }
+      if (r && r.accepted) _finproLastProcessByCvu.set(ourCvu, { processId, at: Date.now() });
+      return r;
+    });
+
+    if (result.accepted) {
+      await PendingPayout.updateOne({ id }, { $set: { fpAccepted: true, hgStatus: 'aceptado', status: 'paying', paidVia: 'finpro' } });
+      setTimeout(function () { _pollPayingPayouts(); }, 7000);
+      logger.info(`[finpro-pay] lote ACEPTADO payout=${id} user=${payout.username} $${payout.amount} process=${processId} tx=${transactionId} → ${resolvedCbu.slice(-6)} (${lookupName || payout.titular || '?'}) por ${req.user.username}`);
+      return res.json({ success: true, status: 'paying', fpProcessId: processId, lookupName });
+    }
+    if (result.network) {
+      // No sabemos si entró: NO se manda otro (pagaría dos veces). El poll pregunta por este process_id.
+      await PendingPayout.updateOne({ id }, { $set: { fpAccepted: null, hgStatus: 'sin_respuesta', status: 'paying', paidVia: 'finpro' } });
+      setTimeout(function () { _pollPayingPayouts(); }, 10000);
+      logger.warn(`[finpro-pay] SIN RESPUESTA payout=${id} process=${processId}: ${result.error} — se consulta antes de reintentar`);
+      return res.json({ success: true, status: 'paying', fpProcessId: processId, message: `Finpro no respondió (${result.error}). Se consulta el estado del pedido antes de reintentar: no se manda dos veces.` });
+    }
+    // Rechazado en el acto: el lote NO entró → failed, reintentable con process_id nuevo.
+    const msg = finpro.describeCode(result.code, result.description || result.error);
+    await PendingPayout.updateOne({ id }, { $set: { status: 'failed', paidVia: 'finpro', hgStatus: 'rechazado', fpAccepted: false, error: String(msg).slice(0, 300) } });
+    if (claimed.deductAtPay === true) {
+      await _emitAdminOnlyChatNote(claimed.userId, claimed.username,
+        `💸 ⚠️ El PAGO en Finpro FALLÓ (${msg}) — pero las fichas YA fueron descontadas correctamente: se le descontó $${Number(claimed.amount).toLocaleString('es-AR')}. NO devuelvas: pagá manual ("otro banco") o reintentá.`);
+    }
+    logger.warn(`[finpro-pay] RECHAZADO payout=${id} process=${processId} code=${result.code || '-'} http=${result.httpStatus}: ${msg}`);
+    return res.status(400).json({ error: 'No se pudo iniciar el pago en Finpro: ' + msg });
+  } catch (error) {
+    console.error('Error pagando payout (Finpro):', error);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+}
+// Consulta el estado REAL de un pago en Finpro y lo aplica (idempotente vía
+// handlePayoutStatusWebhook). processes/status → si terminó, processes/{id}/result:
+//   • fila con coelsa_id y response_code que NO es de error → DONE (coelsa = comprobante)
+//   • response_code de la tabla de errores (o 2xxx/04xx/05xx), o terminó con
+//     transaction_fail_count > 0 y sin coelsa → ERROR con el texto en español
+//   • terminó con success_count ≥ 1, sin fallas y sin código de error pero SIN coelsa
+//     (campo no documentado) → DONE igual, con aviso en el log (DECISIÓN defensiva)
+//   • otro caso → sigue 'paying' (hgStatus informativo)
+// Devuelve { ok, status: 'paid'|'failed'|'paying', error?, note? }.
+async function _finproSyncPayout(p, via) {
+  if (!p || !p.fpProcessId) return { ok: false, error: 'sin process_id' };
+  if (!finpro.isEnabled()) return { ok: false, error: 'Finpro no configurado' };
+  const st = await finpro.getProcessStatus([p.fpProcessId]);
+  const unknown = (!st.ok && st.httpStatus === 404) || (st.ok && st.notFound);
+  if (unknown && p.fpAccepted !== true) {
+    // Finpro no conoce el proceso: el POST nunca entró (caso 'sin_respuesta') → failed reintentable.
+    await handlePayoutStatusWebhook({ externalID: p.id, id: p.fpProcessId, status: 'ERROR', errorCode: 'Finpro no registró el pedido (no llegó): reintentá el pago' }, 'finpro');
+    await PendingPayout.updateOne({ id: p.id }, { $set: { fpAccepted: false } });
+    return { ok: true, status: 'failed', error: 'proceso desconocido para Finpro' };
+  }
+  if (!st.ok) return { ok: false, error: (st.httpStatus ? 'HTTP ' + st.httpStatus + ' ' : '') + (st.error || st.description || 'sin detalle') };
+  if (!st.finished) {
+    await PendingPayout.updateOne({ id: p.id }, { $set: { hgStatus: st.status || 'processing', fpAccepted: true } });
+    return { ok: true, status: 'paying', hgStatus: st.status || 'processing' };
+  }
+  const rr = await finpro.getProcessResult(p.fpProcessId);
+  if (!rr.ok) return { ok: false, error: 'resultado: ' + ((rr.httpStatus ? 'HTTP ' + rr.httpStatus + ' ' : '') + (rr.error || rr.description || 'sin detalle')) };
+  const row = rr.transactions.find((t) => t.transactionId && p.fpTransactionId && String(t.transactionId) === String(p.fpTransactionId)) || rr.transactions[0] || null;
+  const code = row ? row.responseCode : null;
+  const coelsa = row ? row.coelsaId : null;
+  const failCount = Number(st.failCount) || 0, okCount = Number(st.successCount) || 0;
+  if (row && coelsa && !finpro.isErrorCode(code)) {
+    await handlePayoutStatusWebhook({ externalID: p.id, id: p.fpProcessId, status: 'DONE', coelsaId: coelsa }, 'finpro');
+    return { ok: true, status: 'paid', coelsaId: coelsa };
+  }
+  const rejectedByStatus = row && !coelsa && /rechaz|fail|error|reject/i.test(String(row.status || ''));
+  if ((row && finpro.isErrorCode(code)) || (failCount > 0 && !coelsa) || rejectedByStatus) {
+    const msg = finpro.describeCode(code, (row && row.responseDescription) || (row && row.status) || null);
+    await handlePayoutStatusWebhook({ externalID: p.id, id: p.fpProcessId, status: 'ERROR', errorCode: msg }, 'finpro');
+    // Un rechazo real = el lote terminó sin pagar → un reintento necesita process_id nuevo.
+    await PendingPayout.updateOne({ id: p.id }, { $set: { fpAccepted: false } });
+    return { ok: true, status: 'failed', error: msg };
+  }
+  if (okCount >= 1 && failCount === 0 && !finpro.isErrorCode(code)) {
+    logger.warn(`[finpro-pay] payout=${p.id} process=${p.fpProcessId} terminó OK según los contadores pero el resultado no trae coelsa_id — se da por PAGADO (${via})`);
+    await handlePayoutStatusWebhook({ externalID: p.id, id: p.fpProcessId, status: 'DONE', coelsaId: coelsa || null }, 'finpro');
+    return { ok: true, status: 'paid', note: 'sin coelsa_id en el resultado' };
+  }
+  await PendingPayout.updateOne({ id: p.id }, { $set: { hgStatus: 'finished_sin_resultado' } });
+  logger.warn(`[finpro-pay] payout=${p.id} process=${p.fpProcessId} terminó sin coelsa ni código de error (ok=${okCount} fail=${failCount}) — queda en proceso, revisar en Finpro`);
+  return { ok: true, status: 'paying', hgStatus: 'finished_sin_resultado', note: 'terminado sin coelsa_id ni código: revisar en Finpro' };
+}
+
 app.post('/api/admin/payouts/:id/pay', authMiddleware, withdrawerMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
+    if ((await getBankProvider()) === 'finpro') return _payPayoutViaFinpro(req, res); // #218: el retiro sale por el banco elegido en el panel
     if (!hgcashPay.isEnabled()) {
       return res.status(400).json({ error: 'Pago automático no configurado (falta HGCASH_API_TOKEN). Pagá manual.' });
     }
@@ -19656,9 +19887,17 @@ app.post('/api/admin/payouts/:id/dismiss', authMiddleware, withdrawerMiddleware,
 // ERROR/CANCELLED→failed). Reusa el handler del webhook para mapear el estado.
 app.post('/api/admin/payouts/:id/sync', authMiddleware, withdrawerMiddleware, async (req, res) => {
   try {
-    if (!hgcashPay.isEnabled()) return res.status(400).json({ error: 'Pago automático no configurado.' });
     const payout = await PendingPayout.findOne({ id: req.params.id }).lean();
     if (!payout) return res.status(404).json({ error: 'Pago no encontrado.' });
+    if (payout.paidVia === 'finpro') { // #218: processes/status → processes/{id}/result
+      if (!finpro.isEnabled()) return res.status(400).json({ error: 'Finpro no está configurado.' });
+      if (!payout.fpProcessId) return res.status(400).json({ error: 'Este pago no tiene proceso en Finpro para consultar.' });
+      const r = await _finproSyncPayout(payout, 'sync');
+      if (!r.ok) return res.status(502).json({ error: 'No se pudo consultar el estado en Finpro: ' + (r.error || 's/estado') });
+      const fresh = await PendingPayout.findOne({ id: payout.id }).select('status hgStatus fpCoelsaId').lean();
+      return res.json({ success: true, status: fresh ? fresh.status : payout.status, hgStatus: fresh ? fresh.hgStatus : null, coelsaId: fresh ? fresh.fpCoelsaId : null, note: r.note || null });
+    }
+    if (!hgcashPay.isEnabled()) return res.status(400).json({ error: 'Pago automático no configurado.' });
     if (!payout.hgTransactionId) return res.status(400).json({ error: 'Este pago no tiene transacción hgcash para consultar.' });
     const st = await hgcashPay.getTransactionStatus(payout.hgTransactionId);
     if (!st.ok || !st.status) return res.status(502).json({ error: 'No se pudo consultar el estado en hgcash: ' + (st.error || 's/estado') });
@@ -21371,12 +21610,17 @@ setInterval(function () { _runInactividadTick(); }, 6 * 60 * 60 * 1000);
 // duplica). Solo pagos RECIENTES (últimas 2h) para NO resucitar ni spamear pagos viejos.
 async function _pollPayingPayouts() {
   try {
-    if (!hgcashPay.isEnabled()) return;
+    if (!hgcashPay.isEnabled() && !finpro.isEnabled()) return;
     const since = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const paying = await PendingPayout.find({ status: 'paying', createdAt: { $gte: since } })
       .sort({ createdAt: -1 }).limit(25).lean();
     for (const p of paying) {
-      if (!p.hgTransactionId) continue;
+      if (p.paidVia === 'finpro') { // #218: processes/status → processes/{id}/result
+        if (!p.fpProcessId || !finpro.isEnabled()) continue;
+        try { await _finproSyncPayout(p, 'poll'); } catch (_) {}
+        continue;
+      }
+      if (!p.hgTransactionId || !hgcashPay.isEnabled()) continue;
       try {
         const st = await hgcashPay.getTransactionStatus(p.hgTransactionId);
         if (st.ok && st.status) {
