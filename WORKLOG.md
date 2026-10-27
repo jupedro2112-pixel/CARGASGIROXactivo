@@ -8,6 +8,11 @@
 
 ## Sesión 2026-10-26
 
+### 216. Píxeles de Meta: el mismo píxel en SSM y en el panel ya no manda cada evento dos veces
+- `_capiDestinations` deduplica por ID de píxel (gana el del panel). Antes, un píxel cargado en los dos lados recibía cada evento server-side
+  por duplicado con el mismo `event_id` (Meta suele deduplicarlo, pero no hay que depender de eso). El navegador de la landing ya deduplicaba.
+  La lista del panel sigue mostrando las dos filas: conviene borrar una igual.
+
 ### 215. FIX panel de píxeles de Meta: los botones 🧪 Probar / ✏️ / 🗑️ no hacían nada
 - **Causa:** los `onclick` de la tabla se armaban con `JSON.stringify(...)` (comillas dobles) adentro de un atributo HTML con comillas dobles
   ⇒ el atributo se cortaba y el navegador descartaba el handler: al tocar no pasaba nada (ni cartel, ni envío). Los envíos reales de eventos no

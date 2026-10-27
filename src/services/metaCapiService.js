@@ -64,7 +64,11 @@ function _scopeMatches(scope, info) {
 // El alcance rige para TODOS los píxeles con alcance, incluido el `_2` de SSM (en el gemelo el `_2` era el píxel de un publicista:
 // hasta ahora recibía los eventos de TODOS los clientes; owner: "son dos pautas distintas, no mezclar"). Sin META_PIXEL_PUBLISHER_n = recibe todo.
 function _capiDestinations(info) {
-  return listPixels().filter((p) => p.token && (info === undefined || _scopeMatches(p.scope, info)));
+  const all = listPixels().filter((p) => p.token && (info === undefined || _scopeMatches(p.scope, info)));
+  // #216: el MISMO píxel cargado en SSM y en el panel ⇒ un solo envío por evento (gana el del panel, que es el que se puede editar/probar).
+  const byId = new Map();
+  for (const p of all) { const cur = byId.get(p.pixelId); if (!cur || (p.source === 'panel' && cur.source !== 'panel')) byId.set(p.pixelId, p); }
+  return [...byId.values()];
 }
 
 // ---- Resolución del "dueño" de un evento (publicista + campaña) — #197 (réplica
