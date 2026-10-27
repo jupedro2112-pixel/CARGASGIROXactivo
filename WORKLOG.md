@@ -8,6 +8,12 @@
 
 ## Sesión 2026-10-26
 
+### 215. FIX panel de píxeles de Meta: los botones 🧪 Probar / ✏️ / 🗑️ no hacían nada
+- **Causa:** los `onclick` de la tabla se armaban con `JSON.stringify(...)` (comillas dobles) adentro de un atributo HTML con comillas dobles
+  ⇒ el atributo se cortaba y el navegador descartaba el handler: al tocar no pasaba nada (ni cartel, ni envío). Los envíos reales de eventos no
+  estaban afectados. **Fix:** los tres handlers van con `escapeHtml(...)` (las comillas pasan a `&quot;`). admin-sw bumpeado.
+  Recordatorio: el mismo píxel cargado dos veces (SSM y panel) recibe cada evento dos veces — borrar el duplicado del panel con 🗑️.
+
 ### 214. 📣 Píxeles de Meta por publicista cargados desde el PANEL (réplica del #990 de PICA ROJA) — sin SSM
 - **Owner:** "¿no se puede cargar un dashboard de publicistas META, que se cargue ahí todos los píxeles y token, y no cargar todo por SSM?"
 - **Panel → COMANDOS → "📣 Píxeles de Meta por publicista"** (solo admin general): lista de TODOS los píxeles (los de Amazon/SSM y los del
