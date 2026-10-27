@@ -2862,6 +2862,15 @@ async function hgcashMatchFromComprobante(comprobante) {
       return c.enabled && _statusAccredited(m.status, c) && _comprobanteMatchesMovement(comprobante, m, c);
     });
     if (matches.length === 0) {
+      // #219: Finpro no avisa las transferencias entrantes → se le PREGUNTA ahora
+      // (verify/incoming). Si confirma, la carga sale adentro (hgcashAutoCarga); si es
+      // ambigua ya avisó al agente; si todavía no está, queda en re-verificación (cron,
+      // 2 min hasta 90 min). Si después Finpro confirma y ya hubo depósito manual, el
+      // cron no vuelve a cargar.
+      if (fpCfg.enabled && finpro.isReadyForIncoming()) {
+        const fv = await _finproVerifyComprobante(comprobante, { source: 'comprobante' });
+        if (fv && (fv.confirmed || fv.ambiguous)) return;
+      }
       logger.info(`[hgcash] comprobante SIN movimiento aún: $${comprobante.amount} op=${comprobante.operationNumber || '-'} de "${comprobante.originHolder || '?'}" — ${candidates.length} movimientos pendientes en ventana`);
       return; // todavía no llegó el movimiento; el webhook lo matcheará al llegar
     }
@@ -3059,6 +3068,172 @@ const FINPRO_VERIFY_WINDOW_MIN = 180;
 const FINPRO_REVERIFY_EVERY_MS = 2 * 60 * 1000;
 const FINPRO_REVERIFY_MAX_MS = 90 * 60 * 1000;
 const _finproCallbackStats = { received: 0, matched: 0, lastAt: null, lastProcessId: null, lastIp: null, lastStatus: null };
+
+// ── #219 Verificación de una carga por COMPROBANTE (sin webhook) ────────────────────
+// Finpro no avisa cuando entra plata: cuando el cliente manda el comprobante se le
+// PREGUNTA a Finpro (`transfers/verify/incoming`) con el dato más fuerte disponible:
+// N° de operación si tiene pinta de coelsa (22 alfanuméricos con letras) → monto + fecha +
+// ventana + nuestro CVU. Resultado:
+//   confirmed (exact/high) → `_finproIngestIncoming` + `hgcashAutoCarga` directo (el match
+//                            lo hizo Finpro; los candados son los de siempre: claim atómico,
+//                            HgcashCharge por coelsa, guard de duplicados, multicuenta,
+//                            bonos pendientes, vínculos del #183, modo sombra/auto de Finpro)
+//   not_found_yet          → queda 'pending' y el cron `_finproReverifyTick` reintenta cada
+//                            2 min hasta 90 min (por instancia, claim atómico), después 'gave_up'
+//   ambiguous / medium     → NO se carga: `bankMatchStatus 'needs_review'` + nota al agente
+//   400/401/403            → error de configuración/permisos: se avisa y no se reintenta
+// Cada intento queda en `Comprobante.finproVerify` (diag del panel).
+// Adaptación a esta página: acá no existe el "reabrir chat a Abiertos" del gemelo
+// (`_reopenChatForManualCharge`): el comprobante recién llegó por el chat, así que el chat
+// ya está abierto; se deja la nota adminOnly como en el resto del pipeline de hgcash.
+function _finproVerifyInputFor(c) {
+  const coelsa = String(c.coelsaCode || '').trim(); // (esta página no tiene el campo; queda por si la IA lo agrega)
+  if (/^[A-Z0-9]{18,30}$/i.test(coelsa)) return { coelsaId: coelsa.toUpperCase(), kind: 'coelsa_id' };
+  // A veces el "N° de operación" leído ES el coelsa (22 alfanuméricos con letras).
+  const op = String(c.operationNumber || '').trim();
+  if (/^[A-Z0-9]{22}$/i.test(op) && /[A-Z]/i.test(op)) return { coelsaId: op.toUpperCase(), kind: 'coelsa_id' };
+  if (!(Number(c.amount) > 0)) return null;
+  return { amount: Number(c.amount), occurredAt: c.createdAt ? new Date(c.createdAt) : new Date(), windowMinutes: FINPRO_VERIFY_WINDOW_MIN, toCvu: finpro.fromCvu() || undefined, kind: 'amount_date' };
+}
+async function _finproRecordVerify(comprobanteId, attempt, state, extra) {
+  try {
+    const now = Date.now();
+    const c = await Comprobante.findOne({ id: comprobanteId }).select('finproVerify').lean();
+    const fv = (c && c.finproVerify) || {};
+    const log = Array.isArray(fv.log) ? fv.log.slice(-9) : [];
+    log.push(attempt);
+    const startedAt = fv.startedAt ? new Date(fv.startedAt).getTime() : now;
+    let st = state, nextAt = null;
+    if (state === 'pending') {
+      if (now - startedAt >= FINPRO_REVERIFY_MAX_MS) st = 'gave_up';
+      else nextAt = new Date(now + FINPRO_REVERIFY_EVERY_MS);
+    }
+    const doc = Object.assign({}, fv, { startedAt: new Date(startedAt), attempts: (Number(fv.attempts) || 0) + 1, lastAt: new Date(now), last: attempt, nextAt, log }, extra || {});
+    await Comprobante.updateOne({ id: comprobanteId }, { $set: { finproVerifyStatus: st, finproVerify: doc } });
+    return st;
+  } catch (e) { logger.warn(`[finpro] no se pudo registrar el intento de verificación (${comprobanteId}): ${e.message}`); return state; }
+}
+async function _finproVerifyComprobante(comprobante, opts) {
+  const source = (opts && opts.source) || 'comprobante';
+  try {
+    if (!comprobante || !comprobante.isComprobante || comprobante.autoCharged) return { skipped: 'no aplica' };
+    if (comprobante.status === 'duplicate') return { skipped: 'duplicado' };
+    const fpCfg = await getFinproConfig();
+    if (!fpCfg.enabled || !finpro.isReadyForIncoming()) return { skipped: 'finpro apagado' };
+    const input = _finproVerifyInputFor(comprobante);
+    if (!input) {
+      await _finproRecordVerify(comprobante.id, { at: new Date(), source, kind: 'none', error: 'sin coelsa ni monto' }, 'gave_up');
+      return { skipped: 'sin datos' };
+    }
+    const r = await finpro.verifyIncoming(input);
+    const attempt = {
+      at: new Date(), source, kind: input.kind, httpStatus: r.httpStatus, status: r.status || null, matchedBy: r.matchedBy || null,
+      confidence: r.confidence || null, error: r.error || null, notificationId: (r.notification && r.notification.id) || null,
+      notificationAmount: r.notification ? r.notification.amount : null
+    };
+    const uid = comprobante.userId, uname = comprobante.username;
+    if (!r.ok) {
+      const fatal = [400, 401, 403].includes(r.httpStatus);
+      const st = await _finproRecordVerify(comprobante.id, attempt, fatal ? 'error' : 'pending');
+      logger.warn(`[finpro] verify (${input.kind}) falló HTTP ${r.httpStatus}: ${r.error} — comprobante ${comprobante.id} ${fatal ? 'NO se reintenta' : 'se reintenta'}`);
+      if (fatal) {
+        await _emitAdminOnlyChatNote(uid, uname,
+          `🟣 Finpro NO pudo verificar este comprobante (HTTP ${r.httpStatus}: ${String(r.error || '').slice(0, 120)}). ${r.httpStatus === 403 ? 'La clave no tiene el permiso "movements".' : (r.httpStatus === 401 ? 'Credenciales inválidas o cliente inactivo.' : 'Pedido inválido.')} Revisá panel → Finpro y cargá a mano si corresponde.`).catch(() => {});
+      } else if (st === 'gave_up') {
+        await _emitAdminOnlyChatNote(uid, uname, `🟣 Finpro: no se pudo verificar la transferencia en ${Math.round(FINPRO_REVERIFY_MAX_MS / 60000)} min (errores de conexión). Cargá a mano si corresponde.`).catch(() => {});
+      }
+      return { error: r.error, httpStatus: r.httpStatus };
+    }
+    const n = r.notification || {};
+    if (r.status === 'confirmed') {
+      // Sin `confidence` en la respuesta: fuerte solo si la coincidencia fue por código exacto.
+      const conf = r.confidence || ((input.kind === 'coelsa_id' || /coelsa|authorization/i.test(String(r.matchedBy || ''))) ? 'exact' : 'medium');
+      const strong = conf === 'exact' || conf === 'high';
+      const amountOk = n.amount == null || comprobante.amount == null || _amountsEqual(n.amount, comprobante.amount);
+      if (!strong || !amountOk) {
+        const why = !amountOk ? `el monto acreditado ($${Number(n.amount).toLocaleString('es-AR')}) no es el del comprobante ($${Number(comprobante.amount).toLocaleString('es-AR')})` : `confianza "${conf}"`;
+        await _finproRecordVerify(comprobante.id, Object.assign(attempt, { note: why }), 'ambiguous');
+        await Comprobante.updateOne({ id: comprobante.id, autoCharged: { $ne: true }, bankMatchStatus: { $in: ['none', 'pending'] } }, { $set: { bankMatchStatus: 'needs_review' } });
+        await _emitAdminOnlyChatNote(uid, uname, `🟣 Finpro: coincidencia AMBIGUA — la transferencia figura acreditada pero ${why}. NO se cargó sola: verificá en Finpro y cargá a mano.`);
+        logger.warn(`[finpro] verify confirmed pero no concluyente (${why}) — comprobante ${comprobante.id} a revisión`);
+        return { ambiguous: true };
+      }
+      const ing = await _finproIngestIncoming(Object.assign({}, n, { coelsaId: n.coelsaId || input.coelsaId || null }), 'verify', { amount: comprobante.amount, coelsaId: input.coelsaId || null });
+      await _finproRecordVerify(comprobante.id, attempt, 'confirmed', { movementId: ing.movement ? ing.movement.movementId : null });
+      if (!ing.movement) {
+        logger.warn(`[finpro] confirmado pero sin movimiento (${ing.error || '?'}) — comprobante ${comprobante.id}`);
+        return { error: ing.error };
+      }
+      if (ing.movement.matchStatus === 'pending') {
+        // El match lo hizo Finpro (confirmed + exact/high + mismo monto): va directo a la
+        // auto-carga, que aplica los candados de siempre (claim atómico del movimiento y del
+        // comprobante, HgcashCharge por coelsa, guard de duplicados, multicuenta bancaria,
+        // bonos pendientes, vínculos del #183, modo sombra/auto de la config de Finpro).
+        await hgcashAutoCarga({ movement: ing.movement, comprobante, mode: fpCfg.mode });
+      } else {
+        logger.info(`[finpro] movimiento ${ing.movement.movementId} ya estaba ${ing.movement.matchStatus} — no se vuelve a cargar (comprobante ${comprobante.id})`);
+      }
+      return { confirmed: true, movementId: ing.movement.movementId };
+    }
+    if (r.status === 'ambiguous') {
+      const cnt = Array.isArray(r.matches) ? r.matches.length : 0;
+      await _finproRecordVerify(comprobante.id, attempt, 'ambiguous');
+      await Comprobante.updateOne({ id: comprobante.id, autoCharged: { $ne: true }, bankMatchStatus: { $in: ['none', 'pending'] } }, { $set: { bankMatchStatus: 'needs_review' } });
+      await _emitAdminOnlyChatNote(uid, uname, `🟣 Finpro: coincidencia AMBIGUA — hay ${cnt || 'varias'} transferencias acreditadas compatibles (mismo monto en la ventana) y el comprobante no trae el código COELSA para distinguirlas. NO se cargó sola: pedile al cliente el comprobante con el código, verificá en Finpro y cargá a mano.`);
+      return { ambiguous: true };
+    }
+    // not_found_yet (o estado desconocido): todavía no acreditó → el cron reintenta.
+    const st = await _finproRecordVerify(comprobante.id, attempt, 'pending');
+    if (st === 'gave_up') {
+      await _emitAdminOnlyChatNote(uid, uname, `🟣 Finpro: la transferencia del comprobante NO apareció acreditada en ${Math.round(FINPRO_REVERIFY_MAX_MS / 60000)} min (${input.kind === 'coelsa_id' ? 'código ' + input.coelsaId : 'monto $' + Number(input.amount).toLocaleString('es-AR')}). Se deja de buscar: verificá a mano.`).catch(() => {});
+      logger.info(`[finpro] verify agotado (${comprobante.id}) — a mano`);
+    } else {
+      if (source === 'comprobante') {
+        await _emitAdminOnlyChatNote(uid, uname, `🟣 Finpro todavía no da por acreditada la transferencia de este comprobante (${input.kind === 'coelsa_id' ? 'código ' + input.coelsaId : 'monto $' + Number(input.amount).toLocaleString('es-AR')}). Se vuelve a consultar cada ${FINPRO_REVERIFY_EVERY_MS / 60000} min (hasta ${FINPRO_REVERIFY_MAX_MS / 60000} min): si aparece y no la cargaste a mano, se carga sola${fpCfg.mode === 'auto' ? '' : ' (modo sombra: solo avisa)'}.`).catch(() => {});
+      }
+      logger.info(`[finpro] verify (${input.kind}) → ${r.status || 'sin estado'} — comprobante ${comprobante.id} queda pendiente (reintento en ${FINPRO_REVERIFY_EVERY_MS / 60000} min)`);
+    }
+    return { pending: st === 'pending' };
+  } catch (e) {
+    logger.warn(`[finpro] verificación por comprobante falló: ${e.message}`);
+    return { error: e.message };
+  }
+}
+// Cron (cada 2 min, por instancia): re-verifica los comprobantes 'pending' cuyo turno
+// llegó. Claim atómico por intento (`finproVerify.nextAt` se corre antes de llamar) →
+// con varias instancias cada comprobante se consulta una sola vez por turno. Si mientras
+// tanto un agente ya cargó a mano (depósito del mismo monto posterior al comprobante) o el
+// comprobante se resolvió por otro camino, se marca 'resolved' y no se verifica más.
+async function _finproReverifyTick() {
+  try {
+    if (!finpro.isReadyForIncoming()) return;
+    const fp = await getFinproConfig();
+    if (!fp.enabled) return;
+    for (let i = 0; i < 15; i++) {
+      const now = new Date();
+      const c = await Comprobante.findOneAndUpdate(
+        { finproVerifyStatus: 'pending', 'finproVerify.nextAt': { $lte: now }, autoCharged: { $ne: true }, createdAt: { $gte: new Date(Date.now() - 4 * 3600 * 1000) } },
+        { $set: { 'finproVerify.nextAt': new Date(Date.now() + FINPRO_REVERIFY_EVERY_MS) } },
+        { new: true, sort: { 'finproVerify.nextAt': 1 } }
+      ).lean();
+      if (!c) break;
+      let resolved = !['none', 'pending'].includes(c.bankMatchStatus || 'none');
+      if (!resolved) {
+        try {
+          const dep = await Transaction.findOne({ userId: c.userId, type: 'deposit', amount: Number(c.amount), timestamp: { $gte: c.createdAt } }).select('id').lean();
+          if (dep) resolved = true;
+        } catch (_) {}
+      }
+      if (resolved) {
+        await Comprobante.updateOne({ id: c.id }, { $set: { finproVerifyStatus: 'resolved', 'finproVerify.nextAt': null } });
+        continue;
+      }
+      await _finproVerifyComprobante(c, { source: 'cron' });
+    }
+  } catch (e) { logger.warn(`[finpro] re-verificación falló: ${e.message}`); }
+}
+setTimeout(function () { _finproReverifyTick(); }, 75 * 1000);
+setInterval(function () { _finproReverifyTick(); }, FINPRO_REVERIFY_EVERY_MS);
 
 // ============================================
 // FAN-OUT del webhook hgcash → autoreembolsos
