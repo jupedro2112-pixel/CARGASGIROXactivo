@@ -4541,6 +4541,74 @@ app.get('/api/meta-pixel-id', async (req, res) => {
   }
 });
 
+// #214 (réplica del #990 de PICA ROJA): PÍXELES DE META POR PUBLICISTA cargados desde el PANEL (COMANDOS → "📣 Píxeles de Meta por publicista"),
+// sin tocar SSM (los META_PIXEL_ID_n de SSM siguen valiendo). Config['metaPixels'] = [{ id, label, pixelId, tokenEnc, tokenLast4, scope:[...],
+// testCode, capiOnly, updatedAt, updatedBy }]. El token se guarda cifrado con JWT_SECRET (como las credenciales de hgcash); rotar JWT_SECRET ⇒
+// recargarlos. Se descifran al arrancar, cada 5 min y al guardar, y van al servicio (`metaCapi.setConfigPixels`). Un píxel con token recibe por
+// CAPI sólo los eventos de los clientes de su alcance (código de campaña / nombre del publicista / * = todos); sin token = sólo navegador.
+//   GET  /api/admin/meta-pixels                 → cada píxel (id enmascarado, token sí/no, alcance, qué recibe, últimos envíos de esta instancia)
+//   GET  /api/admin/meta-pixels?campaign=XXXX   → además, qué píxeles reciben los eventos de esa campaña (navegador y CAPI)
+//   POST /api/admin/meta-pixels · DELETE /:id   → alta/edición/baja (sólo admin general)
+//   POST /api/admin/meta-pixels/:n/test         → manda un evento de prueba "CargasGiroxTest" y devuelve la respuesta de Meta (código 190 = token inválido)
+async function _metaPixelsLoad() {
+  try {
+    const list = (await getConfig('metaPixels', [])) || [];
+    const dec = list.map((p) => { let token = ''; try { token = p.tokenEnc ? (_credDecrypt(p.tokenEnc) || '') : ''; } catch (_) { token = ''; }
+      return { id: String(p.id), label: p.label || '', pixelId: String(p.pixelId || ''), token, scope: Array.isArray(p.scope) ? p.scope : [], testCode: p.testCode || '', capiOnly: !!p.capiOnly }; });
+    metaCapi.setConfigPixels(dec); return dec.length;
+  } catch (e) { logger.warn('[meta-pixels] no se pudieron cargar los del panel: ' + e.message); return 0; }
+}
+setInterval(() => { _metaPixelsLoad(); }, 5 * 60 * 1000);
+app.post('/api/admin/meta-pixels', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Sólo el administrador general.' });
+    const b = req.body || {};
+    const pixelId = String(b.pixelId || '').replace(/\D/g, ''); if (!/^\d{10,20}$/.test(pixelId)) return res.status(400).json({ error: 'El ID del píxel son 15 o 16 números (Administrador de eventos → el píxel → ID del conjunto de datos).' });
+    const scope = String(b.scope || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20); if (!scope.length) return res.status(400).json({ error: 'Poné a quién pertenece: el código de la campaña, el nombre del publicista, o * para todos.' });
+    const token = String(b.token || '').trim(); const list = (await getConfig('metaPixels', [])) || [];
+    const id = String(b.id || '').trim() || ('p' + Date.now().toString(36)); const cur = list.find((p) => String(p.id) === id) || null;
+    if (!token && !(cur && cur.tokenEnc)) return res.status(400).json({ error: 'Falta el token de la API de conversiones de ese píxel (Eventos → Configuración → API de conversiones → Generar token).' });
+    const next = { id, label: String(b.label || scope[0]).slice(0, 60), pixelId, scope, testCode: String(b.testEventCode || '').trim().slice(0, 40), capiOnly: !!b.capiOnly, updatedAt: new Date().toISOString(), updatedBy: req.user.username,
+      tokenEnc: token ? _credEncrypt(token) : cur.tokenEnc, tokenLast4: token ? token.slice(-4) : cur.tokenLast4 };
+    const out = cur ? list.map((p) => (String(p.id) === id ? next : p)) : list.concat([next]);
+    await Config.set('metaPixels', out, req.user.username); await _metaPixelsLoad();
+    logger.info('[meta-pixels] ' + (cur ? 'editado' : 'nuevo') + ' ' + id + ' (' + scope.join('/') + ') por ' + req.user.username);
+    res.json({ success: true, id });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor', detalle: e.message }); }
+});
+app.delete('/api/admin/meta-pixels/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Sólo el administrador general.' });
+    const list = (await getConfig('metaPixels', [])) || []; const out = list.filter((p) => String(p.id) !== String(req.params.id));
+    if (out.length === list.length) return res.status(404).json({ error: 'No existe' });
+    await Config.set('metaPixels', out, req.user.username); await _metaPixelsLoad(); res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.get('/api/admin/meta-pixels', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Sólo el administrador general.' });
+    const mask = (id) => String(id || '').replace(/^(\d{4})\d+(\d{3})$/, '$1…$2');
+    const st = metaCapi.stats();
+    const list = metaCapi.listPixels().map((p) => ({ n: p.n, id: p.id || null, origen: p.source || 'ssm', etiqueta: p.label, pixel: mask(p.pixelId), pixelId: p.source === 'panel' ? p.pixelId : undefined, token: p.token ? 'sí' : 'NO (sólo navegador)', alcance: p.scope, soloCapi: p.capiOnly, testEventCode: p.testCode ? 'sí' : 'no',
+      recibePorCapi: p.token ? (p.scope.includes('*') ? 'todos los clientes' : 'clientes de ' + p.scope.join(', ')) : 'nada', ultimosEnvios: st[p.n] || null }));
+    const out = { pixels: list, nota: 'Ids enmascarados. Los de Amazon salen de META_PIXEL_ID(_n) / META_PIXEL_PUBLISHER_n en SSM. Los contadores son de esta instancia desde el último arranque.' };
+    const camp = String(req.query.campaign || '').trim().toUpperCase();
+    if (camp) {
+      const info = await metaCapi.resolveEventScope({}, { campaignCode: camp });
+      out.campania = { codigo: camp, publicista: info && info.publisher, navegador: await metaCapi.pixelIdsForCampaign(camp).then((a) => a.map(mask)), capi: metaCapi._capiDestinations(info).map((d) => '#' + d.n + ' ' + mask(d.pixelId)) };
+    }
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: 'Error del servidor', detalle: e.message }); }
+});
+app.post('/api/admin/meta-pixels/:n/test', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Sólo el administrador general.' });
+    const r = await metaCapi.testPixel(req.params.n, String((req.body && req.body.testEventCode) || (req.query && req.query.testEventCode) || '').trim() || null);
+    logger.info('[meta-pixels] prueba #' + req.params.n + ' por ' + req.user.username + ': ' + (r.ok ? 'OK' : 'ERROR ' + JSON.stringify(r.error).slice(0, 200)));
+    res.json(r);
+  } catch (e) { res.status(500).json({ error: 'Error del servidor', detalle: e.message }); }
+});
+
 // LAST-TOUCH desde la landing (#198, réplica #228/#247 del gemelo): un jugador YA
 // registrado en este dispositivo vuelve por OTRO anuncio (fbclid nuevo) → la landing
 // NO crea otra cuenta: actualiza su atribución de Meta y la campaña del último clic
@@ -24898,6 +24966,7 @@ if (process.env.VERCEL) {
     } catch (e) {
       console.warn('[girox] radiografía de config falló:', e.message);
     }
+    try { const _np = await _metaPixelsLoad(); if (_np) console.log(`[meta-pixels] ${_np} píxel(es) del panel cargados`); } catch (_) {} // #214
     try {
       console.log(`[MetaCAPI] pixels: ${metaCapi.destinationsSummary()}`);
     } catch (e) {

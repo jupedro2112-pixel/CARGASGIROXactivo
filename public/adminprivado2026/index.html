@@ -826,6 +826,35 @@ document.addEventListener('change', function (ev) {
                             </div>
                         </div>
 
+                        <!-- #214 (réplica #990 de PICA ROJA): PÍXELES DE META POR PUBLICISTA (sólo admin general). Reemplaza tener que cargar META_PIXEL_ID_n en SSM. -->
+                        <div class="panel-subheader" style="margin-top: 24px;" id="metaPixelsHeader">
+                            <h3>📣 Píxeles de Meta por publicista</h3>
+                        </div>
+                        <div class="cbu-form" id="metaPixelsForm">
+                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
+                                Cada publicista recibe en SU píxel los eventos de SUS clientes: PageView y registro en la landing (navegador) y registro, cargas (Purchase) y
+                                reembolsos desde el servidor (API de conversiones). Pedile al publicista: <b>ID del píxel</b> (Administrador de eventos → su píxel → ID del
+                                conjunto de datos) y el <b>token de la API de conversiones</b> (Eventos → Configuración → API de conversiones → Generar token). El token
+                                se guarda cifrado y toma efecto al minuto, sin redeploy. "Probar" manda un evento <code>CargasGiroxTest</code> y muestra lo que contesta Meta.
+                                Los píxeles cargados en Amazon (SSM) siguen valiendo y aparecen en la lista. <b>Dejá vacío el "código de prueba"</b> salvo mientras probás: con
+                                código, los eventos reales salen como prueba y no cuentan como conversiones.
+                            </p>
+                            <div id="metaPixelsList" style="margin:0 0 10px;font-size:12.5px;">Cargando…</div>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+                                <input type="hidden" id="mpId">
+                                <div class="form-group" style="flex:1;min-width:170px;margin:0;"><label>Publicista o campaña</label><input type="text" id="mpScope" placeholder="CODIGO (o varios por coma, o *)" maxlength="200" style="width:100%;"></div>
+                                <div class="form-group" style="flex:1;min-width:170px;margin:0;"><label>ID del píxel</label><input type="text" id="mpPixel" placeholder="15-16 números" maxlength="24" inputmode="numeric" style="width:100%;"></div>
+                                <div class="form-group" style="flex:2;min-width:220px;margin:0;"><label>Token API de conversiones</label><input type="password" id="mpToken" placeholder="EAAB… (al editar, vacío = no cambiar)" autocomplete="new-password" style="width:100%;"></div>
+                                <div class="form-group" style="flex:0 0 150px;margin:0;"><label>Código de prueba (opc.)</label><input type="text" id="mpTest" placeholder="TEST12345" maxlength="40" style="width:100%;"></div>
+                                <label style="display:flex;align-items:center;gap:6px;margin:0 0 6px;font-size:12px;cursor:pointer;"><input type="checkbox" id="mpCapiOnly" style="width:auto;"> Sólo servidor (no cargar en la landing)</label>
+                            </div>
+                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+                                <button type="button" class="btn btn-primary" id="mpSaveBtn" onclick="saveMetaPixel()">💾 Guardar píxel</button>
+                                <button type="button" class="btn btn-secondary" onclick="clearMetaPixelForm()">Limpiar</button>
+                                <span id="mpMsg" style="font-size:12px;color:#aaa;"></span>
+                            </div>
+                        </div>
+
                         <!-- #197 WEBHOOKS SALIENTES (réplica del #334/#346 del gemelo): registro / primera carga / carga / retiro a publicistas (solo admin general) -->
                         <div class="panel-subheader" style="margin-top: 24px;" id="webhooksHeader">
                             <h3>🔗 Webhooks salientes (avisos a publicistas)</h3>

@@ -8,6 +8,24 @@
 
 ## Sesión 2026-10-26
 
+### 214. 📣 Píxeles de Meta por publicista cargados desde el PANEL (réplica del #990 de PICA ROJA) — sin SSM
+- **Owner:** "¿no se puede cargar un dashboard de publicistas META, que se cargue ahí todos los píxeles y token, y no cargar todo por SSM?"
+- **Panel → COMANDOS → "📣 Píxeles de Meta por publicista"** (solo admin general): lista de TODOS los píxeles (los de Amazon/SSM y los del
+  panel: id enmascarado, token sí/no, alcance, qué recibe por CAPI, últimos envíos de la instancia) + formulario (publicista o campaña · ID
+  del píxel · token · código de prueba · sólo servidor) + 🧪 Probar (manda `CargasGiroxTest` y muestra la respuesta de Meta; código 190 =
+  token inválido) + ✏️/🗑️. `Config['metaPixels']` con el token cifrado (`_credEncrypt`, JWT_SECRET: rotarlo ⇒ recargarlos).
+  `_metaPixelsLoad()` al arrancar, cada 5 min y al guardar ⇒ `metaCapi.setConfigPixels()`. Toma efecto sin redeploy. Rutas
+  `GET/POST /api/admin/meta-pixels`, `DELETE /:id`, `POST /:n/test`, `GET ?campaign=XXXX` (qué píxeles reciben esa campaña).
+- **Servicio (`src/services/metaCapiService.js`, reemplazado por la versión del gemelo):** `listPixels()` = SSM n=1..9 + panel;
+  `_capiDestinations(scopeInfo)` ⇒ un píxel con token recibe por CAPI **sólo los eventos de los clientes de su alcance**
+  (`META_PIXEL_PUBLISHER_n` o el alcance del panel: códigos de campaña / nombre del publicista; `*` o sin alcance = todo; sin token = sólo
+  navegador). Antes acá la CAPI sólo mandaba al propio y al `_2`, y el `_2` recibía los eventos de TODOS los clientes. `pixelIdsForCampaign`
+  (navegador de la landing, `/api/meta-pixel-id`) también toma los del panel. Contadores por píxel en memoria (`stats()`),
+  `destinationsSummary()` para el log de arranque. Mismo `prefsFilter`… no: el servicio de Meta no cambia nada de notificaciones.
+- Política: se manda **cada carga** (no sólo la primera) a los píxeles con alcance, como pidió el owner para PICA ROJA. Si algún día se
+  quiere "sólo alta + FTD" para partners, está en PAUTANUEVAsantino (`opts.firstDeposit`).
+- admin-sw v53. Sólo servidor + panel (la app no cambia). `node --check` + `check-tdz` OK.
+
 ### 213. 📣 Meta: la CARGA AUTOMÁTICA del banco ahora manda el `Purchase` (antes el píxel recibía el registro pero no la venta)
 - **Qué pasaba:** `hgcashAutoCarga` (transferís y se acredita sola, y la carga asignada desde la bandeja) no llamaba a `metaCapi.track('Purchase')` ni al aviso de fb-ads:
   sólo lo hacían la carga manual del agente y la autogestionada. Como casi todas las cargas entran por el banco, Meta (píxel propio y

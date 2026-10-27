@@ -208,6 +208,10 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   acoplada a `USERS_LIST_FIELDS` del backend (columna nueva ⇒ sumar campo al select).
   Detalle completo de trampas en `docs/ARCHITECTURE.md` §7.
 
+- **Píxeles de Meta (#214):** se cargan desde COMANDOS → "📣 Píxeles de Meta por publicista" (`Config['metaPixels']`, token cifrado)
+  además de SSM. Un evento de Meta nuevo SIEMPRE lleva `externalId` (User.id) para que vaya al píxel del publicista del cliente; la
+  carga automática del banco manda `Purchase` (#213). Un "código de prueba" cargado convierte TODOS los eventos de ese píxel en
+  eventos de prueba (no cuentan): vacío fuera de las pruebas.
 - **Webhooks salientes y prefijo (#197, réplica del gemelo AUTOGIROXcompartido):** todo flujo
   NUEVO de registro o carga llama `outboundWebhook.notify('registro'|'carga', user, {...})` al lado
   de su `fbAdsWebhook.notify` (fire-and-forget). El username de la landing y las altas del panel

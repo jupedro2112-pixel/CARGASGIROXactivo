@@ -1544,3 +1544,11 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `_autopilotProgramMonth`, `_autopilotClearFuture`, `_autopilotTick`; ruta `/api/admin/cronograma-autopilot`. Las campañas
   las ejecuta `_schedTick` como cualquier otra (`payload` → `_createNotifBatchFromBody`).
 - Locks multi-instancia: `_cronClaim(name, ttl)` sobre `Config['cronlock_<name>']` (fail-open).
+
+### 10.4 Píxeles de Meta por publicista (#214)
+
+- `metaCapi.listPixels()` junta SSM (`META_PIXEL_ID`, `META_PIXEL_ID_2..9` + `META_PIXEL_PUBLISHER_n`, `META_CAPI_ACCESS_TOKEN_n`,
+  `META_TEST_EVENT_CODE_n`, `META_PIXEL_CAPIONLY_n`) y `Config['metaPixels']` (panel, token cifrado con `_credEncrypt`).
+  `sendEvent` resuelve el publicista del cliente (`resolveEventScope`: `lastTouchCampaign` → `acquisitionCampaign` →
+  `giroxOwnerCampaign` → `Campaign.publisher`) y manda a `_capiDestinations(scopeInfo)`. Rutas admin `/api/admin/meta-pixels*`.
+  Toda ruta nueva que dispare un evento de Meta tiene que pasar `externalId` (User.id) en `userInfo` para que llegue al píxel correcto.
