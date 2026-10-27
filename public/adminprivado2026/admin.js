@@ -7577,7 +7577,7 @@ function _bankStatusTxt(key, b) {
             ' · modo ' + (b.mode === 'auto' ? '<b>AUTO</b> (carga sola)' : 'SOMBRA (no carga)') + ' · ' + cred +
             ' · ' + (b.fromCvu ? 'CVU ' + escapeHtml(b.fromCvu) : '<span style="color:#ff8080;">sin CVU</span>') +
             (b.readyPayouts ? '' : ' · <span style="color:#ffb74d;">no puede pagar retiros</span>') +
-            (b.dev ? ' · <span style="color:#ff8080;font-weight:800;">URL DE DESARROLLO</span>' : '');
+            (b.dev ? ' · <span style="color:#ffd479;">URL de la doc (confirmar con Finpro)</span>' : '');
     }
     const tok = b.token === 'panel' ? 'token PANEL' : (b.token === 'ssm' ? 'token AWS' : '<span style="color:#ff8080;">sin token</span>');
     const sec = b.secret ? 'firma ✅' : '<span style="color:#ff8080;">sin secreto del webhook</span>';
@@ -7636,7 +7636,7 @@ async function saveBanks() {
 function _finproDevWarn(j) {
     const w = document.getElementById('finproDevWarn'); if (!w) return;
     const url = j && j.settings && j.settings.baseUrl ? j.settings.baseUrl : '';
-    if (j && j.dev) { w.style.display = ''; w.innerHTML = '⚠️ La URL base de Finpro (<code>' + escapeHtml(url) + '</code>) es la del ambiente de <b>DESARROLLO</b> de la doc: ahí no hay plata real. Cuando Finpro te dé la URL de producción, cargala abajo en "URL base de la API" y guardá.'; }
+    if (j && j.dev) { w.style.display = ''; w.style.color = '#ffd479'; w.innerHTML = 'ℹ️ URL base en uso: <code>' + escapeHtml(url) + '</code> (la que figura en la documentación de Finpro). Confirmá con Finpro que es la URL para operar; si te dan otra, cargala abajo en "URL base de la API" y guardá.'; }
     else { w.style.display = 'none'; w.innerHTML = ''; }
 }
 async function loadFinproCard() {
@@ -7681,7 +7681,7 @@ async function finproDiag() {
         const sv = j.service || {}; const tk = sv.token || {}; const cb = j.callbacks || {}; const vf = j.verify || {};
         let h = '<b>🔑 Credenciales:</b> ' + (j.credentials === 'panel' ? 'PANEL' : (j.credentials === 'ssm' ? 'AWS (SSM)' : '<span style="color:#ff8080;">NINGUNA</span>')) +
             ' · <b>token:</b> ' + (tk.has ? 'vigente, vence en ' + Math.round((tk.secondsLeft || 0) / 60) + ' min' : 'sin token todavía (se pide al usarlo)') +
-            ' · <b>URL:</b> <code>' + escapeHtml((j.settings || {}).baseUrl || '') + '</code>' + (j.dev ? ' <span style="color:#ff8080;font-weight:800;">DEV</span>' : '') +
+            ' · <b>URL:</b> <code>' + escapeHtml((j.settings || {}).baseUrl || '') + '</code>' + (j.dev ? ' <span style="color:#ffd479;">(la de la doc)</span>' : '') +
             ' · <b>bankId:</b> ' + escapeHtml((j.settings || {}).bankId || '—') +
             ' · <b>CVU:</b> ' + ((j.settings || {}).fromCvu ? '…' + escapeHtml(String(j.settings.fromCvu).slice(-6)) : '<span style="color:#ff8080;">sin CVU</span>') +
             ' · <b>cuenta:</b> ' + ((j.settings || {}).account ? '✅' : '<span style="color:#ff8080;">sin número</span>');
