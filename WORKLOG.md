@@ -8,6 +8,27 @@
 
 ## Sesión 2026-11-03
 
+### 225. Landing (carpeta `landing/`) con el diseño de la de PICACOMPARTIDO, adaptada a carga MANUAL con agente 24 hs
+- **Owner:** "cambiá la landing de CARGASGIROXactivo tomando de referencia la de PICACOMPARTIDO; adaptala: esta es carga manual con un
+  agente 24 hs, PICACOMPARTIDO sólo es carga automática". (Primero lo hice al revés en PICACOMPARTIDO: revertido en ese repo con el
+  commit 5286fd0, su árbol volvió exactamente a aab27e9. PICACOMPARTIDO NO se toca.)
+- `landing/index.html` reescrita a partir de la de PICA (header compacto, "⭐ Todo nuestro servicio" plegable, plataforma, bono con
+  línea chica, form, barra de progreso "Creando tu cuenta… → Entrando", carrusel "Top juegos" con N jugando, legal, popup, escape del
+  webview, dedup por dispositivo). Adaptación a ESTA página: logo de texto 1GIROX + "oficial · agente 24 hs"; pitch "Cargás por el chat
+  con un agente real, las 24 hs"; servicios: **Carga con agente 24 hs** (comprobante por el chat, un agente acredita en minutos),
+  **Reembolso por rango** (hasta X%), Ruleta diaria, **Fueguito 🔥** (en lugar de "Misiones semanales", que acá no existe), Referidos X%,
+  Niveles VIP, **Agente real 24 hs**, Retiros a tu CBU ("un agente los confirma"); plataforma única "Jugás en 1GIROX" (logo local).
+  Sin aviso de carga mínima (acá carga un agente, no hay mínimo de acreditación automática) y sin `?ref=` (este `/api/landing/signup`
+  no acepta referido). Se conservó lo propio de esta landing: `API_BASE_DEFAULT` cargas1girox.com, override `?api=` a cualquier https,
+  `/api/landing/touch` (last-touch), píxel por campaña (#214), `accessUrl#lc=`; se sumó el guard "redirigir sólo al backend" de PICA.
+- **Back (`GET /api/landing/info`, público, cache 60 s, en `LANDING_OPEN_CORS_PATHS`):** `{ baseUrl, refunds{maxPct,dailyMax,weeklyMax,
+  monthlyMax}, referralPct, installBonus{pct,capArs,excessPct}|null (null si está APAGADO #222), rouletteEnabled }`. La landing pinta
+  "hasta X%" en reembolso, "X%" en referidos, la línea "+X% EXTRA instalando la app" SOLO si el bono está activo, y esconde la ruleta si
+  está apagada → nada hardcodeado (regla del CLAUDE.md). Si el backend no responde, los títulos quedan sin número.
+- Imágenes copiadas de PICA: `landing/img/girox.png` y `landing/img/games/*.jpg` (9 fotos del carrusel). `vercel.json`, `blank.html` y
+  `demo.html` sin cambios (el geo-bloqueo a Argentina sigue).
+- Validado: `node --check` del script de la landing y de server.js + `check-tdz`. Deploy: back (endpoint nuevo) + Vercel (carpeta `landing/`).
+
 ### 224. Sección propia "🏛️ Bancos — Configuración" debajo de COMANDOS — admin-sw v62
 - **Owner:** "separá el tema de bancos de comandos: que aparezca abajo de COMANDOS una sección BANCOS CONFIGURACIÓN y ahí se configure todo".
 - `index.html`: ítem de menú `data-section="banksConfig"` (`.nav-item-banks-config`, solo admin general) debajo de Comandos y

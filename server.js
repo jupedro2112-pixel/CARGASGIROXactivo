@@ -872,7 +872,7 @@ if (!process.env.ALLOWED_ORIGINS && process.env.NODE_ENV === 'production') {
 // #198: también `/api/meta-pixel-id` (Pixel IDs públicos para el pixel del navegador de la
 // landing) y `/api/landing/touch` (last-touch) — los llama la landing cross-origin; sin esta
 // excepción el fetch se bloqueaba en silencio (mismo fix #247 del gemelo).
-const LANDING_OPEN_CORS_PATHS = new Set(['/api/landing/signup', '/api/meta-pixel-id', '/api/landing/touch']);
+const LANDING_OPEN_CORS_PATHS = new Set(['/api/landing/signup', '/api/meta-pixel-id', '/api/landing/touch', '/api/landing/info']); // #225: + info (porcentajes reales para la landing)
 app.use((req, res, next) => {
   if (LANDING_OPEN_CORS_PATHS.has(req.path)) {
     const origin = req.headers.origin;
@@ -5464,6 +5464,30 @@ app.post('/api/landing/touch', landingIpLimiter, async (req, res) => {
     logger.warn(`[landing-touch] falló: ${e.message}`);
     res.status(500).json({ ok: false });
   }
+});
+
+// #225 Info PÚBLICA para la landing de Vercel (porcentajes REALES, nada hardcodeado — réplica de la idea de
+// /api/landing/info de PICACOMPARTIDO, acotada a lo que esta página tiene): reembolso máximo por rango, % de
+// referidos, bono por instalar la app (si está ACTIVO, #222) y si la ruleta diaria está prendida. Sin datos
+// sensibles; cache 60 s; CORS abierto sin credenciales (LANDING_OPEN_CORS_PATHS).
+app.get('/api/landing/info', async (req, res) => {
+  try {
+    let refunds = null;
+    try {
+      const tbp = await getRefundTiersByPeriod();
+      const mx = (ts) => (ts || []).reduce((m, t) => (t && Number(t.pct) > m ? Number(t.pct) : m), 0);
+      refunds = { dailyMax: mx(tbp.daily), weeklyMax: mx(tbp.weekly), monthlyMax: mx(tbp.monthly) };
+      refunds.maxPct = Math.max(refunds.dailyMax, refunds.weeklyMax, refunds.monthlyMax);
+    } catch (_) {}
+    let referralPct = null;
+    try { referralPct = Math.round(require('./src/utils/referralRate').getConfiguredRate() * 100); } catch (_) {}
+    let installBonus = null;
+    try { const ib = await getInstallBonusConfig(); installBonus = ib && ib.enabled ? { pct: ib.pct, capArs: ib.capArs, excessPct: ib.excessPct } : null; } catch (_) {}
+    let rouletteEnabled = null;
+    try { const rc = await getDailyRouletteConfig(); rouletteEnabled = !!(rc && rc.enabled); } catch (_) {}
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    res.json({ baseUrl: getPublicBaseUrl(), refunds, referralPct, installBonus, rouletteEnabled });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // Login

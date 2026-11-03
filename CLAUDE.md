@@ -274,9 +274,11 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   cambie la clave tiene que borrar `installTokenHash`. El diagnóstico vive en
   `GET /api/admin/install-diag`.
 
-- **Landing externa (#198):** `landing/` es la landing de PAUTANUEVAsantino apuntando a
-  `https://cargas1girox.com` (NUNCA vipcargas.com: Cloudflare le mete challenge al preflight y la
-  landing muestra "Sin conexión"). Todo endpoint que la landing llame cross-origin va en
+- **Landing externa (#198 → #225):** `landing/` apunta a `https://cargas1girox.com` (NUNCA
+  vipcargas.com: Cloudflare le mete challenge al preflight y la landing muestra "Sin conexión").
+  Desde #225 tiene el diseño de la landing de PICACOMPARTIDO adaptado a carga MANUAL con agente 24 hs
+  y pinta los % reales desde `GET /api/landing/info` (nada hardcodeado: un beneficio nuevo que la
+  landing prometa se agrega a ese endpoint). Todo endpoint que la landing llame cross-origin va en
   `LANDING_OPEN_CORS_PATHS`. El alta devuelve `accessUrl` con `ir=creds` (recuadro usuario+clave
   en la PWA) y `metaEventId`; `ir=casino` es legacy.
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>CARGAS 1GIROX</title>
+<title>CARGAS 1GIROX — Creá tu cuenta</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -22,10 +22,12 @@
   /* Header */
   .top {
     width: 100%; max-width: 460px; display: flex; align-items: center;
-    justify-content: space-between; padding: 16px 20px calc(4px + env(safe-area-inset-top,0px));
+    justify-content: space-between; padding: 8px 20px calc(0px + env(safe-area-inset-top,0px));
   }
-  .logo { font-size: 22px; font-weight: 900; letter-spacing: 1px; }
-  .logo .g { color: #e3bd48; } .logo .x { color: #25d366; }
+  .logo { display: flex; align-items: center; gap: 9px; }
+  .logo .mark { font-size: 20px; font-weight: 900; letter-spacing: 1px; line-height: 1.1; }
+  .logo .mark .g { color: #e3bd48; } .logo .mark .x { color: #25d366; }
+  .logo small { display: block; font-size: 10.5px; font-weight: 600; color: #8fa090; letter-spacing: .3px; }
   .plus18 {
     font-size: 11px; font-weight: 800; color: #cbd8cb;
     border: 1px solid rgba(255,255,255,0.22); border-radius: 999px; padding: 3px 9px;
@@ -33,43 +35,44 @@
 
   main {
     width: 100%; max-width: 460px; flex: 1;
-    padding: 8px 20px calc(28px + env(safe-area-inset-bottom,0px));
+    padding: 4px 16px calc(20px + env(safe-area-inset-bottom,0px));
     display: flex; flex-direction: column;
   }
 
   /* Banner de bono */
   .promo {
-    margin-top: 12px; border-radius: 18px; overflow: hidden;
+    margin-top: 8px; border-radius: 18px; overflow: hidden;
     border: 1px solid rgba(212,175,55,0.3);
     background:
       linear-gradient(160deg, rgba(227,189,72,0.14), rgba(15,122,61,0.10)),
       #0e140e;
-    padding: 22px 20px; text-align: center;
+    padding: 8px 14px 8px; text-align: center;
   }
   .promo .eyebrow {
-    font-size: 12px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+    font-size: 10.5px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
     color: #7bd39b;
   }
   .promo .big {
-    font-size: 62px; font-weight: 900; line-height: 1; letter-spacing: -1px;
-    color: #e3bd48; text-shadow: 0 4px 30px rgba(227,189,72,0.28); margin: 6px 0 2px;
+    font-size: 32px; font-weight: 900; line-height: 1; letter-spacing: -1px;
+    color: #e3bd48; text-shadow: 0 4px 30px rgba(227,189,72,0.28); margin: 2px 0 0;
   }
-  .promo .sub { font-size: 15px; font-weight: 800; color: #f3f5f1; letter-spacing: .5px; }
+  .promo .sub { font-size: 11.5px; font-weight: 800; color: #f3f5f1; letter-spacing: .5px; }
+  .promo .note { font-size: 10.5px; font-weight: 700; color: #8fa090; margin-top: 2px; }
 
   /* Copy */
-  .pitch { text-align: center; color: #a7b7a8; font-size: 14.5px; line-height: 1.5; margin: 20px 4px 16px; }
+  .pitch { text-align: center; color: #a7b7a8; font-size: 11.5px; line-height: 1.35; margin: 7px 4px 6px; }
 
   /* Form */
-  .qname { text-align: center; font-size: 14px; font-weight: 800; color: #eaf2ea; margin-bottom: 10px; }
+  .qname { text-align: center; font-size: 12.5px; font-weight: 800; color: #eaf2ea; margin-bottom: 5px; }
   input {
-    width: 100%; padding: 16px 18px; font-size: 17px; color: #fff; text-align: center;
+    width: 100%; padding: 10px 12px; font-size: 15px; color: #fff; text-align: center;
     background: #0a0f0a; border: 1px solid rgba(255,255,255,0.15); border-radius: 14px; outline: none;
     transition: border-color .2s, box-shadow .2s;
   }
   input::placeholder { color: #667766; }
   input:focus { border-color: #25d366; box-shadow: 0 0 0 3px rgba(37,211,102,0.16); }
   .cta {
-    width: 100%; margin-top: 12px; padding: 17px; font-size: 17px; font-weight: 900; letter-spacing: .4px;
+    width: 100%; margin-top: 7px; padding: 11px; font-size: 14px; font-weight: 900; letter-spacing: .4px;
     color: #05230f; background: linear-gradient(135deg, #2ce06e, #0f9a4b);
     border: none; border-radius: 14px; cursor: pointer;
     display: flex; align-items: center; justify-content: center; gap: 9px;
@@ -78,8 +81,8 @@
   .cta:hover { filter: brightness(1.06); }
   .cta:active { transform: scale(0.99); }
   .cta:disabled { filter: saturate(.5) brightness(.85); cursor: default; }
-  .hint { text-align: center; font-size: 12px; color: #6b786c; margin-top: 9px; }
-  .msg { text-align: center; font-size: 13px; min-height: 16px; margin-top: 8px; }
+  .hint { text-align: center; font-size: 11px; color: #6b786c; margin-top: 5px; margin-bottom: 4px; }
+  .msg { text-align: center; font-size: 13px; min-height: 0; margin-top: 0; } .msg.err { margin-top: 6px; }
   .msg.err { color: #ff9090; }
 
   .spin {
@@ -92,11 +95,11 @@
   /* Trust */
   .trust {
     display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap;
-    margin-top: 22px; font-size: 12.5px; color: #8fa090;
+    margin-top: 12px; font-size: 11.5px; color: #8fa090;
   }
   .trust span { display: inline-flex; align-items: center; gap: 6px; }
   .trust .d { width: 5px; height: 5px; border-radius: 50%; background: #25d366; }
-  .legal { text-align: center; font-size: 11px; color: #5d6a5e; line-height: 1.6; margin-top: 24px; }
+  .legal { text-align: center; font-size: 10px; color: #5d6a5e; line-height: 1.5; margin-top: 12px; }
 
   /* Pantalla de credenciales */
   .done { display: none; text-align: center; margin-top: 24px; }
@@ -132,24 +135,111 @@
     text-decoration: underline; cursor: pointer; background: none; border: none;
   }
   @media (prefers-reduced-motion: reduce) { .spin { animation: none; } .done.on, .pop.on { animation: none; } }
+
+  /* ── Plataformas (3 íconos) y servicios resumidos (sólo título) — pedido del owner 2026-10-19 ── */
+  /* #552: carrusel de juegos (como el Inicio de la app) */
+  .games-h { display: flex; align-items: baseline; justify-content: space-between; margin-top: 8px; padding: 0 2px; }
+  .games-h b { font-size: 13px; font-weight: 900; color: #eaf2ea; } .games-h small { font-size: 11px; color: #8fa090; display: inline-flex; align-items: center; gap: 5px; }
+  .games-h .d { width: 6px; height: 6px; border-radius: 50%; background: #25d366; box-shadow: 0 0 0 3px rgba(37,211,102,.2); display: inline-block; }
+  .games { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 6px -4px 0; padding: 0 4px 4px; }
+  .games::-webkit-scrollbar { display: none; }
+  .game { flex: 0 0 29%; max-width: 128px; scroll-snap-align: start; border-radius: 14px; overflow: hidden; background: #161622; border: 1px solid rgba(255,255,255,0.08); }
+  .game img { width: 100%; aspect-ratio: 300 / 330; height: auto; object-fit: contain; display: block; background: #161622; }
+  .game .gn { display: block; padding: 5px 7px 1px; font-size: 10.5px; font-weight: 800; color: #eaf2ea; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .game .gp { display: flex; align-items: center; gap: 4px; padding: 0 7px 6px; font-size: 10px; color: #8fa090; }
+  .game .gp i { width: 6px; height: 6px; border-radius: 50%; background: #25d366; display: inline-block; } .game .gp b { color: #eaf2ea; transition: opacity .25s; } .game .gp b.tick { opacity: .35; }
+  /* #554: "Todo nuestro servicio" plegable arriba + plataformas en una fila afuera */
+  details.svc { margin-top: 6px; border-radius: 14px; border: 1.5px solid rgba(227,189,72,0.55); background: linear-gradient(160deg, rgba(227,189,72,0.16), rgba(15,122,61,0.10)), #0e140e; padding: 0; }
+  details.svc summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; }
+  details.svc summary::-webkit-details-marker { display: none; }
+  .svc-t { font-size: 13.5px; font-weight: 900; color: #e3bd48; letter-spacing: .3px; }
+  .svc-more { font-size: 11px; font-weight: 800; color: #0b0f0b; background: #e3bd48; border-radius: 999px; padding: 4px 9px; display: inline-flex; align-items: center; gap: 4px; }
+  .svc-more i { font-style: normal; transition: transform .2s; } details[open] .svc-more i { transform: rotate(180deg); }
+  .svc-more .on-open { display: none; } details[open] .svc-more .on-open { display: inline; } details[open] .svc-more .on-closed { display: none; }
+  .svc-body { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 10px 10px; }
+  .sv { display: flex; gap: 7px; align-items: flex-start; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 11px; padding: 7px 8px; }
+  .sv i { width: 22px; height: 22px; flex: 0 0 22px; border-radius: 50%; background: rgba(227,189,72,0.16); color: #e3bd48; display: inline-flex; align-items: center; justify-content: center; } .sv i svg { width: 12px; height: 12px; }
+  .sv b { display: block; font-size: 11px; font-weight: 900; color: #eaf2ea; line-height: 1.2; } .sv b span { color: #25d366; }
+  .sv small { display: block; font-size: 9.5px; color: #8fa090; line-height: 1.3; margin-top: 1px; }
+  .plats-box { margin-top: 6px; }
+  .plats-k { text-align: center; font-size: 11px; font-weight: 900; color: #eaf2ea; margin-bottom: 5px; }
+  .plats-box .plats { grid-template-columns: 1fr; max-width: 170px; margin: 0 auto; gap: 6px; }
+  .plats-box .plat { padding: 7px 4px 6px; border-radius: 12px; font-size: 10.5px; gap: 4px; }
+  .plats-box .plat img, .plats-box .plat .ini { width: 28px; height: 28px; border-radius: 9px; }
+  /* centrado robusto (la página y el popup se veían corridos) */
+  html, body { overflow-x: hidden; }
+  .top, main { margin: 0 auto; }
+  .pop { width: 100vw; padding: 20px; }
+  .pop .box { width: min(100%, 340px); margin: 0 auto; }
+  /* (viejo bloque unificado, ya no se usa) */
+  .svc { margin-top: 10px; background: #0e140e; border: 1px solid rgba(255,255,255,0.10); border-radius: 16px; padding: 10px 10px 10px; }
+  .svc-h { text-align: center; margin-bottom: 8px; } .svc-h b { display: block; font-size: 13px; font-weight: 900; color: #eaf2ea; } .svc-h small { font-size: 10.5px; color: #8fa090; }
+  .plats-h { display: none; }
+  .plats-h b { display: block; font-size: 13px; font-weight: 800; color: #eaf2ea; }
+  .plats-h small { font-size: 11px; color: #8fa090; }
+  .plats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 0; }
+  /* #545 (owner): fondo BLANCO en las plataformas (sobre el fondo oscuro los logos se veían tapados) */
+  .plat { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; background: #ffffff; border: 1px solid rgba(255,255,255,0.35); border-radius: 12px; padding: 8px 4px 6px; font-size: 10.5px; font-weight: 800; color: #111; }
+  .plat img, .plat .ini { width: 30px; height: 30px; border-radius: 9px; object-fit: cover; background: #fff; }
+  .plat .ini { display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #e3bd48, #9c853a); color: #0b0f0b; font-size: 18px; font-weight: 900; }
+  .plat small { position: absolute; top: 6px; right: 6px; font-size: 8px; font-weight: 800; letter-spacing: .3px; text-transform: uppercase; color: #6f6f6f; background: #f1f1f1; border-radius: 999px; padding: 2px 6px; }
+  .plat.soon { color: #6f6f6f; } .plat.soon img { filter: grayscale(.4); opacity: .85; }
+  .sys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 8px; }
+  .sy { display: inline-flex; align-items: center; justify-content: center; gap: 4px; background: #0a0f0a; border: 1px solid rgba(255,255,255,0.10); border-radius: 999px; padding: 5px 4px; font-size: 9.5px; font-weight: 700; color: #eaf2ea; white-space: nowrap; overflow: hidden; }
+  .sy i { width: 16px; height: 16px; flex: 0 0 16px; border-radius: 50%; background: rgba(227,189,72,0.14); color: #e3bd48; display: inline-flex; align-items: center; justify-content: center; }
+  .sy i svg { width: 10px; height: 10px; }
+  .sy b { color: #25d366; font-weight: 900; }
+  /* Barra de progreso: nombre → cuenta creada → entra solo */
+  .prog { display: none; margin-top: 14px; text-align: center; }
+  .prog.on { display: block; }
+  .prog b { display: block; font-size: 15px; font-weight: 900; color: #eaf2ea; margin-bottom: 8px; }
+  .bar { width: 100%; max-width: 300px; height: 10px; margin: 0 auto; border-radius: 999px; background: #0a0f0a; border: 1px solid rgba(255,255,255,0.10); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 35%; margin-left: -35%; border-radius: 999px; background: linear-gradient(135deg, #2ce06e, #0f9a4b); animation: bar 1.6s ease-in-out infinite; }
+  .prog.in .bar i { width: 95%; margin-left: 0; animation: none; transition: width .9s ease; }
+  @keyframes bar { to { margin-left: 100%; } }
+  .prog small { display: block; margin-top: 8px; font-size: 11.5px; color: #8fa090; }
+  .refhint { display: none; margin: 0 0 10px; text-align: center; font-size: 12px; font-weight: 800; color: #e3bd48; background: rgba(227,189,72,0.10); border: 1px solid rgba(227,189,72,0.35); border-radius: 999px; padding: 6px 10px; }
+  .refhint.on { display: block; }
+  /* #800 (owner): "crear usuario más grande" */
+  .cta#cta { padding: 17px 16px !important; font-size: 18px !important; letter-spacing: .6px !important; border-radius: 16px !important; box-shadow: 0 8px 24px rgba(15, 154, 75, .35); animation: ctaPulse 1.6s ease-in-out infinite; }
+  @keyframes ctaPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+  @media (prefers-reduced-motion: reduce) { .cta#cta { animation: none; } }
 </style>
 </head>
 <body>
   <div class="top">
-    <div class="logo"><span class="g">1</span><span class="x">GIROX</span></div>
+    <div class="logo"><span><span class="mark"><span class="g">1</span><span class="x">GIROX</span></span><small>oficial · agente 24 hs</small></span></div>
     <div class="plus18">+18</div>
   </div>
 
   <main>
+    <!-- #554 (owner): "Todo nuestro servicio" ARRIBA, bien remarcado y plegable (Ver todo = el detalle); las plataformas debajo, afuera -->
+    <details class="svc" id="svc">
+      <summary><span class="svc-t">⭐ Todo nuestro servicio</span><span class="svc-more"><b class="on-closed">Ver todo</b><b class="on-open">Cerrar</b> <i>▾</i></span></summary>
+      <div class="svc-body">
+        <div class="sv" data-s="carga"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13.5H11l-1 8.5 8.5-11.5H12z"/></svg></i><div><b>Carga con agente 24 hs</b><small>Mandás el comprobante por el chat y un agente te acredita en minutos, a toda hora.</small></div></div>
+        <div class="sv" data-s="reembolso"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/></svg></i><div><b>Reembolso por rango <span id="sysRefund"></span></b><small>Sobre lo que perdés en el período. Subís de rango y cobrás más, desde la app.</small></div></div>
+        <div class="sv" data-s="ruleta"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M6.4 6.4l11.2 11.2M17.6 6.4L6.4 17.6"/></svg></i><div><b>Ruleta diaria</b><small>Un giro por día con % extra y premios en plata.</small></div></div>
+        <div class="sv" data-s="fueguito"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1 3 4 4.5 4 8.5a4 4 0 0 1-8 0c0-1.5.5-2.5 1.5-3.5.3 1.2 1 2 2 2.5C11.5 8 11 5.5 12 3z"/><path d="M8 13c-1.5 1.5-2 3-2 4.5a6 6 0 0 0 12 0c0-1.5-.5-3-2-4.5"/></svg></i><div><b>Fueguito 🔥</b><small>Mantené la racha de cargas y cobrás premios en efectivo.</small></div></div>
+        <div class="sv" data-s="referidos"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><circle cx="17" cy="9" r="2.6"/><path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M15.5 14.2c2.6.3 4.5 2.4 4.5 4.8"/></svg></i><div><b>Referidos <span id="sysRef"></span></b><small>Invitás amigos y cobrás un % de su actividad, todos los meses.</small></div></div>
+        <div class="sv" data-s="vip"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 10H5z"/><path d="M5 20h14"/></svg></i><div><b>Niveles VIP</b><small>Subís de nivel con bonos y rakeback.</small></div></div>
+        <div class="sv" data-s="soporte"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12.5a7.5 7.5 0 0 1-11 6.6L4 20l1.2-4.4A7.5 7.5 0 1 1 20 12.5z"/></svg></i><div><b>Agente real 24 hs</b><small>Una persona te responde por chat, de día y de noche.</small></div></div>
+        <div class="sv" data-s="retiros"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h3"/></svg></i><div><b>Retiros a tu CBU</b><small>Un agente los confirma y salen al toque.</small></div></div>
+      </div>
+    </details>
+    <!-- #557 (owner): "Elegí dónde jugar" arriba y las 3 plataformas debajo, en 3 columnas (la fila horizontal se salía de la pantalla) -->
+    <div class="plats-box"><div class="plats-k">Jugás en</div><div class="plats" id="plats"></div></div>
+
     <!-- Pantalla 1: bono + form -->
     <section id="scForm">
       <div class="promo">
         <div class="eyebrow">Bono de bienvenida</div>
         <div class="big" id="bonusBig">100%</div>
         <div class="sub" id="bonusSub">EN TU PRIMERA CARGA</div>
+        <div class="note" id="bonusNote" style="display:none;"></div>
       </div>
 
-      <p class="pitch">Creá tu cuenta en un click y entrá a jugar. Sin formularios, sin esperas.</p>
+      <p class="pitch">Creá tu cuenta en un click y entrá a jugar. Cargás por el chat con un agente real, las 24 hs.</p>
 
       <form id="form" autocomplete="off">
         <div class="qname">¿Cuál es tu nombre?</div>
@@ -159,11 +249,18 @@
         <div class="msg" id="msg" role="status" aria-live="polite"></div>
       </form>
 
-      <div class="trust">
-        <span><i class="d"></i>Acreditación al instante</span>
-        <span><i class="d"></i>Retiros rápidos</span>
-        <span><i class="d"></i>Soporte 24/7</span>
+      <!-- Barra de progreso: la cuenta se crea y ENTRA solo (usuario y clave quedan en Perfil, dentro de la app) -->
+      <div class="prog" id="prog" aria-live="polite">
+        <b id="progTxt">Creando tu cuenta…</b>
+        <div class="bar"><i></i></div>
+        <small>Tu usuario y tu clave quedan en Perfil. Es la misma clave para la app y para la plataforma.</small>
       </div>
+
+      <!-- #546 (owner): se sacó la línea de confianza (acreditación · retiros · soporte) -->
+
+      <!-- #552 (owner): carrusel de juegos (las fotos del Inicio de la app) y debajo TODO el servicio en un solo bloque -->
+      <div class="games-h"><b>Top juegos</b><small><i class="d"></i><span id="gamesLive">0</span> jugando ahora</small></div>
+      <div class="games" id="games"></div>
 
       <p class="legal">
         Bono sujeto a términos: aplica sobre la primera carga. Solo nuevos jugadores.<br>
@@ -197,10 +294,14 @@
 <script>
 (function () {
   // ==== CONFIGURAR ====
-  var API_BASE_DEFAULT = 'https://cargas1girox.com'; // ⚠️ backend de CARGAS 1GIROX (este repo, PUBLIC_BASE_URL). NO es vipcargas.com (ese tiene challenge de Cloudflare y rompe el CORS) ni picaroja.com (otra página).
+  // #225 (owner 2026-11-03): landing con el diseño de la de PICACOMPARTIDO (servicios plegables, plataforma, carrusel de
+  // juegos, barra de progreso) adaptada a ESTA página = carga MANUAL con un agente 24 hs (la otra es carga automática).
+  // Los % reales (reembolso, referidos, bono por instalar la app) salen de GET /api/landing/info de este backend: nada hardcodeado.
+  var API_BASE_DEFAULT = 'https://cargas1girox.com'; // ⚠️ backend de CARGAS 1GIROX (este repo, PUBLIC_BASE_URL). NO es vipcargas.com (ese tiene challenge de Cloudflare y rompe el CORS) ni el dominio de otra página.
   var CAMPAIGN_CODE = '';                            // fijo, o vacío = tomar de la URL
   var BONUS_BIG = '100%';                             // ⚠️ tu oferta REAL
   var BONUS_SUB = 'EN TU PRIMERA CARGA';
+  // La línea chica debajo del bono ("+X% EXTRA instalando la app") se pinta SOLO si el backend dice que el bono por instalar está ACTIVO (#222).
   // ====================
 
   // Override del backend por URL (para PROBAR contra otro entorno sin editar el
@@ -217,12 +318,48 @@
   document.getElementById('bonusBig').textContent = BONUS_BIG;
   document.getElementById('bonusSub').textContent = BONUS_SUB;
 
-  // PIXEL DEL NAVEGADOR de Meta (owner 2026-08-26). Antes la landing NO tenía
-  // pixel → el asistente de Meta decía "no se encontraron píxeles" y el _fbp real
-  // no se creaba (se generaba uno sintético). Ahora se carga fbevents.js y se
-  // inicializan los Pixel IDs que sirve el backend desde SSM (propio + partners):
-  // genera el _fbp REAL, dispara PageView y permite DEDUP navegador+CAPI del
-  // CompleteRegistration (con el mismo event_id `reg_<id>`).
+  // ── #552: carrusel de juegos (fotos del Inicio de la app) con "N jugando" que varía rato a rato ──
+  (function games() {
+    var LIST = [['fortune-garuda-1000', 'Fortune Garuda 1000'], ['jokers-jewel', "Joker's Jewel"], ['fortune-garuda-500', 'Fortune Garuda 500'], ['fortune-tiger', 'Fortune Tiger'], ['fortune-gems-2', 'Fortune Gems 2'], ['fortune-rabbit', 'Fortune Rabbit'], ['fortune-gems', 'Fortune Gems'], ['fortune-dragon', 'Fortune Dragon'], ['golden-joker', 'Golden Joker']];
+    var box = document.getElementById('games'); if (!box) return;
+    var n = {}; LIST.forEach(function (g) { n[g[0]] = 50 + Math.floor(Math.random() * 151); });
+    box.innerHTML = LIST.map(function (g) { return '<div class="game" data-g="' + g[0] + '"><img src="img/games/' + g[0] + '.jpg" alt="' + g[1].replace(/"/g, '') + '" loading="lazy"><span class="gn">' + g[1].replace(/</g, '') + '</span><span class="gp"><i></i><b>' + n[g[0]] + '</b> jugando</span></div>'; }).join('');
+    function total() { var t = 0; LIST.forEach(function (g) { t += n[g[0]]; }); var e = document.getElementById('gamesLive'); if (e) e.textContent = t; }
+    total();
+    setInterval(function () {
+      if (document.hidden) return;
+      LIST.forEach(function (g) {
+        if (Math.random() > 0.45) return;
+        var d = (Math.random() < 0.5 ? -1 : 1) * (1 + Math.floor(Math.random() * 9));
+        var v = Math.max(50, Math.min(200, n[g[0]] + d)); if (v === n[g[0]]) return; n[g[0]] = v;
+        var el = box.querySelector('.game[data-g="' + g[0] + '"] b'); if (!el) return;
+        el.textContent = v; el.classList.remove('tick'); void el.offsetWidth; el.classList.add('tick');
+      });
+      total();
+    }, 9000);
+  })();
+
+  // ── La plataforma (esta página es SOLO 1girox; logo local en img/) ──
+  (function () {
+    var box = document.getElementById('plats'); if (!box) return;
+    box.innerHTML = '<span class="plat"><img src="img/girox.png" alt="">1GIROX</span>';
+  })();
+  // ── % REALES desde este backend (#225 GET /api/landing/info); si no responde, los títulos quedan sin número. ──
+  try {
+    fetch(API_BASE + '/api/landing/info').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      if (!d) return;
+      try { var rf = d.refunds || {}; var mp = Number(rf.maxPct); if (mp > 0) document.getElementById('sysRefund').textContent = 'hasta ' + mp + '%'; } catch (e) {}
+      try { var rp = Number(d.referralPct); if (rp > 0) document.getElementById('sysRef').textContent = rp + '%'; } catch (e) {}
+      // Bono por instalar la app (#188/#222): se promete SOLO si está activo en el panel.
+      try {
+        var ib = d.installBonus, note = document.getElementById('bonusNote');
+        if (ib && Number(ib.pct) > 0 && note) { note.textContent = '+' + Number(ib.pct) + '% EXTRA instalando la app' + (Number(ib.capArs) > 0 ? ' (hasta $' + Number(ib.capArs).toLocaleString('es-AR') + ')' : ''); note.style.display = ''; }
+      } catch (e) {}
+      // Ruleta diaria apagada en el panel → no se promete.
+      try { if (d.rouletteEnabled === false) { var r = document.querySelector('.sv[data-s="ruleta"]'); if (r) r.style.display = 'none'; } } catch (e) {}
+    }).catch(function () {});
+  } catch (e) {}
+
   // ============================================================
   // ESCAPE del navegador EMBEBIDO de Instagram/Facebook/TikTok (#260).
   // Los anuncios abren la landing DENTRO de la app (webview): la cuenta queda
@@ -298,12 +435,10 @@
     else document.addEventListener('DOMContentLoaded', mount);
   })();
 
+  // Píxel de Meta por campaña/publicista (#214): el backend dice qué píxeles cargar (GET /api/meta-pixel-id?c=<campaña>);
+  // si no hay ninguno para esta campaña no se carga fbq. El registro dispara CompleteRegistration con el eventID que
+  // devuelve el backend (metaEventId) para que Meta deduplique con la CAPI server-side.
   (function loadMetaPixel() {
-    // Qué pixel carga la landing lo decide el backend según la campaña del
-    // visitante (/api/meta-pixel-id?c=CODIGO): SOLO el pixel del publicista de esa
-    // campaña. Sin código → NINGÚN pixel (ni siquiera se carga fbevents.js). El
-    // pixel propio no va al navegador; recibe registro/compra por CAPI (2026-08-28).
-    // Si el fetch falla, tampoco se carga nada (el _fbp sintético cubre el signup).
     var _inited = false;
     function initPixels(ids) {
       if (_inited || !ids || !ids.length) return;
@@ -318,7 +453,7 @@
     try {
       var _pixCampaign = '';
       try { _pixCampaign = resolveCampaign() || ''; } catch (e) {}
-      if (!_pixCampaign) return; // sin campaña → sin pixel
+      if (!_pixCampaign) return;
       fetch(API_BASE + '/api/meta-pixel-id?c=' + encodeURIComponent(_pixCampaign))
         .then(function (r) { return r.json(); })
         .then(function (d) { initPixels(d && d.pixelIds ? d.pixelIds : []); })
@@ -396,6 +531,10 @@
     cta.disabled = true;
     ctaLabel.textContent = 'Creando tu cuenta';
     var sp = document.createElement('span'); sp.className = 'spin'; cta.appendChild(sp);
+    // Barra de progreso: se ve mientras se crea la cuenta y hasta que entra a la app.
+    var prog = document.getElementById('prog'), progTxt = document.getElementById('progTxt');
+    form.style.display = 'none'; prog.classList.remove('in'); prog.classList.add('on'); progTxt.textContent = 'Creando tu cuenta…';
+    var progFail = function () { prog.classList.remove('on'); form.style.display = ''; };
 
     fetch(API_BASE + '/api/landing/signup', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -413,6 +552,7 @@
         // Las credenciales viajan en el FRAGMENTO (#lc=...) — el fragmento no
         // llega al servidor ni queda en logs; la PWA lo lee y limpia la URL.
         var dest = res.d.accessUrl || res.d.enterUrl;
+        if (!(dest === API_BASE || String(dest).indexOf(API_BASE + '/') === 0)) dest = API_BASE + '/'; // sólo al backend (idea del #553 de la otra página)
         try {
           dest += '#lc=' + encodeURIComponent((res.d.username || '') + ':' + (res.d.password || ''));
         } catch (e) {}
@@ -429,14 +569,18 @@
           }
         } catch (e) {}
         ctaLabel.textContent = 'Entrando';
+        progTxt.textContent = 'Entrando a tu cuenta…'; prog.classList.add('in');
+        // Entra DIRECTO a la sesión: el link de acceso loguea solo; usuario y clave quedan en Perfil dentro de la app.
         window.location.href = dest;
       } else {
+        progFail();
         cta.disabled = false; sp.remove(); ctaLabel.textContent = 'CREAR MI CUENTA';
         msg.className = 'msg err';
         msg.textContent = (res.d && res.d.error) || 'No pudimos crear tu cuenta. Probá de nuevo.';
       }
     })
     .catch(function () {
+      progFail();
       cta.disabled = false; sp.remove(); ctaLabel.textContent = 'CREAR MI CUENTA';
       msg.className = 'msg err'; msg.textContent = 'Sin conexión. Probá de nuevo.';
     });

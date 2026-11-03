@@ -5,7 +5,8 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-11-03 (d)** — sección propia "🏛️ Bancos — Configuración" en el panel
+> Última actualización: **2026-11-03 (e)** — landing `landing/` con el diseño de PICACOMPARTIDO adaptada a
+> carga manual con agente 24 hs + `GET /api/landing/info` público (#225, §4.10). Antes (d): sección propia "🏛️ Bancos — Configuración" en el panel
 > (#224: todo lo de bancos salió de COMANDOS; mismos ids/endpoints). Antes (c): hasta 3 cuentas hgcash con cuenta ACTIVA rotable con un
 > botón (`Config['hgcashAccounts']`, #223; las cargas entran por todas, la activa paga y es lo que ve el cliente,
 > cada pago recuerda su cuenta). Antes (misma fecha, b): interruptor del bono por instalar la app
@@ -675,8 +676,14 @@ VIPCARGAS con su JWT, y el cliente nunca más necesita conocer su clave del casi
 
 ### 4.10 Alta por LANDING externa (2026-08-19; landing nueva + `ir=creds` #198)
 
-**Carpeta `landing/` (#198, 2026-10-19):** es la landing de `PAUTANUEVAsantino/landing`
-copiada tal cual (`index.html` + `vercel.json` + `blank.html` + `demo.html`), con
+**Carpeta `landing/` (#198, 2026-10-19 → #225, 2026-11-03):** `index.html` tiene el DISEÑO de la
+landing de PICACOMPARTIDO (servicios plegables, plataforma única 1GIROX, carrusel de juegos
+`img/games/`, barra de progreso) adaptado a esta página = carga MANUAL con agente 24 hs; los %
+que muestra (reembolso máximo por rango, referidos, bono por instalar la app sólo si está activo,
+ruleta sólo si está prendida) salen de **`GET /api/landing/info`** (público, cache 60 s, en
+`LANDING_OPEN_CORS_PATHS`; devuelve `{ baseUrl, refunds, referralPct, installBonus|null,
+rouletteEnabled }`). Sin `?ref=` (el signup de acá no acepta referido) ni carga mínima. El resto
+(`vercel.json` + `blank.html` + `demo.html`) sigue siendo lo de PAUTANUEVAsantino, con
 `API_BASE_DEFAULT = 'https://cargas1girox.com'` (el `PUBLIC_BASE_URL` de este repo;
 ⚠️ NO `vipcargas.com`: ese dominio tiene challenge de Cloudflare y el preflight vuelve 403
 HTML sin CORS → la landing muestra "Sin conexión"). Se deploya aparte (Vercel: `vercel.json`
