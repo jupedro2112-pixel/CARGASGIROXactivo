@@ -921,7 +921,13 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   `_hgApplyActiveToConfigs` escribe `hgcash.accountName/cbu/accountId` y `Config['cbu']`. **TODAS
   reciben:** `_hgcashWebhookSecretEntries()` → el webhook acepta la firma de cualquiera y guarda por
   cuál entró en `BankMovement.accountKey`; `_comprobanteToOurBank` reconoce el CBU/titular de
-  cualquiera. **Cada pago recuerda su cuenta** (`PendingPayout.hgAccountKey`, `BankSweep.hgAccountKey`):
+  cualquiera. **Qué cuentas cargan solas (#223b):** `incomingMode 'all'|'active'` (todas / solo la en
+  uso) + `accounts[].incomingEnabled` (pausa por cuenta) → `_hgAccountReceives(a)`; un movimiento de una
+  cuenta que no recibe se registra igual pero queda `pending` en la bandeja con `chargeError`
+  explicativo (`_hgMovementAutoOff`: `hgcashMatchFromMovement` lo saltea, `hgcashMatchFromComprobante`
+  no lo toma de candidato, `_comprobanteToOurBank` ignora su CBU/titular); asignar a mano sigue
+  funcionando. `POST /api/admin/hgcash/accounts/incoming-mode` y `POST …/:key/incoming`.
+  **Cada pago recuerda su cuenta** (`PendingPayout.hgAccountKey`, `BankSweep.hgAccountKey`):
   `hgcashService` acepta `token` opcional en todas las llamadas y las consultas de estado/recibo pasan
   `_hgTokenFor(key)` → rotar no rompe los pagos en curso. El pago/bajada recarga las cuentas antes de
   resolver (`_loadHgcashCredentials()`), así el cambio aplica al instante en todas las instancias.

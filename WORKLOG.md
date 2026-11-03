@@ -38,6 +38,14 @@
   …últimos 4, datos de pago, botones **🔁 USAR ESTA** / ✏️ Editar / 🗑️, formulario Agregar/Editar, "Borrar todas y volver a AWS". En **🏦 Banco** hay una
   barra "Cuenta hgcash en uso: X [select] 🔁 USAR ESTA" (visible con 2+ cuentas; la ve el encargado). Badge HG de movimientos/bandeja muestra la
   cuenta (verde = en uso). Resumen de Bancos automáticos dice qué cuenta paga.
+- **#223b (owner: "que se pueda activar o desactivar que cargue automática de las 3 o solo de la activa, o desactivar alguna") — admin-sw v61:**
+  `Config['hgcashAccounts'].incomingMode` `'all'` (default) | `'active'` y `accounts[].incomingEnabled` (default true). `_hgAccountReceives(a)` decide;
+  `_hgMovementAutoOff(m)` da el motivo. Una transferencia a una cuenta que NO recibe se registra igual (el webhook la acepta, queda en el libro y en
+  la bandeja como `pending` con `chargeError` explicativo) pero `hgcashMatchFromMovement` no la carga, `hgcashMatchFromComprobante` no la toma de
+  candidata y `_comprobanteToOurBank` ignora su CBU/titular; la asignación a mano desde la bandeja sigue andando. Endpoints (admin/depositor/withdrawer):
+  `POST /api/admin/hgcash/accounts/incoming-mode {mode}` y `POST /api/admin/hgcash/accounts/:key/incoming {enabled}`; avisan si queda NINGUNA cuenta
+  recibiendo. Panel: radio "⚡ Cargas automáticas: por todas / solo por la cuenta en uso" en la card y select en la barra de 🏦 Banco; por cuenta
+  botón ⏸️ Pausar cargas / ▶️ Reanudar cargas y línea de estado (recibe / pausada / no carga sola por el modo).
 - **Pendiente del owner tras el deploy:** cada cuenta hgcash nueva necesita el webhook dado de alta en hgcash apuntando a la MISMA URL
   (`/api/hgcash/webhook`) con su propio secreto; cargar titular/CBU/alias en cada cuenta para que el cliente vea los datos correctos al rotar.
 - Validado con `node --check` (server.js, hgcashService, 3 modelos, admin.js, admin-sw) + `check-tdz`. Docs: ARCHITECTURE (§5 auto-carga, §2

@@ -2074,7 +2074,8 @@ function _comprobanteToOurBank(comprobante, cfg) {
   const cfgCbu = _digits(cfg.cbu);
   if (cfgCbu && _digits(comprobante.destCbu) === cfgCbu) return true;
   if (cfg.accountName && _nameMatch(comprobante.destHolder, cfg.accountName)) return true;
-  for (const a of _hgAccounts) { // #223 cualquiera de las cuentas hgcash cargadas (no solo la activa)
+  for (const a of _hgAccounts) { // #223 cualquiera de las cuentas hgcash cargadas que RECIBA cargas (#223b: modo/pausa)
+    if (!_hgAccountReceives(a)) continue;
     if (a.cbu && _digits(comprobante.destCbu) === a.cbu) return true;
     const nm = a.accountName || a.titular;
     if (nm && _nameMatch(comprobante.destHolder, nm)) return true;
@@ -2824,6 +2825,12 @@ async function hgcashMatchFromMovement(movement) {
     const cfg = await _bankCfgForMovement(movement); // #217: cada movimiento se gatea con la config de SU banco
     if (!cfg.enabled) return;
     if (!movement || movement.direction !== 'Inbound' || movement.matchStatus !== 'pending') return;
+    const _autoOff = _hgMovementAutoOff(movement); // #223b cuenta pausada / modo "solo la en uso" → queda en la bandeja, sin carga sola
+    if (_autoOff) {
+      if (!movement.chargeError) BankMovement.updateOne({ movementId: movement.movementId, chargeError: null }, { $set: { chargeError: _autoOff } }).catch(() => {});
+      logger.info(`[hgcash] movimiento ${movement.movementId} sin carga automática: ${_autoOff}`);
+      return;
+    }
     if (!_statusAccredited(movement.status, cfg)) return; // todavía no acreditado (status != done)
     if (cfg.currency && movement.currency && String(movement.currency).toUpperCase() !== String(cfg.currency).toUpperCase()) return;
 
@@ -2882,6 +2889,7 @@ async function hgcashMatchFromComprobante(comprobante) {
     // aporta candidatos).
     const _cfgOf = (m) => (m.provider === 'finpro' ? Object.assign({}, cfg, { enabled: fpCfg.enabled, mode: fpCfg.mode, acceptStatuses: fpCfg.acceptStatuses }) : cfg);
     const matches = candidates.filter(m => {
+      if (_hgMovementAutoOff(m)) return false; // #223b cuenta pausada / modo "solo la en uso"
       const c = _cfgOf(m);
       return c.enabled && _statusAccredited(m.status, c) && _comprobanteMatchesMovement(comprobante, m, c);
     });
@@ -2971,17 +2979,38 @@ function _hgNormStored(a) {
     accountId: a.accountId ? String(a.accountId) : null, accountName: String(a.accountName || '').trim().slice(0, 120),
     cbu: String(a.cbu || '').replace(/\D/g, '').slice(0, 22), alias: String(a.alias || '').trim().slice(0, 60),
     bank: String(a.bank || '').trim().slice(0, 60), titular: String(a.titular || '').trim().slice(0, 120),
+    incomingEnabled: a.incomingEnabled !== false, // #223b pausada = sus transferencias NO se cargan solas (quedan en la bandeja)
     updatedBy: a.updatedBy || null, updatedAt: a.updatedAt || null
   };
+}
+// #223b modo de cargas automáticas: 'all' = por todas las cuentas cargadas · 'active' = solo por la cuenta en uso.
+function _hgNormIncomingMode(v) { return String(v || '').toLowerCase() === 'active' ? 'active' : 'all'; }
+let _hgIncomingMode = 'all';
+// ¿Esta cuenta recibe cargas automáticas? (modo global + pausa por cuenta). key null (SSM) → sí.
+function _hgAccountReceives(a) {
+  if (!a) return true;
+  if (a.incomingEnabled === false) return false;
+  if (_hgIncomingMode === 'active' && a.key !== _hgActiveKey) return false;
+  return true;
+}
+// Motivo por el que un movimiento hgcash NO se carga solo (null = sí se carga). Para el matcheo.
+function _hgMovementAutoOff(m) {
+  if (!m || m.provider === 'finpro' || !_hgAccounts.length) return null;
+  const a = (m.accountKey && _hgAccountByKey(m.accountKey))
+    || (m.accountId && _hgAccounts.find(x => x.accountId && String(x.accountId) === String(m.accountId))) || null;
+  if (!a || _hgAccountReceives(a)) return null;
+  return a.incomingEnabled === false
+    ? `Sin carga automática: la cuenta "${_hgAccountLabel(a)}" está PAUSADA para cargas (panel). Asignala a mano si corresponde.`
+    : `Sin carga automática: solo carga la cuenta en uso y esta entró por "${_hgAccountLabel(a)}". Asignala a mano si corresponde.`;
 }
 // Lee Config['hgcashAccounts']; si no existe, migra lo del #192 (Config['hgcashCredentials']) a 'a1'.
 async function _hgReadAccountsConfig() {
   const v = await getConfig('hgcashAccounts', null);
   if (v && Array.isArray(v.accounts)) {
-    return { accounts: v.accounts.map(_hgNormStored).filter(a => a.key), activeKey: v.activeKey || null, switchedBy: v.switchedBy || null, switchedAt: v.switchedAt || null };
+    return { accounts: v.accounts.map(_hgNormStored).filter(a => a.key), activeKey: v.activeKey || null, switchedBy: v.switchedBy || null, switchedAt: v.switchedAt || null, incomingMode: _hgNormIncomingMode(v.incomingMode) };
   }
   const legacy = await getConfig('hgcashCredentials', null);
-  if (!legacy || (!legacy.tokenEnc && !legacy.secretEnc)) return { accounts: [], activeKey: null, switchedBy: null, switchedAt: null };
+  if (!legacy || (!legacy.tokenEnc && !legacy.secretEnc)) return { accounts: [], activeKey: null, switchedBy: null, switchedAt: null, incomingMode: 'all' };
   const hg = await getHgcashConfig();
   const cbuCfg = (await getConfig('cbu', null)) || {};
   const a1 = _hgNormStored({
@@ -2995,7 +3024,7 @@ async function _hgReadAccountsConfig() {
     await setConfig('hgcashAccounts', { accounts: [a1], activeKey: 'a1', migratedFrom: 'hgcashCredentials', migratedAt: new Date() });
     logger.warn('[hgcash] #223 credenciales del panel (#192) migradas a la cuenta "a1" de Config[hgcashAccounts]');
   } catch (e) { logger.warn(`[hgcash] migración de cuentas falló: ${e.message}`); }
-  return { accounts: [a1], activeKey: 'a1', switchedBy: null, switchedAt: null };
+  return { accounts: [a1], activeKey: 'a1', switchedBy: null, switchedAt: null, incomingMode: 'all' };
 }
 async function _loadHgcashCredentials() {
   try {
@@ -3011,6 +3040,7 @@ async function _loadHgcashCredentials() {
     _hgAccounts = list;
     _hgActiveKey = (cfg.activeKey && list.some(a => a.key === cfg.activeKey)) ? cfg.activeKey : (list[0] ? list[0].key : null);
     _hgAccountsMeta = { decryptError, switchedBy: cfg.switchedBy || null, switchedAt: cfg.switchedAt || null };
+    _hgIncomingMode = _hgNormIncomingMode(cfg.incomingMode); // #223b
     const act = _hgActiveAccount();
     hgcashPay.setTokenOverride(act ? act.token : null);
     _hgcashCredMeta = act ? { tokenLast4: act.tokenLast4 || null, secretLast4: act.secretLast4 || null, updatedBy: act.updatedBy || null, updatedAt: act.updatedAt || null, decryptError } : null;
@@ -3035,17 +3065,18 @@ function _hgAccountLabelFor(m) {
 function _hgAccountPublic(a) {
   return { key: a.key, label: _hgAccountLabel(a), active: a.key === _hgActiveKey, hasToken: !!a.token, tokenLast4: a.tokenLast4 || null,
     hasSecret: !!a.secret, secretLast4: a.secretLast4 || null, accountId: a.accountId || null, accountName: a.accountName || '',
-    cbu: a.cbu || '', alias: a.alias || '', bank: a.bank || '', titular: a.titular || '', updatedBy: a.updatedBy || null, updatedAt: a.updatedAt || null };
+    cbu: a.cbu || '', alias: a.alias || '', bank: a.bank || '', titular: a.titular || '', updatedBy: a.updatedBy || null, updatedAt: a.updatedAt || null,
+    incomingEnabled: a.incomingEnabled !== false, receives: _hgAccountReceives(a) }; // #223b
 }
 function _hgAccountsPayload() {
-  return { accounts: _hgAccounts.map(_hgAccountPublic), activeKey: _hgActiveKey, max: HG_MAX_ACCOUNTS, tokenSource: hgcashPay.getTokenSource(),
+  return { accounts: _hgAccounts.map(_hgAccountPublic), activeKey: _hgActiveKey, max: HG_MAX_ACCOUNTS, incomingMode: _hgIncomingMode, tokenSource: hgcashPay.getTokenSource(),
     ssmToken: !!process.env.HGCASH_API_TOKEN, ssmSecret: !!process.env.HGCASH_WEBHOOK_SECRET, decryptError: !!_hgAccountsMeta.decryptError,
     switchedBy: _hgAccountsMeta.switchedBy, switchedAt: _hgAccountsMeta.switchedAt, webhookFullUrl: `${getPublicBaseUrl()}/api/hgcash/webhook` };
 }
 // Modifica la config de cuentas (lee → mut(next) → guarda → recarga memoria).
 async function _hgSaveAccountsConfig(mut, by) {
   const cfg = await _hgReadAccountsConfig();
-  const next = { accounts: cfg.accounts, activeKey: cfg.activeKey, switchedBy: cfg.switchedBy, switchedAt: cfg.switchedAt };
+  const next = { accounts: cfg.accounts, activeKey: cfg.activeKey, switchedBy: cfg.switchedBy, switchedAt: cfg.switchedAt, incomingMode: cfg.incomingMode || 'all' };
   await mut(next);
   next.updatedBy = by || null; next.updatedAt = new Date();
   await setConfig('hgcashAccounts', next);
@@ -18821,6 +18852,39 @@ app.delete('/api/admin/hgcash/accounts/:key', authMiddleware, adminMiddleware, a
     logger.warn(`[hgcash] #223 cuenta ${key} BORRADA por ${req.user.username}${_hgAccounts.length ? '' : ' → sin cuentas en el panel, vuelve a SSM'}`);
     res.json(Object.assign({ success: true }, _hgAccountsPayload(), { canEdit: true }));
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+// #223b Modo de cargas automáticas: 'all' (todas las cuentas cargadas) | 'active' (solo la en uso).
+app.post('/api/admin/hgcash/accounts/incoming-mode', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (!_bankCanView(req)) return res.status(403).json({ error: 'Sin permiso' });
+    const mode = _hgNormIncomingMode(req.body && req.body.mode);
+    await _hgSaveAccountsConfig((n) => { n.incomingMode = mode; }, req.user.username);
+    const warnings = [];
+    if (!_hgAccounts.some(_hgAccountReceives)) warnings.push('Con esto NINGUNA cuenta recibe cargas automáticas (la cuenta en uso está pausada). Todas las transferencias van a la bandeja para asignar a mano.');
+    logger.warn(`[hgcash] #223b cargas automáticas: ${mode === 'active' ? 'SOLO la cuenta en uso' : 'por TODAS las cuentas'} (${req.user.username})`);
+    res.json(Object.assign({ success: true, warnings }, _hgAccountsPayload(), { canEdit: req.user.role === 'admin' }));
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+// #223b Pausar / reanudar las cargas automáticas de UNA cuenta (sus transferencias quedan en la bandeja).
+app.post('/api/admin/hgcash/accounts/:key/incoming', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (!_bankCanView(req)) return res.status(403).json({ error: 'Sin permiso' });
+    const key = String(req.params.key || '');
+    const enabled = !(req.body && (req.body.enabled === false || req.body.enabled === 'false'));
+    await _hgSaveAccountsConfig((n) => {
+      const a = n.accounts.find(x => x.key === key);
+      if (!a) throw Object.assign(new Error('Cuenta no encontrada'), { status: 404 });
+      a.incomingEnabled = enabled;
+    }, req.user.username);
+    const a = _hgAccountByKey(key);
+    const warnings = [];
+    if (!_hgAccounts.some(_hgAccountReceives)) warnings.push('Con esto NINGUNA cuenta recibe cargas automáticas. Todas las transferencias van a la bandeja para asignar a mano.');
+    logger.warn(`[hgcash] #223b cuenta "${_hgAccountLabel(a)}" (${key}): cargas automáticas ${enabled ? 'REANUDADAS' : 'PAUSADAS'} (${req.user.username})`);
+    res.json(Object.assign({ success: true, warnings, label: _hgAccountLabel(a) }, _hgAccountsPayload(), { canEdit: req.user.role === 'admin' }));
+  } catch (e) {
+    if (e && e.status === 404) return res.status(404).json({ error: 'Cuenta no encontrada' });
+    res.status(500).json({ error: 'Error del servidor' });
+  }
 });
 app.post('/api/admin/hgcash/accounts/:key/activate', authMiddleware, adminMiddleware, async (req, res) => {
   try {

@@ -80,7 +80,9 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   con el botón "USAR ESTA" (Comandos → Banco automático, o la barra de 🏦 Banco; la pueden tocar
   admin/depositor/withdrawer). La activa paga y es lo que ve el cliente (al activar se reescribe
   `Config['cbu']`); **las cargas entran por TODAS** (el webhook acepta cualquiera de los secretos y
-  etiqueta `BankMovement.accountKey`). Un pago recuerda su cuenta (`hgAccountKey`): toda consulta
+  etiqueta `BankMovement.accountKey`) salvo que el panel diga "solo la en uso" o pause una cuenta
+  (`incomingMode` / `incomingEnabled` → `_hgAccountReceives`; lo pausado queda en la bandeja, no se
+  carga solo — todo matcheo automático nuevo tiene que respetar `_hgMovementAutoOff(m)`). Un pago recuerda su cuenta (`hgAccountKey`): toda consulta
   nueva a hgcash sobre un pago/bajada existente tiene que pasar `_hgTokenFor(x.hgAccountKey)`, y
   todo flujo nuevo que pague tiene que guardar `hgAccountKey: _hgActiveKey`. No volver a leer
   `process.env.HGCASH_API_TOKEN` directo: usar `hgcashPay.getToken()` / `_hgcashWebhookSecretEntries()`. **Reenvío a otras
