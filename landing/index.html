@@ -236,7 +236,7 @@
         <div class="eyebrow">Bono de bienvenida</div>
         <div class="big" id="bonusBig">100%</div>
         <div class="sub" id="bonusSub">EN TU PRIMERA CARGA</div>
-        <div class="note" id="bonusNote" style="display:none;"></div>
+        <div class="note" id="bonusNote">+50% EXTRA instalando la app y activando notificaciones</div>
       </div>
 
       <p class="pitch">Creá tu cuenta en un click y entrá a jugar. Cargás por el chat con un agente real, las 24 hs.</p>
@@ -301,7 +301,7 @@
   var CAMPAIGN_CODE = '';                            // fijo, o vacío = tomar de la URL
   var BONUS_BIG = '100%';                             // ⚠️ tu oferta REAL
   var BONUS_SUB = 'EN TU PRIMERA CARGA';
-  // La línea chica debajo del bono ("+X% EXTRA instalando la app") se pinta SOLO si el backend dice que el bono por instalar está ACTIVO (#222).
+  var BONUS_NOTE = '+50% EXTRA instalando la app y activando notificaciones'; // owner 2026-11-03: línea chica debajo del bono. Si el backend responde, el % se pisa con el REAL del bono por instalar (#188/#222) y se oculta si está APAGADO.
   // ====================
 
   // Override del backend por URL (para PROBAR contra otro entorno sin editar el
@@ -317,6 +317,7 @@
 
   document.getElementById('bonusBig').textContent = BONUS_BIG;
   document.getElementById('bonusSub').textContent = BONUS_SUB;
+  document.getElementById('bonusNote').textContent = BONUS_NOTE; document.getElementById('bonusNote').style.display = BONUS_NOTE ? '' : 'none';
 
   // ── #552: carrusel de juegos (fotos del Inicio de la app) con "N jugando" que varía rato a rato ──
   (function games() {
@@ -350,10 +351,11 @@
       if (!d) return;
       try { var rf = d.refunds || {}; var mp = Number(rf.maxPct); if (mp > 0) document.getElementById('sysRefund').textContent = 'hasta ' + mp + '%'; } catch (e) {}
       try { var rp = Number(d.referralPct); if (rp > 0) document.getElementById('sysRef').textContent = rp + '%'; } catch (e) {}
-      // Bono por instalar la app (#188/#222): se promete SOLO si está activo en el panel.
+      // Bono por instalar la app (#188/#222): el % REAL del panel pisa el fijo; si está APAGADO, no se promete.
       try {
         var ib = d.installBonus, note = document.getElementById('bonusNote');
-        if (ib && Number(ib.pct) > 0 && note) { note.textContent = '+' + Number(ib.pct) + '% EXTRA instalando la app' + (Number(ib.capArs) > 0 ? ' (hasta $' + Number(ib.capArs).toLocaleString('es-AR') + ')' : ''); note.style.display = ''; }
+        if (note && ib === null) note.style.display = 'none';
+        else if (note && ib && Number(ib.pct) > 0) { note.textContent = '+' + Number(ib.pct) + '% EXTRA instalando la app y activando notificaciones'; note.style.display = ''; }
       } catch (e) {}
       // Ruleta diaria apagada en el panel → no se promete.
       try { if (d.rouletteEnabled === false) { var r = document.querySelector('.sv[data-s="ruleta"]'); if (r) r.style.display = 'none'; } } catch (e) {}
