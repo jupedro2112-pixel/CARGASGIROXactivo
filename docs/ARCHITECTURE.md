@@ -5,7 +5,9 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-11-03** — **Bono de 1ª carga por PUBLICISTA (#221)**: regla
+> Última actualización: **2026-11-03 (b)** — interruptor del bono por instalar la app
+> (`Config['installBonus'].enabled`, #222; apagado = sin cartel ni reclamo ni /sys_install_app,
+> los pendientes ya reclamados se cobran igual). Antes (misma fecha): **Bono de 1ª carga por PUBLICISTA (#221)**: regla
 > pct/tope/excedente por campaña (`Config['publisherFirstBonus']`), resuelta al vuelo para los
 > derivados creados desde el panel, aplicada por el server en la primera carga vía
 > `_pendingBonusFor`/`_settlePendingBonuses` (excluye al bono por instalar en esa carga); card en
@@ -1158,8 +1160,10 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
 - **Bono por instalar la app** (#100: % en la PRÓXIMA carga, lo aplica el agente; ya no
   acredita monto): exige standalone real (token FCM), teléfono verificado (salvo creado
   por agente), anti-multicuenta por token, reserva atómica. **#188 regla con TOPE:**
-  `Config['installBonus'] = { pct, capArs, excessPct }` (default 100% hasta $5.000 +
-  20% del resto; `computeInstallBonus`, `installBonusRuleText`; `GET/POST /api/admin/
+  `Config['installBonus'] = { enabled, pct, capArs, excessPct }` (default ACTIVO, 100% hasta $5.000 +
+  20% del resto; **#222** `enabled:false` = la app no muestra el cartel ni deja reclamar
+  (`INSTALL_BONUS_OFF`), no se manda `/sys_install_app`, Información/pauta/ruleta no lo prometen;
+  un 'pending' ya reclamado se cobra igual; `computeInstallBonus`, `installBonusRuleText`; `GET/POST /api/admin/
   install-bonus`). Todos los textos la muestran (cartel, `/sys_install_bonus` con
   `{pct} {tope} {excedente} {regla}`, Información del Servicio). **#189: lo aplica el
   SERVER solo** — `_pendingBonusFor(user, amount)` (bono instalación + % de ruleta) se

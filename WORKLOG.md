@@ -8,6 +8,18 @@
 
 ## Sesión 2026-11-03
 
+### 222. Interruptor ACTIVO/APAGADO del bono por instalar la app (desde el panel) — admin-sw v59, PWA SW v134
+- **Owner:** "¿y lo de instalar la app se puede habilitar/deshabilitar?" — no había interruptor (solo la regla %/tope/excedente).
+- `Config['installBonus'].enabled` (default **true**; `getInstallBonusConfig()` lo devuelve, el POST de `/api/admin/install-bonus` lo guarda
+  y conserva el actual si un panel viejo no lo manda). Tilde "Bono por instalar la app ACTIVO" en la card 📲 de Configuración (el título dice
+  "— APAGADO"). **Apagado:** `GET /api/install-bonus/status` → `enabled:false` ⇒ la PWA esconde el cartel/botón de reclamar
+  (`installbonus.js`, `VIP.state.installBonusEnabled`), los textos de Información del Servicio y del modal de pauta dejan de prometerlo
+  (`_applyOffTexts`) y la ruleta no muestra "al instalar la app te llevás…"; `POST /api/install-bonus/claim` → 400 `INSTALL_BONUS_OFF`;
+  no se manda `/sys_install_app` tras la carga manual; `/api/refunds/status` manda `installGiftPct 0`.
+- **DECISIÓN (confirmada por el owner):** los que YA lo reclamaron (`firstChargeBonusStatus 'pending'`) lo cobran igual en su próxima carga:
+  `_pendingBonusFor` / `_settlePendingBonuses` / banner del chat / sugerencia de Depositar NO miran el flag. Para que tampoco se apliquen
+  habría que agregar el chequeo en `_pendingBonusFor`. `node --check` + `check-tdz` OK. **Back necesita deploy.**
+
 ### 221. 🤝 BONO DE 1ª CARGA POR PUBLICISTA (derivados de Kommo): % con tope + % del excedente, lo aplica el server en la primera carga — admin-sw v58
 - **Pedido (Uchiha por Telegram, 2026-11-03):** "tenemos que derivar desde Kommo a cargas1girox y por derivar es 50% con tope de 20k y el
   excedente 20%; eso lo podés agregar en la primera carga, pero solo para los que derivamos, que creamos desde el publicista (kommo1), que

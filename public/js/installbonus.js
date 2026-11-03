@@ -12,6 +12,7 @@ window.VIP = window.VIP || {};
 VIP.installBonus = (function () {
 
     let _claimed = true; // por defecto no mostramos el cartel hasta confirmar con el server
+    let _enabled = true; // #222 el panel puede APAGAR el bono: sin cartel ni reclamo
 
     function _el(id) { return document.getElementById(id); }
 
@@ -26,11 +27,13 @@ VIP.installBonus = (function () {
             if (res.ok) {
                 const data = await res.json();
                 _claimed = data.claimed === true;
+                _enabled = data.enabled !== false; // #222
+                VIP.state.installBonusEnabled = _enabled; // lo lee la ruleta (promesa "al instalar la app…")
                 // #188 regla del bono (tope + excedente) → textos de la app.
-                if (data.rule) { VIP.state.installBonusRule = data.rule; _applyRuleTexts(data.rule); }
+                if (data.rule) { VIP.state.installBonusRule = data.rule; if (_enabled) _applyRuleTexts(data.rule); else _applyOffTexts(); }
             }
         } catch (e) { /* si falla, dejamos el cartel oculto */ }
-        banner.style.display = _claimed ? 'none' : '';
+        banner.style.display = (_claimed || !_enabled) ? 'none' : '';
 
         // Aviso solo para usuarios que se registraron DIRECTO (sin pauta): el
         // bono es para probar la página y no es retirable hasta ser usuario
@@ -46,6 +49,13 @@ VIP.installBonus = (function () {
     // #188 Pinta la regla vigente (pct / tope / excedente) en todos los textos que
     // hablan del bono: cartel del home, aviso, Información del Servicio y el
     // modal de pauta. Así nunca queda un "100%" fijo que después genere quejas.
+    // #222 bono apagado desde el panel: los textos que lo prometían pasan a "no disponible".
+    function _applyOffTexts() {
+        const set = (id, txt) => { const el = _el(id); if (el) el.textContent = txt; };
+        set('infoInstallBonusDesc', 'Instalá la app para entrar más rápido y recibir tus avisos. El bono por instalar no está disponible por el momento.');
+        set('adInstallBonusTitle', 'Instalá la app');
+        set('adInstallBonusDesc', 'Entrás más rápido y recibís tus avisos al toque.');
+    }
     function _applyRuleTexts(r) {
         const money = (n) => '$' + Number(n || 0).toLocaleString('es-AR');
         const pct = Number(r.pct) || 100;

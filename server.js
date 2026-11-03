@@ -10378,7 +10378,9 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
       const hasAppInstalled = user.fcmTokenContext === 'standalone'
         || (Array.isArray(user.fcmTokens) && user.fcmTokens.some(t => t && t.context === 'standalone'));
 
-      if (!hasAppInstalled) {
+      // #222: con el bono por instalar APAGADO no se promete nada (el mensaje habla del bono).
+      let _ibOn = true; try { _ibOn = (await getInstallBonusConfig()).enabled !== false; } catch (_) {}
+      if (!hasAppInstalled && _ibOn) {
         const installCmd = await Command.findOne({ name: '/sys_install_app', isActive: true });
         const installDisabled = installCmd && (!installCmd.response || !String(installCmd.response).trim());
         if (!installDisabled) { // null = comando vaciado a propósito → no enviar
@@ -12696,14 +12698,18 @@ const INSTALL_BONUS_AMOUNT = 5000;
 // Ej.: carga $10.000 → $5.000 al 100% + $5.000 al 20% = $6.000 de bono.
 // Config['installBonus'] = { pct, capArs, excessPct }, editable desde el panel
 // (Config → "📲 Bono por instalar la app"). Sin cache (multi-instancia).
-const INSTALL_BONUS_RULE_DEFAULT = { pct: 100, capArs: 5000, excessPct: 20 };
+// #222 `enabled` (default true, owner 2026-11-03): APAGADO = la app no muestra el cartel ni deja
+// reclamar, no se manda /sys_install_app tras la carga y el panel deja de sugerirlo a los
+// que no lo reclamaron. Los que YA lo reclamaron (firstChargeBonusStatus 'pending') lo cobran
+// igual en su próxima carga (se les prometió): _pendingBonusFor no mira el flag.
+const INSTALL_BONUS_RULE_DEFAULT = { enabled: true, pct: 100, capArs: 5000, excessPct: 20 };
 async function getInstallBonusConfig() {
   const d = INSTALL_BONUS_RULE_DEFAULT;
   try {
     const raw = await getConfig('installBonus', null);
     if (raw && typeof raw === 'object') {
       const n = (v, def, max) => { const x = Math.round(Number(v)); return Number.isFinite(x) && x >= 0 && x <= max ? x : def; };
-      return (_installBonusCfgCache = { pct: n(raw.pct, d.pct, 500), capArs: n(raw.capArs, d.capArs, 100000000), excessPct: n(raw.excessPct, d.excessPct, 500) });
+      return (_installBonusCfgCache = { enabled: raw.enabled !== false, pct: n(raw.pct, d.pct, 500), capArs: n(raw.capArs, d.capArs, 100000000), excessPct: n(raw.excessPct, d.excessPct, 500) });
     }
   } catch (_) {}
   return (_installBonusCfgCache = { ...d });
@@ -12760,8 +12766,11 @@ app.get('/api/install-bonus/status', authMiddleware, async (req, res) => {
   try {
     const user = await User.findOne({ id: req.user.userId }).lean();
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+    const _ibCfgSt = await getInstallBonusConfig();
     res.json({
       claimed: user.installBonusClaimed === true,
+      // #222 apagado desde el panel → la app esconde el cartel (un pendiente ya reclamado igual se cobra).
+      enabled: _ibCfgSt.enabled !== false,
       // 'none' | 'pending' (lo tiene para usar) | 'used' (el agente ya se lo aplicó)
       bonusStatus: user.firstChargeBonusStatus || 'none',
       bonusType: 'first_charge_100',
@@ -12782,6 +12791,11 @@ app.post('/api/install-bonus/claim', authMiddleware, async (req, res) => {
   try {
     const user = await User.findOne({ id: req.user.userId });
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    // #222 bono apagado desde el panel → no se puede reclamar (la app ya no muestra el cartel).
+    if ((await getInstallBonusConfig()).enabled === false) {
+      return res.status(400).json({ error: 'El bono por instalar la app no está disponible por el momento.', code: 'INSTALL_BONUS_OFF' });
+    }
 
     // Validación server-side de "app instalada": exige un token FCM en
     // contexto standalone. El flag req.body.standalone era falsificable
@@ -12936,8 +12950,11 @@ app.post('/api/admin/install-bonus', authMiddleware, adminMiddleware, async (req
     if (!Number.isFinite(pct) || pct < 0 || pct > 500) return res.status(400).json({ error: 'El % del bono tiene que estar entre 0 y 500.' });
     if (!Number.isFinite(capArs) || capArs < 0) return res.status(400).json({ error: 'El tope tiene que ser un monto ≥ 0 (0 = sin tope).' });
     if (!Number.isFinite(excessPct) || excessPct < 0 || excessPct > 500) return res.status(400).json({ error: 'El % del excedente tiene que estar entre 0 y 500.' });
-    await Config.set('installBonus', { pct, capArs, excessPct }, req.user.username);
-    logger.info(`[install-bonus] regla → ${pct}% hasta $${capArs} + ${excessPct}% del resto (por ${req.user.username})`);
+    // #222 interruptor: si el panel viejo (cacheado) no manda `enabled`, se conserva el actual.
+    const prev = await getInstallBonusConfig();
+    const enabled = b.enabled === undefined ? prev.enabled !== false : (b.enabled !== false && b.enabled !== 'false');
+    await Config.set('installBonus', { enabled, pct, capArs, excessPct }, req.user.username);
+    logger.info(`[install-bonus] regla → ${enabled ? 'ACTIVO' : 'APAGADO'} ${pct}% hasta $${capArs} + ${excessPct}% del resto (por ${req.user.username})`);
     const cfg = await getInstallBonusConfig();
     res.json({ success: true, ...cfg, text: installBonusRuleText(cfg) });
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
@@ -17101,7 +17118,7 @@ const _datosIaModels = () => ({ Transaction, User, RefundClaim, DailyRouletteSpi
 async function _diaPromoConfig() {
   const out = { firstDepositBonusPct: 0, autoLoadBonusPct: 0, dailyRefundPct: 0, weeklyRefundPct: 0, monthlyRefundPct: 0, installGiftPct: 0, roulettePct: 0, capArs: 0, restPct: 0 };
   try { const tbp = await getRefundTiersByPeriod(); const mx = (ts) => (ts || []).reduce((m, t) => (t && t.pct > m ? t.pct : m), 0); out.dailyRefundPct = mx(tbp.daily); out.weeklyRefundPct = mx(tbp.weekly); out.monthlyRefundPct = mx(tbp.monthly); } catch (_) {}
-  try { const ib = await getInstallBonusConfig(); if (ib) { out.installGiftPct = Number(ib.pct) || 0; out.capArs = Number(ib.capArs) || 0; out.restPct = Number(ib.excessPct) || 0; } } catch (_) {}
+  try { const ib = await getInstallBonusConfig(); if (ib && ib.enabled !== false) { out.installGiftPct = Number(ib.pct) || 0; out.capArs = Number(ib.capArs) || 0; out.restPct = Number(ib.excessPct) || 0; } } catch (_) {} // #222 apagado → 0
   // ruleta = % extra promedio por giro (Σ peso × % / Σ pesos, sólo premios en %)
   try { const rc = await getDailyRouletteConfig(); const ps = (rc && rc.enabled && rc.prizes) || []; const W = ps.reduce((s, p) => s + (Number(p.weight) || 0), 0); out.roulettePct = W > 0 ? Math.round(ps.reduce((s, p) => s + (p.type === 'percent' ? (Number(p.weight) || 0) * (Number(p.value) || 0) : 0), 0) / W * 10) / 10 : 0; } catch (_) { out.roulettePct = 0; }
   return out;

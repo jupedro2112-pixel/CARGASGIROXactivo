@@ -4935,7 +4935,7 @@ function renderDepositPendingBonus() {
         suggested += b;
         parts.push('🤝 <b>Bono ' + pfb.pct + '% de 1ª carga (publicista ' + escapeHtml(pfb.campaign || '') + ')</b>: ' + escapeHtml(pfb.text || '') + (amount > 0 ? ' → para ' + money(amount) + ' corresponden <b>' + money(b) + '</b>' + (excess > 0 ? ' (' + money(base) + ' al ' + pfb.pct + '% + ' + money(excess) + ' al ' + pfb.excessPct + '%)' : '') : '') + (u.firstChargeBonusStatus === 'pending' ? ' <i>(el bono por instalar queda para la carga siguiente)</i>' : ''));
     }
-    if (u.firstChargeBonusStatus === 'pending' && !pfb) {
+    if (u.firstChargeBonusStatus === 'pending' && !pfb) { // #222: un pendiente ya reclamado se cobra aunque el bono esté apagado
         const r = u.installBonusRule || { pct: 100, capArs: 5000, excessPct: 20, text: '' };
         const cap = r.capArs > 0 ? r.capArs : amount;
         const base = Math.min(amount, cap), excess = Math.max(0, amount - cap);
@@ -7095,18 +7095,21 @@ async function loadInstallBonusCfg() {
         if (header) header.style.display = '';
         const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) { el.value = v; if (!el._wired) { el._wired = true; el.addEventListener('input', _ibPreview); } } };
         set('ibPct', cfg.pct); set('ibCap', cfg.capArs); set('ibExcess', cfg.excessPct);
+        const en = document.getElementById('ibEnabled'); if (en) en.checked = cfg.enabled !== false; // #222
+        if (header) header.querySelector('h3').textContent = '📲 Bono por instalar la app (tope y excedente)' + (cfg.enabled === false ? ' — APAGADO' : '');
         _ibPreview();
     } catch (_) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
 }
 async function saveInstallBonusCfg() {
     try {
         const r = await authFetch('/api/admin/install-bonus', { method: 'POST', body: JSON.stringify({
-            pct: Number(document.getElementById('ibPct').value), capArs: Number(document.getElementById('ibCap').value), excessPct: Number(document.getElementById('ibExcess').value)
+            pct: Number(document.getElementById('ibPct').value), capArs: Number(document.getElementById('ibCap').value), excessPct: Number(document.getElementById('ibExcess').value),
+            enabled: !!(document.getElementById('ibEnabled') || { checked: true }).checked // #222
         }) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) { showToast(j.error || 'No se pudo guardar', 'error'); return; }
-        showToast('Regla del bono guardada: ' + (j.text || ''), 'success');
-        _ibPreview();
+        showToast((j.enabled === false ? '⏸️ Bono por instalar APAGADO. ' : 'Regla del bono guardada: ') + (j.enabled === false ? '' : (j.text || '')), 'success');
+        loadInstallBonusCfg();
     } catch (_) { showToast('Error de conexión', 'error'); }
 }
 window.saveInstallBonusCfg = saveInstallBonusCfg;

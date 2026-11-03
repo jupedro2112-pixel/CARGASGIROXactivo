@@ -174,6 +174,8 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   con `metadata.appliedOnDeposit:true` (`_recordAppliedBonusTx`; excluida de la base del
   reembolso en vivo). La regla
   del bono por instalar (% hasta un tope + % del excedente) en `Config['installBonus']`.
+  **#222:** `Config['installBonus'].enabled` apaga el bono por instalar (sin cartel/reclamo/`/sys_install_app`;
+  los 'pending' ya reclamados se cobran igual) — todo texto nuevo que lo prometa tiene que mirar ese flag.
   No hardcodear "100%", "$5.000" ni "10 cargas": salen de la config y de las variables
   `{pct} {tope} {excedente} {regla}` de `/sys_install_bonus`. Un premio "%" de la
   ruleta y el bono de instalación los APLICA EL SERVER solo en la carga (hgcash y
