@@ -184,6 +184,12 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   (`claimAutoPromoPercent` → bonus de la MISMA operación con tope `_loteBonusAmount` →
   `settle`/`revert`). Una carga = como mucho UN bono automático. Las fichas de un lote
   por tiempo se acreditan recién cuando el cliente toca 🎁 RECLAMAR (`/api/gift/claim`).
+- **Bono de 1ª carga por PUBLICISTA (#221, 2026-11-03):** regla pct/tope/excedente POR CAMPAÑA en
+  `Config['publisherFirstBonus']` (card "🤝" de Configuración), resuelta AL VUELO por
+  `_publisherFirstBonusRuleFor` (campaña + creado desde el panel + fecha de alta + sin cargas previas)
+  — no hay estado pending. Entra como parte `publisher` de `_pendingBonusFor` y EXCLUYE al bono por
+  instalar en esa carga; `_settlePendingBonuses` recibe `ctx.parts` y solo marca usado lo que entró.
+  Nada hardcodeado (kommo1/50%/$20k/20%/fecha salen del panel).
 - **Funciones replicadas de PICA ROJA (#208, 2026-10-26):** TODAS arrancan APAGADAS y se prenden desde COMANDOS →
   "🧩 Funciones" (`src/services/featureFlags.js`, `Config['features']`). Toda ruta/cron de Datos IA, Alertas de
   estafa, Centro de avisos, piloto automático e historias tiene que consultar `featureFlags.isOn(...)`; un ítem nuevo

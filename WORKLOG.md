@@ -4,7 +4,47 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-10-27**
+> **Última actualización: 2026-11-03**
+
+## Sesión 2026-11-03
+
+### 221. 🤝 BONO DE 1ª CARGA POR PUBLICISTA (derivados de Kommo): % con tope + % del excedente, lo aplica el server en la primera carga — admin-sw v58
+- **Pedido (Uchiha por Telegram, 2026-11-03):** "tenemos que derivar desde Kommo a cargas1girox y por derivar es 50% con tope de 20k y el
+  excedente 20%; eso lo podés agregar en la primera carga, pero solo para los que derivamos, que creamos desde el publicista (kommo1), que
+  pasaron ayer". Owner: "algo parecido al bono que da por instalar app".
+- **Regla por CAMPAÑA en `Config['publisherFirstBonus'] = { rules: [{ campaign, enabled, pct, capArs, excessPct, fromDate 'YYYY-MM-DD'|null,
+  scope 'panel'|'all' }] }`** (`getPublisherFirstBonusRules`, sin cache). Un cliente la tiene si (`_publisherFirstBonusRuleFor`): su
+  `acquisitionCampaign` tiene regla activa · con `scope 'panel'` fue creado desde un panel (`createdByAgent` / `createdByEmployeeId` /
+  `acquisitionSource 'manual'` — los derivados que el publisher_admin da de alta; NO los que entran por el link) · `createdAt ≥ fromDate`
+  (00:00 ART) · `publisherFirstBonusStatus ≠ 'used'` · **sin ninguna carga real previa** (Transaction deposit excluyendo regalos/devoluciones;
+  la carga en curso todavía no escribió la suya). Fail-closed. El monto sale de la MISMA fórmula del bono por instalar (`computeInstallBonus`
+  con la regla del publicista: pct% hasta capArs + excessPct% del resto).
+- **Pipeline:** parte `{ kind:'publisher', campaign, cfg }` en `_pendingBonusFor` (va PRIMERO; **excluye al bono por instalar en esa carga**
+  — dos bonos "de primera carga" no se suman; el de instalar queda `pending` para la carga siguiente —; ruleta/historia sí se suman como
+  siempre; con cualquier parte pendiente el lote automático no entra, como antes). `_settlePendingBonuses(user, agent, ctx)` ahora recibe
+  `ctx.parts` (los dos callers lo pasan): si vino la parte publisher → `User.publisherFirstBonusStatus 'used'` atómico (+ `UsedAt/UsedBy/
+  Campaign/Amount`), Transaction 'bonus' propia `_recordAppliedBonusTx kind 'publisher_first'` → `metadata.source 'publisher_first_bonus'`
+  (`appliedOnDeposit`: excluida de la base del reembolso en vivo, ya cuenta `deposit.bonus`) y nota admin-only 🤝; y NO marca usado el de
+  instalar si no se aplicó. Sin `ctx.parts` (otro caller) se comporta como antes. Vale igual en la carga MANUAL (`/api/admin/deposit`, pisa
+  lo que haya puesto el agente), en hgcash/Finpro (`hgcashAutoCarga`, nunca en multicuenta) y en la asignada desde la bandeja.
+- **Cliente:** al mensaje de la carga se le agrega la línea `/sys_publisher_first_bonus` (sembrado: "🎁 Incluye tu BONO DE BIENVENIDA por tu
+  primera carga: ${bono} extra ({regla}). ¡Es por única vez!"; variables `{bono} {regla} {pct} {tope} {excedente} {publicista}`; vacío = no se
+  agrega) vía `_publisherFirstBonusClientLine`. Etiquetas de las notas admin-only unificadas en `_pendingPartLabel` (antes la historia
+  salía como "ruleta").
+- **Panel:** Configuración → card **"🤝 Bono de 1ª carga por publicista (derivados)"** (solo admin general): select de campaña (de
+  `/api/admin/campaigns`), %, tope, % excedente, "desde" (fecha de alta), alcance (solo panel / toda la campaña), activa, ejemplo en vivo y
+  tabla de reglas con cuántos clientes lo cobraron y cuánto (✏️ edita, 🗑️ borra). Rutas `GET/POST /api/admin/publisher-first-bonus`,
+  `DELETE /:campaign` (POST valida que la campaña exista y pct/tope/excedente como el bono de instalar). Chat: banner celeste 🤝 "BONO DE 1ª
+  CARGA X% (publicista …)" mientras le corresponda (`GET /api/users/:id` → `user.publisherFirstBonus` para staff) y gris "ya utilizado por …
+  ($…)" después; modal Depositar sugiere el bono (y avisa que el de instalar queda para la siguiente). Transacciones: origen "🤝 bono 1ª carga
+  publicista". admin-sw **v58**. Modelo `User`: `publisherFirstBonusStatus/UsedAt/UsedBy/Campaign/Amount`.
+- **Decisiones:** (1) sin estado 'pending' en el User: la regla se evalúa al vuelo, así alcanza a los derivados creados AYER (antes de que
+  existiera la función) con solo poner `fromDate`; (2) exclusión con el bono por instalar (no acumular dos bonos de bienvenida en una carga;
+  el de instalar no se pierde); (3) nada hardcodeado: kommo1 / 50% / $20.000 / 20% / fecha se cargan desde el panel.
+- `node --check` (server.js, admin.js, admin-sw.js, User.js) + `check-tdz` OK. **Back necesita deploy.** PARA ACTIVARLO: Configuración →
+  🤝 → campaña KOMMO1 · 50 · 20000 · 20 · desde 02/11/2026 · "solo creados desde el panel" · Activa → Guardar. PROBAR: cliente creado desde el
+  panel del publicista → banner 🤝 en el chat → primera carga (manual sin bono, o transferencia) → sale con el bono y la línea al cliente; la
+  segunda carga ya no.
 
 ## Sesión 2026-10-27
 

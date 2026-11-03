@@ -5,7 +5,11 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-10-27 (b)** — **Webhooks de Finpro (#220)**: `POST /api/finpro/webhook`
+> Última actualización: **2026-11-03** — **Bono de 1ª carga por PUBLICISTA (#221)**: regla
+> pct/tope/excedente por campaña (`Config['publisherFirstBonus']`), resuelta al vuelo para los
+> derivados creados desde el panel, aplicada por el server en la primera carga vía
+> `_pendingBonusFor`/`_settlePendingBonuses` (excluye al bono por instalar en esa carga); card en
+> Configuración, banner 🤝 en el chat (§2 User, §5, §6, §9). Anterior: **2026-10-27 (b)** — **Webhooks de Finpro (#220)**: `POST /api/finpro/webhook`
 > (secundario: entrantes/salientes de nuestros CVUs, firma HMAC `timestamp.rawBody`, dedupe por
 > `fp:<notification_id>` + coelsa, titular por Coelsa) y callback de retiros firmado; secreto en
 > panel/SSM; multi-CVU. Antes (misma fecha): **Finpro como SEGUNDO BANCO con API** paralelo a hgcash
@@ -141,7 +145,9 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   actualiza con `$max`), `vipLevel` (0 = sin nivel; NUNCA baja; se avanza recién
   DESPUÉS de acreditar el bono del nivel), `vipLevelUpdatedAt`. Otros:
   `installBonusClaimed`, `notificationPlan`, `notifMonthlyCounts`,
-  `loginWithoutPassword`, `withdrawalAccount`, `pendingAccessCode`.
+  `loginWithoutPassword`, `withdrawalAccount`, `pendingAccessCode`. **#221:**
+  `publisherFirstBonusStatus` ('none'|'used'; no hay 'pending': la regla se evalúa al vuelo) +
+  `publisherFirstBonusUsedAt/UsedBy/Campaign/Amount` (trazabilidad del bono de 1ª carga por publicista).
 - **Transaction** — registro PERMANENTE (sin TTL). `type`: deposit|withdrawal|bonus|
   refund|transfer|referral_commission|fire_reward|rakeback|vip_levelup|roulette
   (`roulette` desde 2026-09-07: antes la ruleta no escribía Transaction; desde #206 lleva
@@ -1161,6 +1167,19 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   `hgcashAutoCarga` (bonus nativo en la misma operación, salvo multicuenta); al éxito
   `_settlePendingBonuses` marca `firstChargeBonusStatus:'used'` y consume el % de
   ruleta. El botón manual "Marcar como usado" sigue para casos raros.
+- **Bono de 1ª carga por PUBLICISTA (#221, 2026-11-03):** `Config['publisherFirstBonus'].rules[]`
+  = `{ campaign, enabled, pct, capArs, excessPct, fromDate, scope 'panel'|'all' }`
+  (`getPublisherFirstBonusRules`, sin cache; `GET/POST/DELETE /api/admin/publisher-first-bonus`).
+  `_publisherFirstBonusRuleFor(u)` devuelve la regla si `acquisitionCampaign` la tiene activa,
+  (scope panel) el cliente fue creado desde un panel (`createdByAgent`/`createdByEmployeeId`/
+  `acquisitionSource 'manual'`), `createdAt ≥ fromDate` (ART), no está `used` y NO tiene ninguna
+  carga real previa. Monto = `computeInstallBonus(amount, regla)` (misma fórmula que el bono por
+  instalar). Entra como parte `kind:'publisher'` de `_pendingBonusFor` — PRIMERA y excluyente
+  con la parte `install` (el bono por instalar queda pendiente para la carga siguiente) — y
+  `_settlePendingBonuses` (con `ctx.parts`) lo marca `used` atómico + Transaction 'bonus'
+  `metadata.source 'publisher_first_bonus'` (`appliedOnDeposit`) + nota 🤝; línea al cliente
+  `/sys_publisher_first_bonus` (`_publisherFirstBonusClientLine`). Staff ve `user.publisherFirstBonus`
+  en `GET /api/users/:id` (banner del chat + sugerencia de Depositar).
 - **Link de acceso de un solo uso** (2026-08-03): el admin general o un DEPOSITOR
   generan `?acceso=<token>` para un cliente (`POST /api/admin/users/:userId/access-link`,
   también desde el alta del panel; regenerar pisa el anterior). En `User` vive SOLO
@@ -1393,6 +1412,12 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   app"**: pct / tope / % excedente con ejemplo. **Modal Depositar:** bloque de bonos
   pendientes que pre-carga "Monto de Bonificación" (`renderDepositPendingBonus`, usa
   `window._chatUserInfo` del chat abierto).
+- **Config → "🤝 Bono de 1ª carga por publicista (derivados)"** (#221, solo admin general): select de
+  campaña, %, tope, % excedente, "desde", alcance, activa, ejemplo y tabla de reglas con lo cobrado
+  (`loadPublisherFirstBonusCfg` / `savePublisherFirstBonusRule` / `editPublisherFirstBonusRule` /
+  `deletePublisherFirstBonusRule`). Chat: `renderPublisherFirstBonusBanner` (🤝 pendiente / gris usado,
+  sin botón: se consume solo con la carga); `renderDepositPendingBonus` lo sugiere primero y oculta el
+  de instalar si los dos están. Transacciones: origen `publisher_first_bonus`.
 - **Config → "🔤 Prefijo de los usuarios nuevos"** (#197, solo admin general): input + ejemplo
   en vivo; `USERNAME_PREFIX` global de admin.js (de `/api/config/access`), `.usernamePrefixTxt`
   en los hints de las altas. **Config → "🔗 Webhooks salientes"** (#197): lista con último
@@ -1538,6 +1563,11 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `POST /api/gift/claim` (reserva atómica `claimedAt`). El marcado genérico del
   PromoBonus en la carga manual con bonus del agente excluye los lotes auto de "todas
   las cargas" (`$nor`).
+- **Bonos pendientes en la carga (#189/#206/#221):** toda parte nueva de `_pendingBonusFor` tiene que
+  (a) marcarse usada en `_settlePendingBonuses` leyendo `ctx.parts` (los callers pasan las partes de ESA
+  carga: no asumir que todo lo pendiente se aplicó — el bono por instalar queda sin aplicar cuando entró
+  el de publicista), (b) dejar su Transaction 'bonus' por `_recordAppliedBonusTx` con un `kind` propio y
+  (c) sumar su etiqueta en `_pendingPartLabel` y en `getTransactionSourceLabel` del panel.
 - **Regalos = bono 0 "regalo directo", NO depósito** (2026-09-07, §4.5): reembolsos,
   ruleta, rakeback, bono VIP y comisiones van por `creditUserBalance` SIN multiplier
   → `/bonus` con `multiplier: 0` (figuran como Bono en el panel de 1girox), con

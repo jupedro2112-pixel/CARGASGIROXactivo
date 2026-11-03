@@ -2944,6 +2944,7 @@ async function loadUserInfo(userId) {
         // `user`, sin pedir nada extra al servidor.
         renderFirstChargeBonusBanner(user);
         renderRoulettePercentBanner(user); // #188
+        renderPublisherFirstBonusBanner(user); // #221
 
         // Bono sorpresa del código de bienvenida (Comunidad Telegram) — ídem.
         renderWelcomeCodeBonusBanner(user);
@@ -4862,6 +4863,43 @@ function renderRoulettePercentBanner(user) {
             '<button onclick="markRoulettePercentUsed(\'' + escapeHtml(user.id) + '\')" style="background:#2d0052;color:#e9c8ff;border:1px solid rgba(255,255,255,0.3);border-radius:8px;padding:8px 14px;font-weight:800;font-size:12px;cursor:pointer;">✅ Marcar aplicado</button>' + _resetBtn +
         '</div>';
 }
+// #221 === BONO DE 1ª CARGA POR PUBLICISTA (derivados) ===
+// El server lo resuelve al vuelo (regla de la campaña + sin cargas previas): no hay botón
+// de "marcar usado" — se consume solo con la primera carga (manual o banco).
+function renderPublisherFirstBonusBanner(user) {
+    let banner = document.getElementById('chatPubFirstBonusBanner');
+    const anchor = document.getElementById('chatRoulettePctBanner') || document.getElementById('chatBonusBanner');
+    if (!banner && anchor && anchor.parentNode) {
+        banner = document.createElement('div');
+        banner.id = 'chatPubFirstBonusBanner';
+        anchor.parentNode.insertBefore(banner, anchor.nextSibling);
+    }
+    if (!banner) return;
+    const pfb = user && user.publisherFirstBonus;
+    if (pfb && pfb.pending) {
+        banner.style.display = '';
+        banner.innerHTML =
+            '<div style="background:linear-gradient(135deg,#0b5e8a,#1e9bd7);color:#fff;border-radius:10px;padding:10px 12px;margin:6px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">' +
+                '<span style="font-size:20px;">🤝</span>' +
+                '<div style="flex:1;min-width:180px;">' +
+                    '<strong style="font-size:13px;display:block;">BONO DE 1ª CARGA ' + escapeHtml(String(pfb.pct)) + '% (publicista ' + escapeHtml(pfb.campaign || '') + ')</strong>' +
+                    '<span style="font-size:11.5px;opacity:.92;">' + escapeHtml(pfb.text || '') +
+                    ' Lo aplica el SISTEMA solo en su PRIMERA carga (banco o manual, aunque cargues sin bono) y queda usado. Si además tiene el bono por instalar, ese queda para la carga siguiente.</span>' +
+                '</div>' +
+            '</div>';
+        return;
+    }
+    if (user && user.publisherFirstBonusStatus === 'used') {
+        const quien = user.publisherFirstBonusUsedBy ? (' por ' + escapeHtml(user.publisherFirstBonusUsedBy)) : '';
+        const cuanto = user.publisherFirstBonusAmount ? (' ($' + Math.round(Number(user.publisherFirstBonusAmount)).toLocaleString('es-AR') + ')') : '';
+        banner.style.display = '';
+        banner.innerHTML = '<div style="background:rgba(255,255,255,0.05);color:#888;border-radius:10px;padding:7px 12px;margin:6px 0;font-size:11.5px;">🤝 Bono de 1ª carga por publicista ya utilizado' + quien + cuanto + '. No le corresponde otro.</div>';
+        return;
+    }
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+}
+
 async function markRoulettePercentUsed(userId) {
     if (!confirm('¿Ya le aplicaste el % de la ruleta en una carga? Al marcarlo se consume.')) return;
     try {
@@ -4888,7 +4926,16 @@ function renderDepositPendingBonus() {
     const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('es-AR');
     const parts = [];
     let suggested = 0;
-    if (u.firstChargeBonusStatus === 'pending') {
+    // #221 bono de 1ª carga por publicista: va primero y EXCLUYE al de instalar en esta carga (igual que el server).
+    const pfb = u.publisherFirstBonus && u.publisherFirstBonus.pending ? u.publisherFirstBonus : null;
+    if (pfb) {
+        const cap = pfb.capArs > 0 ? pfb.capArs : amount;
+        const base = Math.min(amount, cap), excess = Math.max(0, amount - cap);
+        const b = Math.floor(base * (pfb.pct / 100) + excess * (pfb.excessPct / 100));
+        suggested += b;
+        parts.push('🤝 <b>Bono ' + pfb.pct + '% de 1ª carga (publicista ' + escapeHtml(pfb.campaign || '') + ')</b>: ' + escapeHtml(pfb.text || '') + (amount > 0 ? ' → para ' + money(amount) + ' corresponden <b>' + money(b) + '</b>' + (excess > 0 ? ' (' + money(base) + ' al ' + pfb.pct + '% + ' + money(excess) + ' al ' + pfb.excessPct + '%)' : '') : '') + (u.firstChargeBonusStatus === 'pending' ? ' <i>(el bono por instalar queda para la carga siguiente)</i>' : ''));
+    }
+    if (u.firstChargeBonusStatus === 'pending' && !pfb) {
         const r = u.installBonusRule || { pct: 100, capArs: 5000, excessPct: 20, text: '' };
         const cap = r.capArs > 0 ? r.capArs : amount;
         const base = Math.min(amount, cap), excess = Math.max(0, amount - cap);
@@ -5816,6 +5863,7 @@ function getTransactionSourceLabel(t) {
         notif_batch: '🎁 lote con regalo',
         notif_batch_auto: '🎁 lote con regalo',
         story_bonus: '📽️ historia (+% reclamado)', // #210
+        publisher_first_bonus: '🤝 bono 1ª carga publicista', // #221
         auto_hgcash: '🏦 auto hgcash',
         hgcash_assigned: '🏦 bandeja hgcash',
         payout_refund: '↩️ devolución de retiro',
@@ -6066,6 +6114,8 @@ async function loadCBUConfig() {
     loadBonusRolloverCfg();
     // #188 Regla del bono por instalar la app (solo admin general)
     loadInstallBonusCfg();
+    // #221 Bono de 1ª carga por publicista (solo admin general)
+    loadPublisherFirstBonusCfg();
     // Cargar el estado de los niveles VIP (solo admin general)
     loadVipLevelsConfig();
     // Cargar los premios del fueguito (solo admin general)
@@ -7061,6 +7111,105 @@ async function saveInstallBonusCfg() {
 }
 window.saveInstallBonusCfg = saveInstallBonusCfg;
 window.loadInstallBonusCfg = loadInstallBonusCfg;
+
+// ---- #221 Bono de 1ª carga por PUBLICISTA (derivados): regla pct/tope/excedente por campaña ----
+let _pfbRules = [];
+function _pfbMoney(n) { return '$' + Math.round(Number(n) || 0).toLocaleString('es-AR'); }
+function _pfbCalc(a, pct, cap, ex) { const c = cap > 0 ? cap : a; return Math.floor(Math.min(a, c) * pct / 100 + Math.max(0, a - c) * ex / 100); }
+function _pfbPreview() {
+    const el = document.getElementById('pfbPreview');
+    if (!el) return;
+    const pct = Number((document.getElementById('pfbPct') || {}).value) || 0;
+    const cap = Number((document.getElementById('pfbCap') || {}).value) || 0;
+    const ex = Number((document.getElementById('pfbExcess') || {}).value) || 0;
+    const ej = cap > 0 ? cap * 2 : 10000;
+    el.textContent = 'Ejemplo: carga ' + _pfbMoney(ej) + ' → ' + _pfbMoney(_pfbCalc(ej, pct, cap, ex)) + ' de bono' + (cap > 0 ? ' (' + _pfbMoney(cap) + ' al ' + pct + '% + ' + _pfbMoney(ej - cap) + ' al ' + ex + '%)' : '') + '. Carga ' + _pfbMoney(cap > 0 ? cap / 2 : 3000) + ' → ' + _pfbMoney(_pfbCalc(cap > 0 ? cap / 2 : 3000, pct, cap, ex)) + '.';
+}
+async function _pfbFillCampaigns() {
+    const sel = document.getElementById('pfbCampaign');
+    if (!sel || sel._filled) return;
+    try {
+        const r = await authFetch('/api/admin/campaigns');
+        if (!r.ok) return;
+        const j = await r.json();
+        const list = (j.campaigns || []).slice().sort(function (a, b) { return String(a.publisher || '').localeCompare(String(b.publisher || '')) || String(a.code).localeCompare(String(b.code)); });
+        sel.innerHTML = '<option value="">— elegí el publicista (campaña) —</option>';
+        list.forEach(function (c) { const o = document.createElement('option'); o.value = c.code; o.textContent = (c.publisher ? c.publisher + ' · ' : '') + c.code + (c.name ? ' (' + c.name + ')' : ''); sel.appendChild(o); });
+        sel._filled = true;
+    } catch (_) {}
+}
+function _pfbRenderRules() {
+    const box = document.getElementById('pfbRulesList');
+    if (!box) return;
+    if (!_pfbRules.length) { box.innerHTML = '<div style="color:#888;font-size:12px;">Todavía no hay reglas: ningún publicista da bono de 1ª carga.</div>'; return; }
+    box.innerHTML = '<table class="data-table" style="font-size:12px;"><thead><tr><th>Publicista</th><th>Regla</th><th>Desde</th><th>A quién</th><th>Estado</th><th>Cobrado</th><th></th></tr></thead><tbody>' +
+        _pfbRules.map(function (r) {
+            return '<tr>' +
+                '<td><b>' + escapeHtml(r.publisher || '') + '</b><br><span style="color:#aaa;">' + escapeHtml(r.campaign) + (r.campaignName ? ' · ' + escapeHtml(r.campaignName) : '') + '</span></td>' +
+                '<td>' + escapeHtml(r.shortRule || '') + '<br><span style="color:#aaa;">ej. ' + _pfbMoney(r.example && r.example.amount) + ' → ' + _pfbMoney(r.example && r.example.bonus) + '</span></td>' +
+                '<td>' + (r.fromDate ? escapeHtml(r.fromDate.split('-').reverse().join('/')) : '<span style="color:#aaa;">todos</span>') + '</td>' +
+                '<td>' + (r.scope === 'all' ? 'todos los de la campaña' : 'solo creados desde el panel') + '</td>' +
+                '<td>' + (r.enabled ? '<span style="color:#7fffb0;font-weight:700;">ACTIVA</span>' : '<span style="color:#ff9800;font-weight:700;">apagada</span>') + '</td>' +
+                '<td>' + (r.usedCount || 0) + ' cliente' + (r.usedCount === 1 ? '' : 's') + '<br><span style="color:#aaa;">' + _pfbMoney(r.usedTotal) + '</span></td>' +
+                '<td style="white-space:nowrap;"><button type="button" class="btn-secondary" style="padding:4px 8px;font-size:11px;" onclick="editPublisherFirstBonusRule(\'' + escapeHtml(r.campaign) + '\')">✏️</button> ' +
+                '<button type="button" class="btn-secondary" style="padding:4px 8px;font-size:11px;color:#ff6b6b;" onclick="deletePublisherFirstBonusRule(\'' + escapeHtml(r.campaign) + '\')">🗑️</button></td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+}
+async function loadPublisherFirstBonusCfg() {
+    const form = document.getElementById('publisherFirstBonusForm');
+    const header = document.getElementById('publisherFirstBonusHeader');
+    try {
+        const r = await authFetch('/api/admin/publisher-first-bonus');
+        if (!r.ok) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; return; }
+        const j = await r.json();
+        _pfbRules = j.rules || [];
+        if (form) form.style.display = '';
+        if (header) header.style.display = '';
+        await _pfbFillCampaigns();
+        ['pfbPct', 'pfbCap', 'pfbExcess'].forEach(function (id) { const el = document.getElementById(id); if (el && !el._wired) { el._wired = true; el.addEventListener('input', _pfbPreview); } });
+        _pfbPreview();
+        _pfbRenderRules();
+    } catch (_) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
+}
+function editPublisherFirstBonusRule(code) {
+    const r = _pfbRules.find(function (x) { return x.campaign === code; });
+    if (!r) return;
+    const set = function (id, v) { const el = document.getElementById(id); if (el) el.value = v == null ? '' : v; };
+    set('pfbCampaign', r.campaign); set('pfbPct', r.pct); set('pfbCap', r.capArs); set('pfbExcess', r.excessPct); set('pfbFrom', r.fromDate || ''); set('pfbScope', r.scope || 'panel');
+    const en = document.getElementById('pfbEnabled'); if (en) en.checked = r.enabled !== false;
+    _pfbPreview();
+    const f = document.getElementById('publisherFirstBonusForm'); if (f && f.scrollIntoView) f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+async function savePublisherFirstBonusRule() {
+    const v = function (id) { const el = document.getElementById(id); return el ? el.value : ''; };
+    const campaign = v('pfbCampaign');
+    if (!campaign) { showToast('Elegí el publicista (campaña).', 'error'); return; }
+    try {
+        const r = await authFetch('/api/admin/publisher-first-bonus', { method: 'POST', body: JSON.stringify({
+            campaign: campaign, pct: Number(v('pfbPct')), capArs: Number(v('pfbCap')), excessPct: Number(v('pfbExcess')),
+            fromDate: v('pfbFrom'), scope: v('pfbScope') || 'panel', enabled: !!(document.getElementById('pfbEnabled') || {}).checked
+        }) });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { showToast(j.error || 'No se pudo guardar', 'error'); return; }
+        showToast('Regla guardada para ' + campaign + ': ' + ((j.rule && j.rule.shortRule) || ''), 'success');
+        loadPublisherFirstBonusCfg();
+    } catch (_) { showToast('Error de conexión', 'error'); }
+}
+async function deletePublisherFirstBonusRule(code) {
+    if (!confirm('¿Borrar la regla del bono de 1ª carga para ' + code + '?\n\nLos clientes de ese publicista que todavía no cargaron dejan de tener el bono. Los que ya lo cobraron no cambian.')) return;
+    try {
+        const r = await authFetch('/api/admin/publisher-first-bonus/' + encodeURIComponent(code), { method: 'DELETE' });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) { showToast(j.error || 'No se pudo borrar', 'error'); return; }
+        showToast('Regla borrada', 'success');
+        loadPublisherFirstBonusCfg();
+    } catch (_) { showToast('Error de conexión', 'error'); }
+}
+window.loadPublisherFirstBonusCfg = loadPublisherFirstBonusCfg;
+window.savePublisherFirstBonusRule = savePublisherFirstBonusRule;
+window.editPublisherFirstBonusRule = editPublisherFirstBonusRule;
+window.deletePublisherFirstBonusRule = deletePublisherFirstBonusRule;
 
 // ---- Rollover GLOBAL de bonos (#184) ----
 // Radios x0/x2/x3/x5/x10. Los que la plataforma NO permite (bonus.multipliers

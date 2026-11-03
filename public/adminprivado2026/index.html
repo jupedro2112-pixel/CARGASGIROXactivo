@@ -753,6 +753,59 @@ document.addEventListener('change', function (ev) {
                             <button type="button" class="btn-primary" onclick="saveInstallBonusCfg()">💾 Guardar regla del bono</button>
                         </div>
 
+                        <!-- #221 BONO DE 1ª CARGA POR PUBLICISTA (derivados; solo admin general) -->
+                        <div class="panel-subheader" style="margin-top: 24px;" id="publisherFirstBonusHeader">
+                            <h3>🤝 Bono de 1ª carga por publicista (derivados)</h3>
+                        </div>
+                        <div class="cbu-form" id="publisherFirstBonusForm">
+                            <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">
+                                Los clientes de un publicista reciben en su <b>PRIMERA carga</b> un <b>%</b> hasta un <b>tope</b> de carga y <b>otro %</b> sobre lo que carguen de más
+                                (misma regla que el bono por instalar). Ej.: 50% hasta $20.000 + 20% del resto → carga $30.000 = $10.000 + $2.000 = <b>$12.000</b>.
+                                Lo aplica el <b>sistema solo</b> en la primera carga (banco o manual, aunque el agente cargue sin bono) y es por única vez.
+                                Con "solo creados desde el panel" alcanza únicamente a los que el publicista (o un agente) dio de alta desde el panel — los derivados —, no a los que entraron por su link.
+                                Si el cliente también tiene el bono por instalar la app, ese queda para la carga siguiente (no se suman).
+                                El texto que ve el cliente es el comando <code>/sys_publisher_first_bonus</code>.
+                            </p>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                <div class="form-group" style="flex:2;min-width:220px;">
+                                    <label>Publicista (campaña)</label>
+                                    <select id="pfbCampaign" style="width:100%;"><option value="">— elegí el publicista (campaña) —</option></select>
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:100px;">
+                                    <label>% del bono</label>
+                                    <input type="number" id="pfbPct" min="0" max="500" placeholder="50" value="50">
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:130px;">
+                                    <label>Tope de carga ($, 0 = sin tope)</label>
+                                    <input type="number" id="pfbCap" min="0" placeholder="20000" value="20000">
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:120px;">
+                                    <label>% sobre el excedente</label>
+                                    <input type="number" id="pfbExcess" min="0" max="500" placeholder="20" value="20">
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+                                <div class="form-group" style="flex:1;min-width:160px;">
+                                    <label>Solo clientes dados de alta desde</label>
+                                    <input type="date" id="pfbFrom" style="width:100%;">
+                                    <small style="color:#aaa;font-size:11px;">Vacío = todos los de la campaña que todavía no cargaron.</small>
+                                </div>
+                                <div class="form-group" style="flex:1;min-width:200px;">
+                                    <label>A quién</label>
+                                    <select id="pfbScope" style="width:100%;">
+                                        <option value="panel">Solo creados desde el panel (derivados)</option>
+                                        <option value="all">Todos los clientes de la campaña</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="min-width:120px;">
+                                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="pfbEnabled" checked> Activa</label>
+                                </div>
+                            </div>
+                            <div id="pfbPreview" style="font-size:12px;color:#ffd479;margin:0 0 8px;"></div>
+                            <button type="button" class="btn-primary" onclick="savePublisherFirstBonusRule()">💾 Guardar regla del publicista</button>
+                            <div id="pfbRulesList" style="margin-top:12px;"></div>
+                        </div>
+
                         <!-- PREFIJO de los usuarios nuevos (#197, réplica del #328 del gemelo; solo admin general) -->
                         <div class="panel-subheader" style="margin-top: 24px;" id="usernamePrefixHeader">
                             <h3>🔤 Prefijo de los usuarios nuevos</h3>

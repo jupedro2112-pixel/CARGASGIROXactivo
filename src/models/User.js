@@ -580,6 +580,22 @@ const userSchema = new mongoose.Schema({
     default: null
   },
 
+  // #221 BONO DE 1ª CARGA POR PUBLICISTA (2026-11-03): los clientes que un publicista
+  // crea desde su panel (derivados) reciben en su PRIMERA carga un % con tope +
+  // % del excedente (regla en Config['publisherFirstBonus'], por campaña). No hay
+  // estado 'pending': se resuelve al vuelo (regla vigente + sin cargas previas);
+  // 'used' = ya lo cobró → nunca más. Quién/cuándo/cuánto para trazabilidad.
+  publisherFirstBonusStatus: {
+    type: String,
+    enum: ['none', 'used'],
+    default: 'none',
+    index: true
+  },
+  publisherFirstBonusUsedAt: { type: Date, default: null },
+  publisherFirstBonusUsedBy: { type: String, default: null },
+  publisherFirstBonusCampaign: { type: String, default: null },
+  publisherFirstBonusAmount: { type: Number, default: null },
+
   // ============================================
   // CÓDIGO DE BIENVENIDA de la Comunidad de Telegram (2026-08-03)
   // ============================================

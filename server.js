@@ -2716,6 +2716,9 @@ async function hgcashAutoCarga({ movement, comprobante, mode, assign = null }) {
       const _hgRollNote = _hgBonusApplied > 0 ? await _rolloverNote(_hgLote ? _hgMult : await getGiroxBonusMultiplier()) : '';
       let clientMsg = depositTpl.replace(/\{amount\}/g, Number(amount)).replace(/\{bonus\}/g, _hgBonusApplied).replace(/\{balance\}/g, newBalance !== null ? newBalance : 'actualizándose').replace(/\{rollover\}/g, _hgRollNote);
       if (_hgLote && _hgBonusApplied > 0) clientMsg += `\n🎁 Incluye tu regalo: +${_hgLote.pct}% extra por el lote de regalo${_hgLote.scope === 'first' ? ' (ya utilizado)' : ''}.`; // #191
+      // #221: bono de 1ª carga por publicista aplicado en esta carga → se lo decimos.
+      const _hgPubPart = _hgBonusApplied > 0 ? _hgPend.parts.find(p => p && p.kind === 'publisher') : null;
+      if (_hgPubPart) { try { const l = await _publisherFirstBonusClientLine(_hgPubPart); if (l) clientMsg += '\n' + l; } catch (_) {} }
       const sysMsg = await Message.create({
         id: uuidv4(), senderId: 'admin', senderUsername: 'Sistema', senderRole: 'admin',
         receiverId: user.id, receiverRole: 'user', content: clientMsg, type: 'system', timestamp: new Date(), read: false
@@ -2749,8 +2752,8 @@ async function hgcashAutoCarga({ movement, comprobante, mode, assign = null }) {
     } else if (_hgBonusApplied > 0) {
       // #206: además de marcar usados, deja la Bonificación propia de cada bono (ruleta / instalar app).
       await _settlePendingBonuses(user, assign ? agentLabel : 'auto-hgcash', { amount: Number(amount), bonus: _hgBonusApplied, txId,
-        transactionId: result.data?.transfer_id || result.data?.transferId, adminRole: assign ? (assign.agentRole || 'depositor') : 'system' });
-      _hgBonusNote = ` 🤖 Con $${_hgBonusApplied.toLocaleString('es-AR')} de bono automático (${_hgPend.parts.map(p => (p.kind === 'install' ? 'bono instalar app ' + p.pct + '%' : 'ruleta +' + p.pct + '%') + ' = $' + p.amount.toLocaleString('es-AR')).join(' + ')}).`;
+        transactionId: result.data?.transfer_id || result.data?.transferId, adminRole: assign ? (assign.agentRole || 'depositor') : 'system', parts: _hgPend.parts });
+      _hgBonusNote = ` 🤖 Con $${_hgBonusApplied.toLocaleString('es-AR')} de bono automático (${_hgPend.parts.map(p => _pendingPartLabel(p) + ' = $' + p.amount.toLocaleString('es-AR')).join(' + ')}).`;
     } else if (_hgBonus > 0 && result.bonusFailed) {
       _hgBonusNote = ` ⚠️ El bono pendiente de $${_hgBonus.toLocaleString('es-AR')} NO entró (la plataforma lo rechazó): aplicalo a mano con Bonificación. El bono sigue PENDIENTE.`;
     }
@@ -10107,10 +10110,10 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
       // usados solos (bono por instalar la app + % de la ruleta).
       if (bonusActuallyApplied) {
         _settledPending = await _settlePendingBonuses(user, req.user.username, { amount: Number(amount), bonus: Number(bonus), txId: _depTxId,
-          transactionId: result.data?.transfer_id || result.data?.transferId, adminRole: req.user?.role || 'admin' });
+          transactionId: result.data?.transfer_id || result.data?.transferId, adminRole: req.user?.role || 'admin', parts: _pend.parts });
         if (_autoBonus && _autoBonus.replaced) {
           await _emitAdminOnlyChatNote(user.id, user.username,
-            `🤖 BONO AUTOMÁTICO: la carga de $${Number(amount).toLocaleString('es-AR')} salió con $${Number(bonus).toLocaleString('es-AR')} de bono (${_autoBonus.parts.map(p => (p.kind === 'install' ? 'bono instalar app ' + p.pct + '%' : 'ruleta +' + p.pct + '%') + ' = $' + p.amount.toLocaleString('es-AR')).join(' + ')}) en vez de los $${Number(_autoBonus.agentBonus).toLocaleString('es-AR')} que había puesto ${req.user.username}. El bono pendiente lo calcula y aplica el sistema.`).catch(() => {});
+            `🤖 BONO AUTOMÁTICO: la carga de $${Number(amount).toLocaleString('es-AR')} salió con $${Number(bonus).toLocaleString('es-AR')} de bono (${_autoBonus.parts.map(p => _pendingPartLabel(p) + ' = $' + p.amount.toLocaleString('es-AR')).join(' + ')}) en vez de los $${Number(_autoBonus.agentBonus).toLocaleString('es-AR')} que había puesto ${req.user.username}. El bono pendiente lo calcula y aplica el sistema.`).catch(() => {});
         }
       }
 
@@ -10244,7 +10247,12 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
       }
       // #191: la carga incluyó el % de un lote automático → se lo decimos.
       if (_loteClaim && includeBonusInMessage) messageContent += `\n🎁 Incluye tu regalo: +${_loteClaim.pct}% extra por el lote de regalo${_loteClaim.scope === 'first' ? ' (ya utilizado)' : ''}.`;
-      
+      // #221: bono de 1ª carga por publicista aplicado en esta carga → se lo decimos.
+      if (includeBonusInMessage && _autoBonus && _settledPending.includes('publisher')) {
+        const _depPubPart = _autoBonus.parts.find(p => p && p.kind === 'publisher');
+        if (_depPubPart) { try { const l = await _publisherFirstBonusClientLine(_depPubPart); if (l) messageContent += '\n' + l; } catch (_) {} }
+      }
+
       const systemMessage = await Message.create({
         id: uuidv4(),
         senderId: 'admin',
@@ -12081,6 +12089,12 @@ async function initializeData() {
       response: '🎁 ¡Listo {username}! Tenés un *{pct}% de bono en tu próxima carga*.\n\nCuando vayas a cargar, avisale al agente que tenés el bono del {pct}% por instalar la app y te lo aplica en el momento. 🥳\n\n{regla}\n\n⚠️ Es por única vez.'
     },
     {
+      name: '/sys_publisher_first_bonus',
+      description: 'Línea que se AGREGA al mensaje de la carga cuando el cliente recibió el bono de 1ª carga por publicista (regla en Configuración → "🤝 Bono de 1ª carga por publicista"). Variables: ${bono} (monto del bono), {regla} (ej. "50% hasta $20.000, el resto al 20%"), {pct}, ${tope}, {excedente}, {publicista} (código de la campaña). Si lo dejás vacío, no se agrega nada.',
+      type: 'message',
+      response: '🎁 Incluye tu BONO DE BIENVENIDA por tu primera carga: ${bono} extra ({regla}). ¡Es por única vez!'
+    },
+    {
       name: '/sys_payout_paid',
       description: 'Mensaje automático "pago enviado" cuando un retiro se paga (pago automático por hgcash o "Pagar con otro banco"). Variables: ${amount}. Si lo dejás vacío, no se envía.',
       type: 'message',
@@ -12926,6 +12940,137 @@ app.post('/api/admin/install-bonus', authMiddleware, adminMiddleware, async (req
     logger.info(`[install-bonus] regla → ${pct}% hasta $${capArs} + ${excessPct}% del resto (por ${req.user.username})`);
     const cfg = await getInstallBonusConfig();
     res.json({ success: true, ...cfg, text: installBonusRuleText(cfg) });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+
+// #221 BONO DE 1ª CARGA POR PUBLICISTA (owner 2026-11-03, pedido por Telegram: "los que
+// derivamos desde Kommo, 50% con tope de 20k y el excedente 20%, en la primera carga, solo
+// los que creamos desde el publicista"). Misma regla pct/tope/excedente que el bono por
+// instalar; por CAMPAÑA (publicista); solo clientes dados de alta desde `fromDate` (ART) y,
+// con scope 'panel', solo los creados por staff/publisher_admin (no los del link). Lo aplica
+// el SERVER en la carga (manual y banco) vía _pendingBonusFor / _settlePendingBonuses y
+// EXCLUYE al bono por instalar en esa misma carga (no se suman dos bonos de "primera
+// carga"; el de instalar queda pendiente para la próxima). Sin cache (multi-instancia).
+// Config['publisherFirstBonus'] = { rules: [{ campaign, enabled, pct, capArs, excessPct,
+// fromDate 'YYYY-MM-DD'|null, scope 'panel'|'all' }] }.
+function _normPubFirstRule(r) {
+  if (!r || typeof r !== 'object') return null;
+  const campaign = String(r.campaign || '').toUpperCase().trim();
+  if (!campaign) return null;
+  const n = (v, def, max) => { const x = Math.round(Number(v)); return Number.isFinite(x) && x >= 0 && x <= max ? x : def; };
+  const fromDate = /^\d{4}-\d{2}-\d{2}$/.test(String(r.fromDate || '')) ? String(r.fromDate) : null;
+  return { campaign, enabled: r.enabled !== false, pct: n(r.pct, 50, 500), capArs: n(r.capArs, 20000, 100000000), excessPct: n(r.excessPct, 20, 500), fromDate, scope: r.scope === 'all' ? 'all' : 'panel' };
+}
+async function getPublisherFirstBonusRules() {
+  try {
+    const raw = await getConfig('publisherFirstBonus', null);
+    const list = raw && Array.isArray(raw.rules) ? raw.rules : [];
+    return list.map(_normPubFirstRule).filter(Boolean);
+  } catch (_) { return []; }
+}
+// Regla que le corresponde HOY a un cliente, o null. `u` necesita: id, username,
+// acquisitionCampaign, acquisitionSource, createdByAgent, createdByEmployeeId, createdAt,
+// publisherFirstBonusStatus. Sin cargas reales previas (la carga en curso todavía no
+// escribió su Transaction cuando se evalúa). Fail-closed: ante duda, sin bono.
+async function _publisherFirstBonusRuleFor(u) {
+  if (!u || u.publisherFirstBonusStatus === 'used') return null;
+  const camp = String(u.acquisitionCampaign || '').toUpperCase().trim();
+  if (!camp) return null;
+  const rules = await getPublisherFirstBonusRules();
+  const rule = rules.find(r => r.enabled && r.campaign === camp);
+  if (!rule) return null;
+  if (rule.scope === 'panel') {
+    const fromPanel = u.createdByAgent === true || !!u.createdByEmployeeId || u.acquisitionSource === 'manual';
+    if (!fromPanel) return null;
+  }
+  if (rule.fromDate) {
+    const from = new Date(rule.fromDate + 'T00:00:00-03:00');
+    if (!u.createdAt || new Date(u.createdAt).getTime() < from.getTime()) return null;
+  }
+  const prev = await Transaction.countDocuments({
+    $or: [{ userId: String(u.id) }, { username: u.username }],
+    type: 'deposit',
+    'metadata.source': { $nin: ['install_bonus', 'welcome_gift', 'welcome_code', 'payout_refund', 'notif_batch', 'notif_batch_auto'] }
+  });
+  if (prev > 0) return null;
+  return rule;
+}
+// Regla en una frase corta para el cliente ("50% hasta $20.000, el resto al 20%").
+function _pubFirstShortRule(cfg) {
+  const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('es-AR');
+  const c = cfg || {};
+  return c.capArs > 0 ? `${c.pct}% hasta ${money(c.capArs)}, el resto al ${c.excessPct}%` : `${c.pct}% de la carga`;
+}
+// Línea que se suma al mensaje de la carga al cliente (editable: /sys_publisher_first_bonus; vacío = nada).
+async function _publisherFirstBonusClientLine(part) {
+  const cfg = (part && part.cfg) || {};
+  return renderSystemCommand('/sys_publisher_first_bonus',
+    '🎁 Incluye tu BONO DE BIENVENIDA por tu primera carga: ${bono} extra ({regla}). ¡Es por única vez!',
+    { bono: Math.round(Number(part && part.amount) || 0).toLocaleString('es-AR'), regla: _pubFirstShortRule(cfg), pct: cfg.pct,
+      tope: Math.round(Number(cfg.capArs) || 0).toLocaleString('es-AR'), excedente: cfg.excessPct, publicista: (part && part.campaign) || '' });
+}
+// GET cualquier staff (el panel lo usa para la sugerencia); POST/DELETE solo admin general.
+app.get('/api/admin/publisher-first-bonus', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const rules = await getPublisherFirstBonusRules();
+    const codes = rules.map(r => r.campaign);
+    const camps = codes.length ? await Campaign.find({ code: { $in: codes } }).select('code publisher name').lean() : [];
+    const byCode = {}; camps.forEach(c => { byCode[c.code] = c; });
+    let usedBy = {};
+    if (codes.length) {
+      try {
+        const used = await User.aggregate([
+          { $match: { publisherFirstBonusStatus: 'used', publisherFirstBonusCampaign: { $in: codes } } },
+          { $group: { _id: '$publisherFirstBonusCampaign', n: { $sum: 1 }, total: { $sum: { $ifNull: ['$publisherFirstBonusAmount', 0] } } } }
+        ]);
+        used.forEach(u => { usedBy[u._id] = u; });
+      } catch (_) {}
+    }
+    res.json({ rules: rules.map(r => {
+      const ej = (r.capArs > 0 ? r.capArs : 10000) * 2;
+      return Object.assign({}, r, {
+        publisher: (byCode[r.campaign] && byCode[r.campaign].publisher) || null,
+        campaignName: (byCode[r.campaign] && byCode[r.campaign].name) || null,
+        text: installBonusRuleText(r), shortRule: _pubFirstShortRule(r),
+        example: { amount: ej, bonus: computeInstallBonus(ej, r) },
+        usedCount: (usedBy[r.campaign] && usedBy[r.campaign].n) || 0,
+        usedTotal: (usedBy[r.campaign] && usedBy[r.campaign].total) || 0
+      });
+    }) });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/publisher-first-bonus', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const b = req.body || {};
+    const campaign = String(b.campaign || '').toUpperCase().trim();
+    if (!campaign) return res.status(400).json({ error: 'Elegí el publicista (campaña).' });
+    const camp = await Campaign.findOne({ code: campaign }).select('code').lean();
+    if (!camp) return res.status(400).json({ error: 'Esa campaña no existe.' });
+    const pct = Math.round(Number(b.pct)), capArs = Math.round(Number(b.capArs)), excessPct = Math.round(Number(b.excessPct));
+    if (!Number.isFinite(pct) || pct < 0 || pct > 500) return res.status(400).json({ error: 'El % del bono tiene que estar entre 0 y 500.' });
+    if (!Number.isFinite(capArs) || capArs < 0) return res.status(400).json({ error: 'El tope tiene que ser un monto ≥ 0 (0 = sin tope).' });
+    if (!Number.isFinite(excessPct) || excessPct < 0 || excessPct > 500) return res.status(400).json({ error: 'El % del excedente tiene que estar entre 0 y 500.' });
+    const fromDate = String(b.fromDate || '').trim();
+    if (fromDate && !/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) return res.status(400).json({ error: 'La fecha "desde" tiene que ser AAAA-MM-DD (o vacía = todos).' });
+    const rule = { campaign, enabled: b.enabled !== false && b.enabled !== 'false', pct, capArs, excessPct, fromDate: fromDate || null, scope: b.scope === 'all' ? 'all' : 'panel' };
+    const rules = await getPublisherFirstBonusRules();
+    const next = rules.filter(r => r.campaign !== campaign).concat([rule]);
+    await Config.set('publisherFirstBonus', { rules: next }, req.user.username);
+    logger.info(`[pub-first-bonus] regla ${campaign} → ${rule.enabled ? 'ON' : 'OFF'} ${pct}% hasta $${capArs} + ${excessPct}% del resto, desde ${rule.fromDate || 'siempre'}, alcance ${rule.scope} (por ${req.user.username})`);
+    res.json({ success: true, rule: Object.assign({}, rule, { text: installBonusRuleText(rule), shortRule: _pubFirstShortRule(rule) }) });
+  } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.delete('/api/admin/publisher-first-bonus/:campaign', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const campaign = String(req.params.campaign || '').toUpperCase().trim();
+    const rules = await getPublisherFirstBonusRules();
+    const next = rules.filter(r => r.campaign !== campaign);
+    if (next.length === rules.length) return res.status(404).json({ error: 'No hay regla para esa campaña.' });
+    await Config.set('publisherFirstBonus', { rules: next }, req.user.username);
+    logger.info(`[pub-first-bonus] regla ${campaign} BORRADA (por ${req.user.username})`);
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
 
@@ -18301,6 +18446,11 @@ app.get('/api/users/:userId', authMiddleware, async (req, res) => {
       } catch (e) { /* no bloquear el perfil por esto */ }
       // #188 regla del bono por instalar (para la sugerencia del modal Depositar).
       try { const c = await getInstallBonusConfig(); user.installBonusRule = Object.assign(c, { text: installBonusRuleText(c) }); } catch (_) {}
+      // #221 bono de 1ª carga por publicista pendiente (banner del chat + sugerencia en Depositar).
+      try {
+        const pr = await _publisherFirstBonusRuleFor(user);
+        user.publisherFirstBonus = pr ? { pending: true, campaign: pr.campaign, pct: pr.pct, capArs: pr.capArs, excessPct: pr.excessPct, text: installBonusRuleText(pr), shortRule: _pubFirstShortRule(pr) } : null;
+      } catch (_) {}
     }
 
     // Nivel VIP resuelto (nombre/emoji) para el header del chat del panel.
@@ -21015,7 +21165,8 @@ async function _recordAppliedBonusTx(o) {
       daily_roulette: { source: 'daily_roulette', desc: `Ruleta diaria — ${o.label || (o.pct + '% EXTRA')} aplicado en carga de ${fmt(amt)}` },
       install_bonus:  { source: 'install_bonus',  desc: `Bono por instalar la app — ${o.pct ? o.pct + '% ' : ''}aplicado en carga de ${fmt(amt)}` },
       auto_promo:     { source: 'notif_batch',    desc: `Lote con regalo — ${o.label || (o.pct + '%')} aplicado en carga de ${fmt(amt)}` },
-      story_bonus:    { source: 'story_bonus',    desc: `Historia — ${o.label || ('+' + o.pct + '%')} aplicado en carga de ${fmt(amt)}` } // #210
+      story_bonus:    { source: 'story_bonus',    desc: `Historia — ${o.label || ('+' + o.pct + '%')} aplicado en carga de ${fmt(amt)}` }, // #210
+      publisher_first: { source: 'publisher_first_bonus', desc: `Bono de 1ª carga (publicista ${o.label || ''}) — ${o.pct}% aplicado en carga de ${fmt(amt)}` } // #221
     };
     const k = kinds[o.kind]; if (!k) return null;
     return await Transaction.create({
@@ -21048,6 +21199,14 @@ async function _markDailySpinPctUsed(userId, o) {
 // calculado"): el bono por instalar la app (pct% hasta el tope + excessPct% del
 // resto) y el % de la ruleta diaria. Devuelve { total, parts[] }. `total` 0 = nada.
 // #206: el % de la ruleta solo cuenta si no venció (24 h) — se relee de la DB.
+// Etiqueta corta de cada parte (notas admin-only de la carga manual y del banco).
+function _pendingPartLabel(p) {
+  const k = p && p.kind;
+  if (k === 'install') return 'bono instalar app ' + p.pct + '%';
+  if (k === 'publisher') return 'bono 1ª carga publicista ' + (p.campaign || '') + ' ' + p.pct + '%';
+  if (k === 'story') return 'historia +' + p.pct + '%';
+  return 'ruleta +' + p.pct + '%';
+}
 async function _pendingBonusFor(user, amount) {
   const out = { total: 0, parts: [] };
   const a = Number(amount) || 0;
@@ -21055,9 +21214,17 @@ async function _pendingBonusFor(user, amount) {
   let fresh = user;
   try {
     await _expireDailyRoulettePct(user.id);
-    fresh = (await User.findOne({ id: user.id }).select('firstChargeBonusStatus dailyRoulettePendingPct dailyRoulettePendingAt storyBonus').lean()) || user;
+    fresh = (await User.findOne({ id: user.id }).select('id username firstChargeBonusStatus dailyRoulettePendingPct dailyRoulettePendingAt storyBonus acquisitionCampaign acquisitionSource createdByAgent createdByEmployeeId createdAt publisherFirstBonusStatus').lean()) || user;
   } catch (_) {}
-  if (fresh.firstChargeBonusStatus === 'pending') {
+  // #221 bono de 1ª carga por publicista: va PRIMERO y excluye al de instalar en esta
+  // carga (dos bonos "de primera carga" no se suman; el de instalar sigue pendiente).
+  let _pubRule = null;
+  try { _pubRule = await _publisherFirstBonusRuleFor(fresh); } catch (e) { logger.warn(`[pub-first-bonus] no se pudo evaluar la regla de ${user.username}: ${e.message}`); }
+  if (_pubRule) {
+    const b = computeInstallBonus(a, _pubRule);
+    if (b > 0) { out.parts.push({ kind: 'publisher', pct: _pubRule.pct, amount: b, campaign: _pubRule.campaign, rule: installBonusRuleText(_pubRule), cfg: _pubRule }); out.total += b; }
+  }
+  if (fresh.firstChargeBonusStatus === 'pending' && !out.parts.some(p => p.kind === 'publisher')) {
     const cfg = await getInstallBonusConfig();
     const b = computeInstallBonus(a, cfg);
     if (b > 0) out.parts.push({ kind: 'install', pct: cfg.pct, amount: b, rule: installBonusRuleText(cfg) });
@@ -21087,8 +21254,33 @@ async function _pendingBonusFor(user, amount) {
 async function _settlePendingBonuses(user, agent, ctx) {
   const done = [];
   const a = Number(ctx && ctx.amount) || 0;
+  // #221: ctx.parts = lo que devolvió _pendingBonusFor para ESTA carga. Si entró el bono de
+  // 1ª carga por publicista, el de instalar NO se marca usado (no se aplicó: sigue pendiente).
+  const _parts = Array.isArray(ctx && ctx.parts) ? ctx.parts : null;
+  const _pubPart = _parts ? _parts.find(p => p && p.kind === 'publisher') : null;
+  const _skipInstall = !!_pubPart && !_parts.some(p => p && p.kind === 'install');
+  if (_pubPart) {
+    try {
+      const usedPub = await User.findOneAndUpdate(
+        { id: user.id, publisherFirstBonusStatus: { $ne: 'used' } },
+        { $set: { publisherFirstBonusStatus: 'used', publisherFirstBonusUsedAt: new Date(), publisherFirstBonusUsedBy: agent,
+                  publisherFirstBonusCampaign: _pubPart.campaign || null, publisherFirstBonusAmount: Math.min(Number(_pubPart.amount) || 0, Number(ctx && ctx.bonus) || Infinity) } },
+        { new: true }
+      ).select('id').lean();
+      if (usedPub) {
+        done.push('publisher');
+        const _pubAmt = Math.min(Number(_pubPart.amount) || 0, Number(ctx && ctx.bonus) || Infinity);
+        await _recordAppliedBonusTx({ user, kind: 'publisher_first', pct: _pubPart.pct, label: _pubPart.campaign, bonusAmount: _pubAmt, depositAmount: a,
+          depositTxId: ctx && ctx.txId, transactionId: ctx && ctx.transactionId,
+          adminUsername: agent, adminRole: (ctx && ctx.adminRole) || (agent === 'auto-hgcash' ? 'system' : 'admin') });
+        await _emitAdminOnlyChatNote(user.id, user.username,
+          `🤝 BONO DE 1ª CARGA (publicista ${_pubPart.campaign}) USADO — aplicado ${agent === 'auto-hgcash' ? 'AUTOMÁTICAMENTE' : 'por ' + agent} en la carga de $${a.toLocaleString('es-AR')}: $${_pubAmt.toLocaleString('es-AR')} de bono (regla: ${_pubFirstShortRule(_pubPart.cfg)}). Era por única vez: este cliente ya no lo tiene.${_skipInstall ? ' El bono por instalar la app sigue PENDIENTE para su próxima carga.' : ''}`).catch(() => {});
+        logger.info(`[pub-first-bonus] ${user.username} — $${_pubAmt} (${_pubPart.campaign}) marcado USADO por ${agent}`);
+      }
+    } catch (e) { logger.warn(`[deposit] no se pudo marcar el bono de 1ª carga por publicista: ${e.message}`); }
+  }
   try {
-    const usedIb = await User.findOneAndUpdate(
+    const usedIb = _skipInstall ? null : await User.findOneAndUpdate(
       { id: user.id, firstChargeBonusStatus: 'pending' },
       { $set: { firstChargeBonusStatus: 'used', firstChargeBonusUsedAt: new Date(), firstChargeBonusUsedBy: agent } },
       { new: true }
