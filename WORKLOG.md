@@ -25,8 +25,8 @@
   monthlyMax}, referralPct, installBonus{pct,capArs,excessPct}|null (null si está APAGADO #222), rouletteEnabled }`. La landing pinta
   "hasta X%" en reembolso, "X%" en referidos, la línea "+X% EXTRA instalando la app" SOLO si el bono está activo, y esconde la ruleta si
   está apagada → nada hardcodeado (regla del CLAUDE.md). Si el backend no responde, los títulos quedan sin número.
-- **Línea del bono por instalar (owner, mismo día):** debajo del 100% se muestra SIEMPRE "+50% EXTRA instalando la app y activando
-  notificaciones" (fijo, `BONUS_NOTE`); si `/api/landing/info` responde, el % se pisa con el real del panel y se oculta si el bono está APAGADO (#222).
+- **Línea del bono por instalar (owner, mismo día):** debajo del 100% se muestra SIEMPRE "+50% EXTRA en tu próxima carga si instalás la app y
+  activás las notificaciones" (fijo, `BONUS_NOTE`; dice "próxima" porque el bono por instalar NO se suma al de 1ª carga del publicista, #221: va en la siguiente); si `/api/landing/info` responde, el % se pisa con el real del panel y se oculta si el bono está APAGADO (#222).
 - Imágenes copiadas de PICA: `landing/img/girox.png` y `landing/img/games/*.jpg` (9 fotos del carrusel). `vercel.json`, `blank.html` y
   `demo.html` sin cambios (el geo-bloqueo a Argentina sigue).
 - Validado: `node --check` del script de la landing y de server.js + `check-tdz`. Deploy: back (endpoint nuevo) + Vercel (carpeta `landing/`).

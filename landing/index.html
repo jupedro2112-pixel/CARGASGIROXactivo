@@ -236,7 +236,7 @@
         <div class="eyebrow">Bono de bienvenida</div>
         <div class="big" id="bonusBig">100%</div>
         <div class="sub" id="bonusSub">EN TU PRIMERA CARGA</div>
-        <div class="note" id="bonusNote">+50% EXTRA instalando la app y activando notificaciones</div>
+        <div class="note" id="bonusNote">+50% EXTRA en tu próxima carga si instalás la app y activás las notificaciones</div>
       </div>
 
       <p class="pitch">Creá tu cuenta en un click y entrá a jugar. Cargás por el chat con un agente real, las 24 hs.</p>
@@ -301,7 +301,7 @@
   var CAMPAIGN_CODE = '';                            // fijo, o vacío = tomar de la URL
   var BONUS_BIG = '100%';                             // ⚠️ tu oferta REAL
   var BONUS_SUB = 'EN TU PRIMERA CARGA';
-  var BONUS_NOTE = '+50% EXTRA instalando la app y activando notificaciones'; // owner 2026-11-03: línea chica debajo del bono. Si el backend responde, el % se pisa con el REAL del bono por instalar (#188/#222) y se oculta si está APAGADO.
+  var BONUS_NOTE = '+50% EXTRA en tu próxima carga si instalás la app y activás las notificaciones'; // owner 2026-11-03: el bono por instalar NO se suma al 100% de la 1ª carga (#221): va en la SIGUIENTE. Si el backend responde, el % se pisa con el REAL (#188/#222) y se oculta si está APAGADO.
   // ====================
 
   // Override del backend por URL (para PROBAR contra otro entorno sin editar el
@@ -355,7 +355,7 @@
       try {
         var ib = d.installBonus, note = document.getElementById('bonusNote');
         if (note && ib === null) note.style.display = 'none';
-        else if (note && ib && Number(ib.pct) > 0) { note.textContent = '+' + Number(ib.pct) + '% EXTRA instalando la app y activando notificaciones'; note.style.display = ''; }
+        else if (note && ib && Number(ib.pct) > 0) { note.textContent = '+' + Number(ib.pct) + '% EXTRA en tu próxima carga si instalás la app y activás las notificaciones'; note.style.display = ''; }
       } catch (e) {}
       // Ruleta diaria apagada en el panel → no se promete.
       try { if (d.rouletteEnabled === false) { var r = document.querySelector('.sv[data-s="ruleta"]'); if (r) r.style.display = 'none'; } } catch (e) {}
