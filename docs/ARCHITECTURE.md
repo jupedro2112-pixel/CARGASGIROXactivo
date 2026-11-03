@@ -5,7 +5,9 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-11-03 (b)** — interruptor del bono por instalar la app
+> Última actualización: **2026-11-03 (c)** — hasta 3 cuentas hgcash con cuenta ACTIVA rotable con un
+> botón (`Config['hgcashAccounts']`, #223; las cargas entran por todas, la activa paga y es lo que ve el cliente,
+> cada pago recuerda su cuenta). Antes (misma fecha, b): interruptor del bono por instalar la app
 > (`Config['installBonus'].enabled`, #222; apagado = sin cartel ni reclamo ni /sys_install_app,
 > los pendientes ya reclamados se cobran igual). Antes (misma fecha): **Bono de 1ª carga por PUBLICISTA (#221)**: regla
 > pct/tope/excedente por campaña (`Config['publisherFirstBonus']`), resuelta al vuelo para los
@@ -908,15 +910,28 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   índice único de HgcashCharge de nuestro lado y la idempotencia de 1girox del otro) →
   Transaction + mensaje + SLA. Fallo → se BORRA el HgcashCharge y es reintentable hasta
   3 veces (la reference estable impide que el reintento duplique la carga).
-  **Credenciales desde el PANEL (#192, réplica del #320 del gemelo):** token de API y
-  secreto del webhook cargables en Comandos → Banco automático → card 🔐, cifrados
-  (AES-256-GCM, clave derivada de `JWT_SECRET`) en `Config['hgcashCredentials']`; cada
-  instancia los carga en memoria a los 8 s y cada 60 s. **Panel > SSM** (`HGCASH_API_TOKEN` /
-  `HGCASH_WEBHOOK_SECRET` quedan de respaldo). El webhook acepta la firma con cualquiera de
-  los dos secretos; `hgcashPay.getToken()` devuelve el vigente (NO leer
-  `process.env.HGCASH_API_TOKEN` directo). Endpoints `GET/POST/DELETE
-  /api/admin/hgcash/credentials` (solo admin general; el POST prueba el token contra
-  `GET /accounts` y limpia el `accountId` cacheado).
+  **Cuentas hgcash desde el PANEL (#192 → #223, hasta 3 a la vez con una ACTIVA):**
+  `Config['hgcashAccounts'] = { accounts: [{ key, label, tokenEnc, secretEnc, …Last4, accountId,
+  accountName, cbu, alias, bank, titular }], activeKey, switchedBy/At }`, cifrado AES-256-GCM con
+  clave derivada de `JWT_SECRET` (`_credEncrypt`); cada instancia lo descifra en memoria a los 8 s y
+  cada **15 s** (`_hgAccounts`, `_hgActiveKey`). Lo legacy (`Config['hgcashCredentials']`, #192) se
+  migra solo a la cuenta `a1` la primera vez. **Panel > SSM** (`HGCASH_API_TOKEN` /
+  `HGCASH_WEBHOOK_SECRET` valen solo sin cuentas en el panel). La **ACTIVA** es la que paga
+  (`hgcashPay.setTokenOverride`), responde el saldo y define lo que ve el cliente: al activar,
+  `_hgApplyActiveToConfigs` escribe `hgcash.accountName/cbu/accountId` y `Config['cbu']`. **TODAS
+  reciben:** `_hgcashWebhookSecretEntries()` → el webhook acepta la firma de cualquiera y guarda por
+  cuál entró en `BankMovement.accountKey`; `_comprobanteToOurBank` reconoce el CBU/titular de
+  cualquiera. **Cada pago recuerda su cuenta** (`PendingPayout.hgAccountKey`, `BankSweep.hgAccountKey`):
+  `hgcashService` acepta `token` opcional en todas las llamadas y las consultas de estado/recibo pasan
+  `_hgTokenFor(key)` → rotar no rompe los pagos en curso. El pago/bajada recarga las cuentas antes de
+  resolver (`_loadHgcashCredentials()`), así el cambio aplica al instante en todas las instancias.
+  Endpoints: `GET /api/admin/hgcash/accounts` (admin/depositor/withdrawer), `POST` (admin: upsert,
+  prueba el token contra `GET /accounts`, máx. 3), `DELETE /:key` (admin), `POST /:key/activate`
+  (admin/depositor/withdrawer: el encargado rota). Legacy `POST/DELETE /api/admin/hgcash/credentials`
+  siguen (escriben sobre la activa / borran todas). Panel: card "🏦 Cuentas hgcash" (Comandos → Banco
+  automático) + barra "Cuenta hgcash en uso · 🔁 USAR ESTA" en 🏦 Banco; badge HG con la cuenta en
+  movimientos y bandeja (`hgAccount` en la respuesta). `hgcashPay.getToken()` devuelve el de la activa
+  (NO leer `process.env.HGCASH_API_TOKEN` directo).
   **Fan-out** (#94 → #192): reenvía el webhook crudo+firma a las OTRAS páginas que
   comparten la cuenta hgcash. Destinos desde el panel (card 🔁, `Config['hgcashFanout'].urls`,
   hasta 5, cache 30 s; `GET/POST/DELETE /api/admin/hgcash/fanout`); sin ese Config vale

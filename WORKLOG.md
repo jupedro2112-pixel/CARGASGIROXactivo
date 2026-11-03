@@ -8,6 +8,41 @@
 
 ## Sesión 2026-11-03
 
+### 223. Hasta 3 cuentas hgcash a la vez + cuenta ACTIVA rotable con un botón — admin-sw v60
+- **Owner:** "que se puedan vincular 2 o 3 cuentas a la vez y que el encargado pueda elegir cuál banco utilizar, para rotar más libremente
+  y más rápido, todo configurable con un botón". Antes (#192) había UNA sola cuenta hgcash (un token, un secreto, un titular/CBU) y rotar
+  era pegar credenciales nuevas cada vez.
+- **Modelo:** `Config['hgcashAccounts'] = { accounts: [{ key 'a1'|'a2'|'a3', label, tokenEnc/tokenLast4, secretEnc/secretLast4, accountId,
+  accountName, cbu, alias, bank, titular, updatedBy/At }], activeKey, switchedBy, switchedAt }` (cifrado con la misma clave de #192).
+  **Migración automática:** la primera lectura sin `hgcashAccounts` convierte `Config['hgcashCredentials']` (#192) + `hgcash.accountName/cbu/accountId`
+  + `Config['cbu']` en la cuenta `a1` activa → no hay que reconfigurar nada tras el deploy.
+- **Qué manda la cuenta ACTIVA:** `hgcashPay.setTokenOverride(activa.token)` (retiros, bajadas, saldo, alias-lookup); al activar,
+  `_hgApplyActiveToConfigs` escribe `hgcash.accountName/cbu/accountId` (matcheo) y `Config['cbu']` (titular/banco/CBU/alias que ve el cliente en
+  `/api/config/cbu` y el mensaje de datos de pago). Si la cuenta no tiene titular/CBU/alias cargados, avisa y deja el CBU anterior.
+- **Las cargas entran por TODAS:** `_hgcashWebhookSecretEntries()` devuelve `[{key, secret}]` de todas las cuentas (sin ninguna → SSM, regla #193
+  intacta); el webhook identifica por cuál secreto entró (`matchedKey`) y lo guarda en `BankMovement.accountKey` (campo nuevo); `ensureHgcashAccountIdSaved(accountId, key)`
+  guarda el `accountId` de hgcash en ESE perfil y solo cachea en `hgcash.accountId` si es la activa. `_comprobanteToOurBank` reconoce el CBU/titular
+  de cualquiera de las cuentas (no solo la activa).
+- **Pagos atados a su cuenta:** `PendingPayout.hgAccountKey` / `BankSweep.hgAccountKey` (campos nuevos) guardan qué perfil pagó; `hgcashService`
+  acepta `token` opcional en TODAS las llamadas (`lookupAlias`, `createCashOut`, `getTransactionIdForRequest`, `getReceiptUrl`,
+  `getTransactionStatus`, `fetchReceiptPdf`) y los 8 puntos de consulta de estado/recibo pasan `_hgTokenFor(hgAccountKey)` → un pago hecho desde
+  A se sigue consultando con el token de A aunque se rote a B. El pago/bajada llama `_loadHgcashCredentials()` antes de resolver la cuenta → el
+  cambio desde otra instancia aplica al instante (y la recarga periódica bajó de 60 s a **15 s**). `resolveHgcashAccountId` usa el `accountId`
+  del perfil activo como fallback y lo cachea ahí cuando lo resuelve por API.
+- **Endpoints:** `GET /api/admin/hgcash/accounts` (admin/depositor/withdrawer; `canEdit` solo admin), `POST` (admin: upsert con `key?`, label,
+  token?, webhookSecret?, titular, cbu 22 díg. o vacío, alias, bank; prueba el token contra `GET /accounts` y toma `accountId`; máximo 3; cuenta
+  nueva exige token; sin secreto avisa), `DELETE /:key` (admin; la activa no se borra si hay otras), `POST /:key/activate` (admin/depositor/withdrawer =
+  **el encargado rota**). Legacy `POST /api/admin/hgcash/credentials` escribe sobre la activa (o crea `a1`); `DELETE` borra TODAS y vuelve a SSM.
+  `_banksPayload.hgcash` suma `activeAccount` y `accountsCount`; movimientos y bandeja llevan `hgAccount {key,label,active}`.
+- **Panel:** la card 🔐 de una sola cuenta pasó a **"🏦 Cuentas hgcash (hasta 3)"** (Comandos → Banco automático): lista con ● ACTIVA, token/secreto
+  …últimos 4, datos de pago, botones **🔁 USAR ESTA** / ✏️ Editar / 🗑️, formulario Agregar/Editar, "Borrar todas y volver a AWS". En **🏦 Banco** hay una
+  barra "Cuenta hgcash en uso: X [select] 🔁 USAR ESTA" (visible con 2+ cuentas; la ve el encargado). Badge HG de movimientos/bandeja muestra la
+  cuenta (verde = en uso). Resumen de Bancos automáticos dice qué cuenta paga.
+- **Pendiente del owner tras el deploy:** cada cuenta hgcash nueva necesita el webhook dado de alta en hgcash apuntando a la MISMA URL
+  (`/api/hgcash/webhook`) con su propio secreto; cargar titular/CBU/alias en cada cuenta para que el cliente vea los datos correctos al rotar.
+- Validado con `node --check` (server.js, hgcashService, 3 modelos, admin.js, admin-sw) + `check-tdz`. Docs: ARCHITECTURE (§5 auto-carga, §2
+  modelos), CLAUDE.md (gotcha #192 → #223).
+
 ### 222. Interruptor ACTIVO/APAGADO del bono por instalar la app (desde el panel) — admin-sw v59, PWA SW v134
 - **Owner:** "¿y lo de instalar la app se puede habilitar/deshabilitar?" — no había interruptor (solo la regla %/tope/excedente).
 - `Config['installBonus'].enabled` (default **true**; `getInstallBonusConfig()` lo devuelve, el POST de `/api/admin/install-bonus` lo guarda

@@ -75,10 +75,15 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
 
 ## Cosas que NO hay que romper (gotchas)
 
-- **Credenciales de hgcash (#192):** además de SSM, se pueden cargar desde el panel (cifradas
-  en Config con clave derivada de JWT_SECRET; panel > SSM). Cambio de cuenta hgcash = panel →
-  Comandos → Banco automático, sin tocar AWS. No volver a leer `process.env.HGCASH_API_TOKEN`
-  directo: usar `hgcashPay.getToken()` y `_hgcashWebhookSecrets()`. **Reenvío a otras
+- **Cuentas hgcash (#192 → #223):** hasta 3 cuentas cargadas desde el panel (cifradas en
+  `Config['hgcashAccounts']` con clave derivada de JWT_SECRET; panel > SSM) y UNA activa que se rota
+  con el botón "USAR ESTA" (Comandos → Banco automático, o la barra de 🏦 Banco; la pueden tocar
+  admin/depositor/withdrawer). La activa paga y es lo que ve el cliente (al activar se reescribe
+  `Config['cbu']`); **las cargas entran por TODAS** (el webhook acepta cualquiera de los secretos y
+  etiqueta `BankMovement.accountKey`). Un pago recuerda su cuenta (`hgAccountKey`): toda consulta
+  nueva a hgcash sobre un pago/bajada existente tiene que pasar `_hgTokenFor(x.hgAccountKey)`, y
+  todo flujo nuevo que pague tiene que guardar `hgAccountKey: _hgActiveKey`. No volver a leer
+  `process.env.HGCASH_API_TOKEN` directo: usar `hgcashPay.getToken()` / `_hgcashWebhookSecretEntries()`. **Reenvío a otras
   páginas:** también desde el panel (`Config['hgcashFanout']`, hasta 5 URLs; sin config vale
   `HGCASH_FANOUT_URL`). Un aviso ya reenviado (`X-Forwarded-By`) no se vuelve a reenviar.
 - **Finpro (#217–#220), segundo banco con API paralelo a hgcash:** mismo pipeline. **Entrantes =

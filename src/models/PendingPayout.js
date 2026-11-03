@@ -37,6 +37,7 @@ const pendingPayoutSchema = new mongoose.Schema({
   hgTxId: { type: String, default: null },                       // id de la TRANSACCIÓN real (ledger) → para el comprobante PDF
   receiptSentAt: { type: Date, default: null },                  // cuándo se le envió el comprobante PDF al cliente (idempotencia)
   hgStatus: { type: String, default: null },                     // PENDING/PROCESSING/DONE/ERROR...
+  hgAccountKey: { type: String, default: null },                 // #223 perfil de cuenta hgcash que pagó (su token consulta estado/recibo aunque se rote)
   // #218 Finpro (paidVia 'finpro'): un payout = un proceso (`process_id` uuid) con una transferencia.
   fpProcessId: { type: String, default: null, index: true },     // process_id del lote en Finpro (se reusa SOLO si fpAccepted)
   fpTransactionId: { type: String, default: null },              // transaction_id (≤ 11 chars, determinístico del payout.id)
