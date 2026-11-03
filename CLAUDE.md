@@ -77,7 +77,8 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
 
 - **Cuentas hgcash (#192 → #223):** hasta 3 cuentas cargadas desde el panel (cifradas en
   `Config['hgcashAccounts']` con clave derivada de JWT_SECRET; panel > SSM) y UNA activa que se rota
-  con el botón "USAR ESTA" (Comandos → Banco automático, o la barra de 🏦 Banco; la pueden tocar
+  con el botón "USAR ESTA" (sección **🏛️ Bancos — Configuración** del panel (#224, debajo de Comandos; solo admin)
+  o la barra de 🏦 Banco; la pueden tocar
   admin/depositor/withdrawer). La activa paga y es lo que ve el cliente (al activar se reescribe
   `Config['cbu']`); **las cargas entran por TODAS** (el webhook acepta cualquiera de los secretos y
   etiqueta `BankMovement.accountKey`) salvo que el panel diga "solo la en uso" o pause una cuenta

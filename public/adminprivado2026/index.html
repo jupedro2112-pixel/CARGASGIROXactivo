@@ -130,6 +130,10 @@ document.addEventListener('change', function (ev) {
                     <span class="icon icon-terminal"></span>
                     <span>Comandos</span>
                 </a>
+                <a href="#" class="nav-item nav-item-banks-config" data-section="banksConfig" style="display:none" title="Cuentas hgcash, Finpro, por dónde entran las cargas y salen los retiros, CBU del cliente, movimientos">
+                    <span>🏛️</span>
+                    <span>Bancos configuración</span>
+                </a>
                 <a href="#" class="nav-item" data-section="datos">
                     <span class="icon icon-chart"></span>
                     <span>Datos</span>
@@ -610,7 +614,7 @@ document.addEventListener('change', function (ev) {
 
             <section id="commandsSection" class="section">
                 <div class="panel-header">
-                    <h2><span class="icon icon-terminal"></span> Comandos y Configuración CBU</h2>
+                    <h2><span class="icon icon-terminal"></span> Comandos y Configuración</h2>
                 </div>
                 <div class="commands-layout">
                     <div class="commands-panel">
@@ -625,30 +629,6 @@ document.addEventListener('change', function (ev) {
                         </div>
                     </div>
                     <div class="cbu-panel">
-                        <div class="panel-subheader">
-                            <h3>Configuración CBU</h3>
-                        </div>
-                        <div class="cbu-form">
-                            <div class="form-group">
-                                <label>Banco:</label>
-                                <input type="text" id="cbuBank" placeholder="Ej: Banco Nación">
-                            </div>
-                            <div class="form-group">
-                                <label>Titular:</label>
-                                <input type="text" id="cbuTitular" placeholder="Nombre del titular">
-                            </div>
-                            <div class="form-group">
-                                <label>CBU:</label>
-                                <input type="text" id="cbuNumber" placeholder="22 dígitos del CBU">
-                            </div>
-                            <div class="form-group">
-                                <label>Alias:</label>
-                                <input type="text" id="cbuAlias" placeholder="Alias del CBU">
-                            </div>
-                            <button class="btn-primary" onclick="saveCBUConfig()">
-                                <span class="icon icon-save"></span> Guardar CBU
-                            </button>
-                        </div>
                         <!-- Comunidad / Canal de Telegram — CONFIG ÚNICA del canal.
                              🪦 Acá arriba había una sección "Canal de Telegram" aparte
                              (canalInformativoUrl): se ELIMINÓ el mismo día que se creó
@@ -1133,6 +1113,42 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                             </div>
                             <div id="fireMilestonesMsg" style="font-size:12px;margin-top:8px;color:#aaa;"></div>
                         </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- #224 BANCOS — CONFIGURACIÓN: todo lo de bancos salió de COMANDOS a su propia sección (owner 2026-11-03).
+                 Mismos ids/funciones de siempre (CBU del cliente, Bancos automáticos, hgcash, cuentas hgcash, fan-out, Finpro, movimientos). -->
+            <section id="banksConfigSection" class="section">
+                <div class="panel-header">
+                    <h2>🏛️ Bancos — Configuración</h2>
+                </div>
+                <div class="cbu-panel" id="banksConfigPanel">
+                    <div class="panel-subheader">
+                        <h3>💳 Datos de pago que ve el cliente (CBU)</h3>
+                    </div>
+                    <p style="color:#aaa;font-size:12px;line-height:1.5;margin:0 0 10px;">Es lo que la app muestra para transferir. Con cuentas hgcash cargadas, al tocar <b>USAR ESTA</b> se completa solo con el titular/CBU/alias de esa cuenta (#223).</p>
+                        <div class="cbu-form">
+                            <div class="form-group">
+                                <label>Banco:</label>
+                                <input type="text" id="cbuBank" placeholder="Ej: Banco Nación">
+                            </div>
+                            <div class="form-group">
+                                <label>Titular:</label>
+                                <input type="text" id="cbuTitular" placeholder="Nombre del titular">
+                            </div>
+                            <div class="form-group">
+                                <label>CBU:</label>
+                                <input type="text" id="cbuNumber" placeholder="22 dígitos del CBU">
+                            </div>
+                            <div class="form-group">
+                                <label>Alias:</label>
+                                <input type="text" id="cbuAlias" placeholder="Alias del CBU">
+                            </div>
+                            <button class="btn-primary" onclick="saveCBUConfig()">
+                                <span class="icon icon-save"></span> Guardar CBU
+                            </button>
+                        </div>
                         <!-- ============================================================
                              BANCOS AUTOMÁTICOS (#217, réplica del #333/#368 de AUTOGIROXcompartido): una
                              sección general con las DOS decisiones (por dónde ENTRAN las cargas y por dónde
@@ -1436,7 +1452,6 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                             </div>
                             <div id="hgcashMovPagination" style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:10px;"></div>
                         </div>
-                    </div>
                 </div>
             </section>
 

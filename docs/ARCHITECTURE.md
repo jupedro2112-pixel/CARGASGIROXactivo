@@ -5,7 +5,8 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-11-03 (c)** — hasta 3 cuentas hgcash con cuenta ACTIVA rotable con un
+> Última actualización: **2026-11-03 (d)** — sección propia "🏛️ Bancos — Configuración" en el panel
+> (#224: todo lo de bancos salió de COMANDOS; mismos ids/endpoints). Antes (c): hasta 3 cuentas hgcash con cuenta ACTIVA rotable con un
 > botón (`Config['hgcashAccounts']`, #223; las cargas entran por todas, la activa paga y es lo que ve el cliente,
 > cada pago recuerda su cuenta). Antes (misma fecha, b): interruptor del bono por instalar la app
 > (`Config['installBonus'].enabled`, #222; apagado = sin cartel ni reclamo ni /sys_install_app,
@@ -934,8 +935,8 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   Endpoints: `GET /api/admin/hgcash/accounts` (admin/depositor/withdrawer), `POST` (admin: upsert,
   prueba el token contra `GET /accounts`, máx. 3), `DELETE /:key` (admin), `POST /:key/activate`
   (admin/depositor/withdrawer: el encargado rota). Legacy `POST/DELETE /api/admin/hgcash/credentials`
-  siguen (escriben sobre la activa / borran todas). Panel: card "🏦 Cuentas hgcash" (Comandos → Banco
-  automático) + barra "Cuenta hgcash en uso · 🔁 USAR ESTA" en 🏦 Banco; badge HG con la cuenta en
+  siguen (escriben sobre la activa / borran todas). Panel: card "🏦 Cuentas hgcash" (sección **🏛️ Bancos —
+  Configuración**, #224; antes en Comandos) + barra "Cuenta hgcash en uso · 🔁 USAR ESTA" en 🏦 Banco; badge HG con la cuenta en
   movimientos y bandeja (`hgAccount` en la respuesta). `hgcashPay.getToken()` devuelve el de la activa
   (NO leer `process.env.HGCASH_API_TOKEN` directo).
   **Fan-out** (#94 → #192): reenvía el webhook crudo+firma a las OTRAS páginas que

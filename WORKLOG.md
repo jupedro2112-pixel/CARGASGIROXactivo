@@ -8,6 +8,19 @@
 
 ## Sesión 2026-11-03
 
+### 224. Sección propia "🏛️ Bancos — Configuración" debajo de COMANDOS — admin-sw v62
+- **Owner:** "separá el tema de bancos de comandos: que aparezca abajo de COMANDOS una sección BANCOS CONFIGURACIÓN y ahí se configure todo".
+- `index.html`: ítem de menú `data-section="banksConfig"` (`.nav-item-banks-config`, solo admin general) debajo de Comandos y
+  `<section id="banksConfigSection">` con TODO lo de bancos movido tal cual desde COMANDOS (mismos ids y funciones; sin cambios de back):
+  datos de pago que ve el cliente (card CBU, ahora con nota de que USAR ESTA la completa sola), 🏦 Bancos automáticos, 🟡 Banco automático
+  (hgcash), 🏦 Cuentas hgcash (#223), 🔁 reenvío de avisos, 🟣 Finpro y 🏦 Movimientos del banco. COMANDOS queda con comandos, comunidad,
+  bonos, reembolsos, prefijo, funciones, píxeles, webhooks, etc. (título "Comandos y Configuración").
+- `admin.js`: `switchSection('banksConfig')` → `loadBanksConfigSection()` (= `loadCBUConfigOnly()` + `loadHgcashConfig()`, que a su vez
+  carga cuentas, fan-out, Finpro, Bancos y movimientos); `loadCBUConfig()` (COMANDOS) ya no llama `loadHgcashConfig()`;
+  `_hgcashPanelVisible` mira `banksConfigSection` (antes `commandsSection`) para el refresco en vivo de movimientos; al activar una cuenta
+  se recarga la card CBU solo si la sección está abierta.
+- Nada del server cambió: mismos endpoints. Docs: ARCHITECTURE §6 (panel), CLAUDE.md (gotcha de cuentas: dónde está).
+
 ### 223. Hasta 3 cuentas hgcash a la vez + cuenta ACTIVA rotable con un botón — admin-sw v60
 - **Owner:** "que se puedan vincular 2 o 3 cuentas a la vez y que el encargado pueda elegir cuál banco utilizar, para rotar más libremente
   y más rápido, todo configurable con un botón". Antes (#192) había UNA sola cuenta hgcash (un token, un secreto, un titular/CBU) y rotar
