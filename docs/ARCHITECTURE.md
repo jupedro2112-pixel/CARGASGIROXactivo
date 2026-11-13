@@ -557,7 +557,17 @@ reintento manda la misma reference y la plataforma responde `duplicate:true`.
   loguea en ERROR. **No reintentar el depósito completo** (la reference devolvería
   duplicate): escalar a soporte de 1girox.
 
-### 4.5b Bono WAGER = saldo promocional (#226→#227, 2026-11-13; probado EN VIVO, el manual v1.18 no lo documenta)
+### 4.5b Bono WAGER = saldo promocional (#226→#227, 2026-11-13; probado EN VIVO; documentado en el manual v1.20 `docs/PARTNER-APIv1.20.pdf` §2.8, §2.8.1 y §2.9.1)
+
+> **Manual v1.20 (#228, leído el 2026-11-13) — qué confirma y qué agrega:** `POST /players/{u}/promo` es oficial (v1.19, §2.9.1): 422
+> `wager_out_of_range` si supera `wager.api_max`, 502 `wallet_error` = NO consumió la reference (reintentar con la misma; el cliente ya trata
+> todo 5xx como transitorio). **Motor unificado (§2.8.1):** en `POST /deposit` el monto de `bonus_*` / `wager_*` se respeta pero el TIPO lo
+> decide el agente del jugador en 1girox ("solo Pulse" ⇒ todo sale wager; cualquier otro ⇒ todo sale bono real); `/promo` y `/bonus` "por
+> ahora" NO se convierten ⇒ el diseño del #227 (wager siempre por `/promo`) es el que el manual recomienda. Campos nuevos, solo en unificado:
+> `GET /config.bonus_engine` y `player.bonus_mode` (`'wager'|'bonus'`, expuesto como `bonusMode` en `getUserInfoByName`). Si con el motor
+> unificado un bono NORMAL adjunto sale como promocional, `depositToUser` devuelve `bonusAsWager` y lo deja en el log (hoy la contabilidad
+> local lo sigue anotando como bono real: con el motor en "clásico", que es como está el sitio, no ocurre). El manual se contradice sobre
+> dónde convierte el wager ("solo con Atomic" en §2.8 vs "solo Pulse" en §2.8.1): el panel de 1girox dice Pulse.
 
 - **Qué es:** plata FICTICIA de la casa en un balde aparte (`player.wager`). No sale del saldo del agente,
   no suma al `balance`, no es retirable ni lleva rollover; se juega después del saldo real (solo juegos de

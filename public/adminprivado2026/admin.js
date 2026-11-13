@@ -7350,7 +7350,8 @@ function _bkRenderPlatform(d) {
     }
     if (d && d.player) {
         if (!d.player.found) html += '<div style="color:#ff8a80;">No se pudo leer ese usuario en 1girox.</div>';
-        else if (d.player.wagerFieldPresent) html += '<div>👤 <b>' + escapeHtml(d.player.username) + '</b>: saldo real ' + _bkMoney(d.player.balance) + ' · saldo promocional <b>' + _bkMoney(d.player.wager) + '</b>.</div>';
+        else if (d.player.wagerFieldPresent) html += '<div>👤 <b>' + escapeHtml(d.player.username) + '</b>: saldo real ' + _bkMoney(d.player.balance) + ' · saldo promocional <b>' + _bkMoney(d.player.wager) + '</b>' +
+            (d.player.bonusMode ? ' · con el motor unificado sus bonos de carga salen como <b>' + (d.player.bonusMode === 'wager' ? 'wager (solo Pulse)' : 'bono real') + '</b>' : '') + '.</div>';
         else html += '<div style="color:#ffcc80;">👤 1girox no informa saldo promocional para <b>' + escapeHtml(d.player.username) + '</b>.</div>';
     }
     el.innerHTML = html;

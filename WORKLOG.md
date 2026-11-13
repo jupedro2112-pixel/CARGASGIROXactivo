@@ -8,6 +8,22 @@
 
 ## Sesión 2026-11-13
 
+### 228. 📘 Manual Partner API v1.20 — confirma el diseño del #227 + avisos de motor "unificado" — admin-sw v65
+- **Qué pasó:** 1girox mandó el manual v1.20 (`docs/PARTNER-APIv1.20.pdf`; reemplaza al v1.18, que se borró). Documenta lo que el #227
+  había descubierto probando: `wager_percent`/`wager_amount` en el depósito y `POST /players/{u}/promo` (v1.19), y el motor de bonos
+  unificado (v1.20, §2.8.1).
+- **Conclusión: no hay que rehacer nada.** El manual dice que con el motor unificado el depósito convierte el tipo del bono según el
+  agente y que `/promo` y `/bonus` "por ahora" no se convierten → usar siempre `/promo` para el wager (lo del #227) es el camino correcto.
+- **Cambios chicos (defensivos):** mensajes para `wager_out_of_range` y `wallet_error`; `bonusMode` (`player.bonus_mode`) en la lectura
+  del jugador y en "🔎 Consultar 1girox"; `depositToUser` marca `bonusAsWager` + log si un bono NORMAL adjunto sale como promocional
+  (motor unificado + agente "solo Pulse"); la card "🎟️ Tipo de bono" avisa si el motor está en "unificado" (aunque el wager esté apagado).
+- **Pendiente / a saber:** (1) con motor unificado + agente "solo Pulse" la contabilidad local seguiría anotando ese bono como real
+  (`deposit.bonus`): no se cableó porque el sitio quedó en "clásico"; (2) el "por ahora" del manual: si 1girox algún día convierte también
+  `/promo`, `creditPromo` devolvería `promo_not_granted` y se aplicaría el respaldo — re-probar si cambian de versión; (3) el manual se
+  contradice ("solo Atomic" vs "solo Pulse") sobre en qué juegos convierte el wager.
+- **Validación:** `node scripts/test-bonus-kind.js`, `node scripts/check-tdz.js`, `node --check`. Sin prueba en vivo nueva (no cambia
+  ninguna llamada a la API).
+
 ### 227. 🎟️ BONO WAGER rehecho con el PROMOCIONAL SUELTO (sin códigos) + regalos sin carga como wager — probado EN VIVO contra la API — admin-sw v64
 - **Por qué:** el #226 (mismo día, abajo) se hizo leyendo el manual v1.18, que dice que el wager solo se otorga con un código promocional.
   El panel de 1girox mostraba "La Partner API también puede cargar promocional" (no documentado) y el owner pidió averiguarlo con pruebas

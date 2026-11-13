@@ -206,7 +206,9 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   `_rolloverNoteText` en su mensaje (referidos y devoluciones de retiro NO llevan `giftFlow`). En una carga el promocional va como
   Transaction `'wager_bonus'` + `deposit.metadata.wagerBonus`, NUNCA en `deposit.bonus`; un regalo dado como wager conserva su tipo con
   `metadata.creditedAs:'wager'`. Al aprobar un retiro, 1girox le borra al jugador el saldo promocional. Mensajes: `/sys_wager_bonus`,
-  `/sys_wager_gift_note`.
+  `/sys_wager_gift_note`. Manual vigente: `docs/PARTNER-APIv1.20.pdf` (§2.8.1 motor unificado, §2.9.1 `/promo`). El sitio está en motor
+  **"clásico"** (decisión del owner 2026-11-13): si vuelve a "unificado", el tipo de los bonos NORMALES adjuntos a la carga lo decide
+  1girox según el agente (`player.bonus_mode`) y el panel lo avisa en la card.
 - **Bono de 1ª carga por PUBLICISTA (#221, 2026-11-03):** regla pct/tope/excedente POR CAMPAÑA en
   `Config['publisherFirstBonus']` (card "🤝" de Configuración), resuelta AL VUELO por
   `_publisherFirstBonusRuleFor` (campaña + creado desde el panel + fecha de alta + sin cargas previas)

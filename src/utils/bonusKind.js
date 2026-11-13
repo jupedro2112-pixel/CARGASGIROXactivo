@@ -8,7 +8,7 @@
  * rollover; se juega después del saldo real y se convierte en real de a 5% de lo
  * apostado por ronda; hoy solo en los juegos de Pulse).
  *
- * CÓMO SE OTORGA (#227, PROBADO contra la API el 2026-11-13 — el manual v1.18 no lo
+ * CÓMO SE OTORGA (#227, PROBADO contra la API el 2026-11-13; documentado desde el manual v1.19/v1.20 §2.9.1 — el v1.18 no lo
  * documenta): `POST /players/{u}/promo { amount, reference, description }` =
  * PROMOCIONAL SUELTO. Da wager de verdad con el motor de bonos en "clásico" Y en
  * "unificado", responde `promo_bonus { status:'ok', amount }` + `wager`, y un

@@ -91,5 +91,8 @@ check('endpoints GET/POST /api/admin/bonus-kind', /app\.get\('\/api\/admin\/bonu
 check('mensajes editables sembrados', /name: '\/sys_wager_bonus'/.test(server) && /name: '\/sys_wager_gift_note'/.test(server), true);
 check('la base del reembolso en vivo NO incluye wager_bonus', /CASHBACK_GIFT_TX_TYPES = \[[^\]]*wager_bonus/.test(server), false);
 
+check('#228 v1.20: bonus_mode del jugador y bono normal convertido en wager (motor unificado)', /bonusMode: player\.bonus_mode/.test(girox) && /out\.bonusAsWager = Number\(_pbDep\.amount\)/.test(girox), true);
+check('#228 v1.20: aviso de motor unificado en el panel', /if \(plat\.engine === 'unified'\) w\.push/.test(server), true);
+
 console.log(fails ? `\n❌ ${fails} caso(s) fallaron` : '\n✅ Todos los casos del bono wager dan lo esperado');
 process.exit(fails ? 1 : 0);

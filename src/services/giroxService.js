@@ -269,7 +269,10 @@ const ERROR_MESSAGES = {
   rollover_locked: 'Tenés un objetivo de apuestas pendiente: todavía no podés retirar ese monto.',
   feature_disabled: 'Esa función no está habilitada en la plataforma.',
   bonus_out_of_range: 'El monto del bono está fuera de los límites permitidos.',
-  wallet_not_configured: 'La plataforma está en mantenimiento. Reintentá en unos minutos.'
+  wallet_not_configured: 'La plataforma está en mantenimiento. Reintentá en unos minutos.',
+  // #228 (manual v1.19/v1.20)
+  wager_out_of_range: 'El saldo promocional supera el tope por operación configurado en la plataforma.',
+  wallet_error: 'El servicio de saldo de la plataforma no respondió. Reintentá en unos minutos.'
 };
 
 /** Normaliza cualquier error (de red o de la API) a { error, code, httpStatus, retryable }. */
@@ -532,6 +535,10 @@ function _playerBalances(player) {
     // APARTE del `balance` (no lo suma, no es retirable). null = la plataforma no
     // manda el campo (feat apagado) → distinto de 0 (feat prendido, sin saldo).
     wager: (player.wager != null && Number.isFinite(Number(player.wager))) ? Number(player.wager) : null,
+    // #228 (v1.20, SOLO con el motor "unificado"): qué recibe ESTE jugador con cualquier
+    // bono adjunto a una carga: 'wager' (agente "solo Pulse") o 'bonus' (bono real).
+    // Lo decide la configuración del agente en 1girox, no nuestros params. null = clásico.
+    bonusMode: player.bonus_mode ? String(player.bonus_mode) : null,
     wagering: w
   };
 }
@@ -702,6 +709,7 @@ async function _fetchPlayer(username) {
     claimableTotal: bal.claimableTotal,
     claimable: bal.claimable,
     wager: bal.wager, // #226 saldo promocional (null = feat apagado)
+    bonusMode: bal.bonusMode, // #228 v1.20: 'wager' | 'bonus' (solo motor unificado)
     wagering: bal.wagering,
     createdAt: player.created_at || null
   };
@@ -1010,6 +1018,17 @@ async function depositToUser(username, amount, description = '', reference = nul
       'NO reintentar el depósito completo: la reference devolvería duplicate. Escalar a soporte de 1girox.');
     out.bonusFailed = true;
   }
+  // #228 (manual v1.20 §2.8.1): con el motor "unificado" y un agente "solo Pulse", el
+  // bono NORMAL adjunto (bonus_percent/bonus_amount) lo acredita 1girox como saldo
+  // PROMOCIONAL: no viene `wagering.bonus`, viene `promo_bonus`. Se deja marcado y en
+  // el log (la plata la puso la casa, no el agente). Con el motor "clásico" no pasa.
+  const _sentBonus = body.bonus_percent != null || body.bonus_amount != null;
+  const _pbDep = r.data && r.data.promo_bonus;
+  if (_sentBonus && !bonusStatus && _pbDep && String(_pbDep.status || '').toLowerCase() === 'ok' && Number(_pbDep.amount) > 0) {
+    out.bonusAsWager = Number(_pbDep.amount);
+    logger.warn(`[girox] deposit(${username}, ref=${body.reference}) — el bono NORMAL adjunto salió como SALDO PROMOCIONAL ` +
+      `($${out.bonusAsWager}): el motor de bonos de 1girox está en "unificado" y el agente es "solo Pulse".`);
+  }
   // #226: lo que otorgó la regla del código (saldo promocional). Sin bloque = el
   // código no dio promocional (inválido, vencido, ya usado, o la regla da bono clásico).
   if (body.promo_code) {
@@ -1058,8 +1077,11 @@ async function withdrawFromUser(username, amount, description = '', reference = 
 // ============================================================
 // #227 PROMOCIONAL SUELTO (saldo Wager) — POST /players/{username}/promo
 // ============================================================
-// PROBADO contra la API el 2026-11-13 (el manual v1.18 no lo documenta; lo habilita
-// el operador con "La Partner API también puede cargar promocional"):
+// PROBADO contra la API el 2026-11-13 y documentado en el manual v1.19/v1.20 §2.9.1
+// (`docs/PARTNER-APIv1.20.pdf`; lo habilita el operador con "La Partner API también
+// puede cargar promocional"). 422 wager_out_of_range = supera `wager.api_max`;
+// 502 wallet_error = NO consumió la reference → reintentar con la MISMA.
+// §2.8.1: `/promo` y `/bonus` "por ahora" NO se convierten con el motor unificado.
 //   body  { amount, reference, description? }
 //   201   { duplicate:false, operation:{ reference, type:'promo', ledger_id:null,
 //           wager_ledger_id }, wager:<saldo promocional total>,

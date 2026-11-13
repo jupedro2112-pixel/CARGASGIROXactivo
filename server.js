@@ -9162,7 +9162,11 @@ async function _wagerPlatformInfo(force) {
 }
 function _wagerPlatformWarnings(cfg, plat) {
   const w = [];
-  if (!cfg.enabled || !plat || !plat.ok) return w;
+  if (!plat || !plat.ok) return w;
+  // #228 (manual v1.20 §2.8.1): con el motor unificado el TIPO de un bono adjunto a la
+  // carga lo decide 1girox según el agente, aunque acá el wager esté apagado.
+  if (plat.engine === 'unified') w.push('1girox tiene el motor de bonos en "UNIFICADO": el tipo de los bonos NORMALES que van adentro de una carga lo decide 1girox según el agente (un agente "solo Pulse" los recibe como wager). Los bonos wager de esta página salen bien igual (van por el promocional suelto). Con el motor "clásico" cada bono cae donde se elige acá.');
+  if (!cfg.enabled) return w;
   if (!plat.wagerInfo) w.push('1girox no informa la sección de saldo promocional en su configuración: puede que el Wager no esté habilitado para tu cuenta. Probalo con "Consultar 1girox".');
   else if (!plat.wagerEnabled) w.push('En 1girox el Wager (saldo promocional) está APAGADO: ningún bono va a salir como wager (se aplica el respaldo).');
   else if (!plat.apiEnabled) w.push('En 1girox falta tildar "La Partner API también puede cargar promocional" (Configuración → Bonos y wager): sin eso ningún bono sale como wager (se aplica el respaldo).');
@@ -9211,7 +9215,7 @@ app.post('/api/admin/bonus-kind/check', authMiddleware, adminMiddleware, async (
       const u = await findUserByUsernameCI(username);
       const info = await girox.getUserInfoByName(u ? u.username : username, { fresh: true });
       out.player = info
-        ? { found: true, username: info.username, balance: info.balance, wagerFieldPresent: info.wager != null, wager: info.wager }
+        ? { found: true, username: info.username, balance: info.balance, wagerFieldPresent: info.wager != null, wager: info.wager, bonusMode: info.bonusMode || null }
         : { found: false };
     }
     res.json(out);
