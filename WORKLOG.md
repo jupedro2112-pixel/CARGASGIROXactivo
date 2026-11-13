@@ -8,6 +8,16 @@
 
 ## Sesión 2026-11-13
 
+### 229. 🎰 Prueba JUGANDO el saldo promocional (sin cambios de código)
+- **Cómo:** jugador de prueba `wgtest2358`, $1.000 de promocional por `/promo`, link de ingreso (`/session`), juego del agregador
+  `atomic` (el "Pulse" del panel) manejado por HTTP; saldos leídos tras cada tirada en `admin.1girox.com/api/balance`.
+- **Reglas observadas** (detalle en ARCHITECTURE §4.5b): el juego muestra real + promocional sumados; se gasta primero el real; en cada
+  apuesta el 5% de lo apostado pasa de promocional a real (también si la apuesta fue con real); el premio vuelve al saldo que pagó la
+  apuesta, en proporción; **un retiro por la API borra TODO el promocional** aunque sea de $1.
+- **Consecuencia práctica:** el real convertido se vuelve a apostar primero en la tirada siguiente, así que el cliente no "junta" real
+  salvo que deje de jugar; y un premio grande con promocional queda en promocional.
+- El jugador de prueba quedó en $0 / $0.
+
 ### 228. 📘 Manual Partner API v1.20 — confirma el diseño del #227 + avisos de motor "unificado" — admin-sw v65
 - **Qué pasó:** 1girox mandó el manual v1.20 (`docs/PARTNER-APIv1.20.pdf`; reemplaza al v1.18, que se borró). Documenta lo que el #227
   había descubierto probando: `wager_percent`/`wager_amount` en el depósito y `POST /players/{u}/promo` (v1.19), y el motor de bonos

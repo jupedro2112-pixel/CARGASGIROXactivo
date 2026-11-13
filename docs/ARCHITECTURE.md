@@ -568,6 +568,12 @@ reintento manda la misma reference y la plataforma responde `duplicate:true`.
 > unificado un bono NORMAL adjunto sale como promocional, `depositToUser` devuelve `bonusAsWager` y lo deja en el log (hoy la contabilidad
 > local lo sigue anotando como bono real: con el motor en "clásico", que es como está el sitio, no ocurre). El manual se contradice sobre
 > dónde convierte el wager ("solo con Atomic" en §2.8 vs "solo Pulse" en §2.8.1): el panel de 1girox dice Pulse.
+>
+> **Cómo se JUEGA el wager (#229, probado jugando el 2026-11-13 con un jugador de prueba, juego del agregador `atomic`):** (1) el juego
+> muestra UN saldo = real + promocional; (2) cada apuesta gasta primero el REAL y completa con promocional (puede mezclar); (3) en CADA
+> apuesta —aunque se pague entera con real— el 5% de lo apostado pasa de promocional a real mientras quede promocional; (4) el PREMIO se
+> reparte en proporción a con qué se pagó la apuesta (pagada con promocional ⇒ el premio vuelve al promocional); (5) un RETIRO por la
+> Partner API (`POST /withdraw`, cualquier monto) BORRA todo el promocional al instante (744,20 → 0 retirando $1,40).
 
 - **Qué es:** plata FICTICIA de la casa en un balde aparte (`player.wager`). No sale del saldo del agente,
   no suma al `balance`, no es retirable ni lleva rollover; se juega después del saldo real (solo juegos de
