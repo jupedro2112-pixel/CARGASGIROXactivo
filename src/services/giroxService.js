@@ -1055,6 +1055,76 @@ async function withdrawFromUser(username, amount, description = '', reference = 
   return _moneyResult(r.data);
 }
 
+// ============================================================
+// #227 PROMOCIONAL SUELTO (saldo Wager) — POST /players/{username}/promo
+// ============================================================
+// PROBADO contra la API el 2026-11-13 (el manual v1.18 no lo documenta; lo habilita
+// el operador con "La Partner API también puede cargar promocional"):
+//   body  { amount, reference, description? }
+//   201   { duplicate:false, operation:{ reference, type:'promo', ledger_id:null,
+//           wager_ledger_id }, wager:<saldo promocional total>,
+//           promo_bonus:{ status:'ok', amount, source:'partner' } }
+//   retry con la MISMA reference → 200 duplicate:true con el mismo promo_bonus.
+// Da saldo promocional DE VERDAD con el motor de bonos en "clásico" y en "unificado"
+// (a diferencia de wager_percent/wager_amount adentro del depósito, que en
+// "unificado" se convierten en BONO REAL sin rollover — por eso NO se usan).
+// No sale del saldo del agente. `success` = la plataforma CONFIRMÓ el promocional.
+// @returns { success, duplicate, creditedAs:'wager', via:'promo', rolloverApplied:0,
+//            wagerAmount, wagerBalance, data } | { success:false, error, code, httpStatus }
+async function creditPromo(username, amount, reference = null, description = '') {
+  const amt = _normalizeAmount(amount);
+  if (amt === null) return { success: false, error: 'Monto inválido', code: 'invalid_amount', httpStatus: 400 };
+  const body = { amount: amt, reference: _buildReference('promo', reference) };
+  if (description) body.description = String(description).slice(0, 500);
+  const r = await _request({
+    method: 'post',
+    path: `/players/${encodeURIComponent(String(username))}/promo`,
+    body,
+    label: `promo(${username}, $${amt}, ref=${body.reference})`,
+    username
+  });
+  if (!r.ok) return { success: false, error: r.error, code: r.code, httpStatus: r.httpStatus };
+  _invalidatePlayer(username);
+  const d = r.data || {};
+  const pb = d.promo_bonus || null;
+  const granted = !!(pb && String(pb.status || '').toLowerCase() === 'ok' && Number(pb.amount) > 0);
+  if (!granted) {
+    logger.warn(`[girox] promo(${username}, $${amt}, ref=${body.reference}) respondió OK pero SIN promo_bonus confirmado: ${JSON.stringify(pb)}`);
+    return { success: false, error: 'La plataforma no confirmó el saldo promocional', code: 'promo_not_granted', httpStatus: 200 };
+  }
+  const out = _moneyResult(d);
+  out.creditedAs = 'wager';
+  out.via = 'promo';
+  out.rolloverApplied = 0;
+  out.wagerAmount = Number(pb.amount);
+  out.wagerBalance = (d.wager != null && Number.isFinite(Number(d.wager))) ? Number(d.wager) : null;
+  return out;
+}
+
+// #227 REGALOS SIN CARGA como WAGER. server.js inyecta un resolver que, dado el
+// flujo del regalo (`opts.giftFlow`: 'refund', 'fire', 'roulette_cash'…), devuelve
+// null (bono normal, lo de siempre) o { fallback:'normal'|'skip' } (va como saldo
+// promocional). Sin `giftFlow` o sin resolver nada cambia.
+let _giftKindResolver = null;
+function setGiftKindResolver(fn) { _giftKindResolver = typeof fn === 'function' ? fn : null; }
+// Devuelve el resultado a DEVOLVER tal cual, o null para seguir por el bono normal.
+async function _tryGiftAsWager(username, amt, reference, opts) {
+  if (!opts || !opts.giftFlow || !_giftKindResolver) return null;
+  let k = null;
+  try { k = await _giftKindResolver(opts.giftFlow); } catch (_) { k = null; }
+  if (!k) return null;
+  const r = await creditPromo(username, amt, reference, opts.description || '');
+  if (r.success) return r;
+  // Transitorio (red / 429 / 5xx): NO cambiar de vía — un timeout puede haber
+  // acreditado; el caller reintenta con la MISMA reference y la plataforma deduplica.
+  const st = Number(r.httpStatus);
+  const transient = !Number.isFinite(st) || st === 0 || st === 429 || st >= 500;
+  if (transient || k.fallback === 'skip') return r;
+  // Rechazo de negocio (4xx: no movió nada) + respaldo "bono normal".
+  logger.warn(`[girox] regalo ${opts.giftFlow} a ${username} $${amt}: el promocional fue rechazado (${r.code || r.error}) — sale como bono NORMAL con la misma reference`);
+  return null;
+}
+
 /**
  * Acredita un bono / premio / reembolso (regalo: reembolsos, ruleta, rakeback, bono
  * de nivel VIP, comisiones de referidos, regalos de lote, código de bienvenida).
@@ -1095,6 +1165,12 @@ async function creditUserBalance(username, amount, reference = null, opts = {}) 
   const amt = _normalizeAmount(amount);
   if (amt === null) return { success: false, error: 'Monto inválido', code: 'invalid_amount' };
 
+  // #227: ¿este regalo está configurado para salir como saldo PROMOCIONAL (wager)?
+  if (!opts || !opts._wagerChecked) {
+    const w = await _tryGiftAsWager(username, amt, reference, opts);
+    if (w) return w;
+  }
+
   // Multiplier EXPLÍCITO (incluido 0): /bonus estricto, SIN fallback a depósito —
   // lo usan el botón Bonificación del panel, el welcome code cash y los lotes, donde
   // un bonus_out_of_range tiene que verse como error (no convertirse en carga).
@@ -1131,7 +1207,8 @@ async function creditUserBalance(username, amount, reference = null, opts = {}) 
   // resuelve, con guard de bono activo y fallback a depósito con multiplier).
   return creditGift(username, amt, {
     reference, description: (opts && opts.description) || '', rolloverX: 0,
-    ignoreGlobalRollover: !!(opts && opts.ignoreGlobalRollover)
+    ignoreGlobalRollover: !!(opts && opts.ignoreGlobalRollover),
+    _wagerChecked: true // #227: ya se evaluó arriba
   });
 }
 
@@ -1154,6 +1231,11 @@ const GIFT_BONUS_GUARD_MIN_ARS = 50;
 async function creditGift(username, amount, opts = {}) {
   const amt = _normalizeAmount(amount);
   if (amt === null) return { success: false, error: 'Monto inválido', code: 'invalid_amount' };
+  // #227: ¿este regalo está configurado para salir como saldo PROMOCIONAL (wager)?
+  if (!opts._wagerChecked) {
+    const w = await _tryGiftAsWager(username, amt, opts.reference || null, opts);
+    if (w) return w;
+  }
   let roll = Math.max(0, Math.round(Number(opts.rolloverX) || 0));
   if (!opts.ignoreGlobalRollover) { const g = await _globalRollover(); if (g != null) roll = g; } // #184
   const description = opts.description || '';
@@ -1190,7 +1272,7 @@ async function creditGift(username, amount, opts = {}) {
   }
   if (!why) {
     // ignoreGlobalRollover: acá el global YA se aplicó (roll) — no volver a resolverlo.
-    const r = await creditUserBalance(username, amt, reference, { multiplier: roll, description, ignoreGlobalRollover: true });
+    const r = await creditUserBalance(username, amt, reference, { multiplier: roll, description, ignoreGlobalRollover: true, _wagerChecked: true });
     if (r && r.success) { r.via = 'bonus'; r.claimRequired = true; r.rolloverApplied = roll; return r; }
     if (r && (r.httpStatus === 422 || ['feature_disabled', 'bonus_out_of_range', 'validation_error', 'invalid_multiplier', 'player_not_found'].includes(r.code))) {
       why = `la plataforma rechazó el bono (${r.code || r.error})`;
@@ -1720,6 +1802,8 @@ module.exports = {
   depositToUser,
   /** #184: regalo como BONO con rollover (global si está encendido); fallback a depósito con multiplier. */
   creditGift,
+  creditPromo, // #227 promocional suelto (saldo Wager)
+  setGiftKindResolver, // #227 regalos sin carga como wager
   /** #184: resolver del rollover GLOBAL (server.js): devuelve el efectivo o null si está apagado. */
   setRolloverResolver,
   withdrawFromUser,

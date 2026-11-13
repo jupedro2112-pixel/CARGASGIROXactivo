@@ -5,10 +5,11 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-11-13** — **BONO WAGER (#226, Partner API v1.18)**: saldo promocional de 1girox como
-> alternativa al bono normal en los bonos que se aplican en una carga; `Config['bonusKind']` (COMANDOS → "🎟️ Tipo de bono"),
-> `src/utils/bonusKind.js`, `promo_code` en el depósito, bono normal aparte `vip-depbonus-*` / `vip-hgb-*`, Transaction
-> `'wager_bonus'`, `wager` en los saldos (§2, §4.1, §4.4, §4.5b, §5, §6, §9). Antes: **2026-11-03 (e)** — landing `landing/` con el diseño de PICACOMPARTIDO adaptada a
+> Última actualización: **2026-11-13 (b)** — **BONO WAGER (#226→#227)**: saldo promocional de 1girox como alternativa al
+> bono normal, tanto en los bonos de una carga como en los regalos sin carga; se da con el PROMOCIONAL SUELTO
+> (`girox.creditPromo`, `POST /players/{u}/promo`, probado en vivo), `Config['bonusKind']` (COMANDOS → "🎟️ Tipo de bono", sin
+> códigos), `src/utils/bonusKind.js`, references `vip-depwager-*` / `vip-hgw-*`, Transaction `'wager_bonus'`, `giftFlow` en los
+> regalos, `wager` en los saldos (§2, §4.1, §4.4, §4.5b, §5, §6, §9). Antes: **2026-11-03 (e)** — landing `landing/` con el diseño de PICACOMPARTIDO adaptada a
 > carga manual con agente 24 hs + `GET /api/landing/info` público (#225, §4.10). Antes (d): sección propia "🏛️ Bancos — Configuración" en el panel
 > (#224: todo lo de bancos salió de COMANDOS; mismos ids/endpoints). Antes (c): hasta 3 cuentas hgcash con cuenta ACTIVA rotable con un
 > botón (`Config['hgcashAccounts']`, #223; las cargas entran por todas, la activa paga y es lo que ve el cliente,
@@ -165,12 +166,13 @@ modelos); sus migraciones corren únicamente si algo llamara a ese connectDB.
   Transaction `type:'bonus'` propia con `metadata.source` ('daily_roulette' | 'install_bonus' |
   'notif_batch'), `appliedOnDeposit:true` y `depositTxId` (`_recordAppliedBonusTx`); la base del
   reembolso en vivo las excluye porque ya cuenta `deposit.bonus`.
-  **#226:** `wager_bonus` = SALDO PROMOCIONAL (bono wager) otorgado adentro de una carga
-  (`_recordWagerTx`; `metadata.source 'wager_bonus'`, `flow`, `code`, `rule`, `depositTxId`,
-  `appliedOnDeposit`). Plata ficticia: tipo propio para que NINGÚN reporte de plata real lo
-  cuente (todos son listas blancas de tipos); la carga queda con `bonus: 0` y
-  `metadata.wagerBonus {amount, code, rule, flow}`. `User.wagerCodesUsed` = códigos con los que
-  el jugador ya recibió promocional; `DailyRouletteSpin.usedWagerARS` = % de ruleta dado como wager.
+  **#226/#227:** `wager_bonus` = SALDO PROMOCIONAL (bono wager) otorgado por un bono de CARGA
+  (`_recordWagerTx`; `metadata.source 'wager_bonus'`, `flow`, `depositTxId`, `appliedOnDeposit`).
+  Plata ficticia: tipo propio para que NINGÚN reporte de plata real lo cuente (todos son listas
+  blancas de tipos); la carga lleva en `bonus` solo lo normal y `metadata.wagerBonus {amount,
+  flows}`. Un REGALO sin carga dado como wager conserva su tipo (refund, roulette, fire_reward…)
+  con `metadata.creditedAs 'wager'` (sigue contando como regalo). `DailyRouletteSpin.usedWagerARS`
+  = % de ruleta dado como wager. (`User.wagerCodesUsed` quedó sin uso: era de los códigos del #226.)
   `metadata.creditedAs` ('bonus'|'deposit') en ruleta y fueguito = cómo salió de
   verdad hacia 1girox (fallback a depósito queda registrado).
   `metadata.source` distingue regalos ('install_bonus','welcome_gift') y devoluciones
@@ -352,7 +354,7 @@ Quedan sólo para poder revertir; se borran más adelante. **No los uses para na
 
 | Módulo | Usa | Para qué |
 |---|---|---|
-| `src/services/giroxService.js` | server.js (`girox.*`), migración | **Cliente ÚNICO de la Partner API.** Altas (`createPlatformUser`, `syncUserToPlatform`), consulta (`getUserInfoByName`, `getUserBalance(WithRetry)`), credenciales (`validateCredentials`, `changeUserPassword`), SSO (`createSession`) y plata (`depositToUser`, `withdrawFromUser`, `creditUserBalance`, `creditGift`). Auth por header `X-Api-Key`. Rate limit + reintentos propios. **#226:** `depositToUser` acepta `{ promoCode, noBonus }` (bono wager, §4.5b) y los saldos traen `wager`. **Rollover GLOBAL (#184):** `setRolloverResolver(fn)` inyectado desde server.js; se aplica en los 3 puntos por donde pasa todo bono (`creditGift`, `creditUserBalance` con multiplier, `bonus_multiplier` de `depositToUser`) salvo `ignoreGlobalRollover:true`. |
+| `src/services/giroxService.js` | server.js (`girox.*`), migración | **Cliente ÚNICO de la Partner API.** Altas (`createPlatformUser`, `syncUserToPlatform`), consulta (`getUserInfoByName`, `getUserBalance(WithRetry)`), credenciales (`validateCredentials`, `changeUserPassword`), SSO (`createSession`) y plata (`depositToUser`, `withdrawFromUser`, `creditUserBalance`, `creditGift`). Auth por header `X-Api-Key`. Rate limit + reintentos propios. **#227:** `creditPromo` (promocional suelto = bono wager, §4.5b), `setGiftKindResolver` + `giftFlow` en `creditGift`/`creditUserBalance` (regalos como wager) y `wager` en los saldos; `depositToUser` conserva `{ promoCode, noBonus }` del #226 sin uso. **Rollover GLOBAL (#184):** `setRolloverResolver(fn)` inyectado desde server.js; se aplica en los 3 puntos por donde pasa todo bono (`creditGift`, `creditUserBalance` con multiplier, `bonus_multiplier` de `depositToUser`) salvo `ignoreGlobalRollover:true`. |
 | `src/services/giroxReportsService.js` | reembolsos, referidos (`giroxReports.*`) | **Netwin (GGR) por jugador y rango.** ⚠️ NO es la Partner API: habla con el PANEL `admin.1girox.com`. `getPlayerNetwinForDateRange`, `findPlayerIdByUsername`, `getPlayerInfoById`. |
 | `src/services/giroxUserLinkService.js` | reembolsos, referidos | `resolveGiroxUserId(userId, username)` — lee `User.giroxUserId` y, si falta, lo backfillea al vuelo contra el panel (match EXACTO del nombre, doble verificación). |
 | `src/services/giroxPublisherKeys.js` | publisher_admin create-user, panel | Alta de jugadores con la **API key de la campaña** (`Campaign.giroxApiKey`). `createUserAsPublisher`, `testKey`. `invalidateSession()` quedó como **no-op** (no hay sesiones que tirar). |
@@ -451,8 +453,9 @@ Prefijos en uso hoy:
 | `vip-bonus-<txId>` | Bono manual desde el panel | uuid reusado como Transaction.id |
 | `vip-rf-<periodKey>-<userId>` | Reembolsos | **derivada del PERÍODO, no del RefundClaim.id** (ver abajo) |
 | `vip-hg-<coelsa\|movementId>` | Auto-carga del banco (hgcash **y Finpro**, #219: el movimiento de Finpro entra al mismo `hgcashAutoCarga`) | identificador del MOVIMIENTO bancario (el mismo `chargeKey` del candado) |
-| `vip-depbonus-<txId>` | #226 Bono NORMAL acreditado APARTE de una carga manual que viajó con código wager (bonos de flujos en "normal" + respaldo del wager no otorgado) | el mismo uuid de la Transaction del depósito |
-| `vip-hgb-<coelsa\|movementId>` | #226 Ídem para la carga del banco (hgcash/Finpro, auto o asignada) | el mismo identificador del movimiento que usa `vip-hg-*` |
+| `vip-depwager-<txId>` | #227 PROMOCIONAL SUELTO (bono wager) de una carga manual: la suma de los bonos de esa carga que van como wager | el mismo uuid de la Transaction del depósito |
+| `vip-hgw-<coelsa\|movementId>` | #227 Ídem para la carga del banco (hgcash/Finpro, auto o asignada) | el mismo identificador del movimiento que usa `vip-hg-*` |
+| `vip-depbonus-<txId>` / `vip-hgb-<coelsa\|movementId>` | #227 Bono NORMAL de RESPALDO cuando 1girox rechazó el promocional de esa carga (solo con `fallback 'normal'`) | ídem |
 | `vip-roulette-<spinId>` | Premio de ruleta | id del DailyRouletteSpin |
 | `vip-fire-<userId>-d<día>-<fecha>` | Premio de fueguito | userId + hito + día ART |
 | `vip-install-<userId>` | Bono instalación $5.000 | userId (una sola vez en la vida) |
@@ -554,39 +557,46 @@ reintento manda la misma reference y la plataforma responde `duplicate:true`.
   loguea en ERROR. **No reintentar el depósito completo** (la reference devolvería
   duplicate): escalar a soporte de 1girox.
 
-### 4.5b Bono WAGER = saldo promocional (#226, 2026-11-13; manual v1.18 §2.8, `docs/PARTNER-APIv1.18.pdf`)
+### 4.5b Bono WAGER = saldo promocional (#226→#227, 2026-11-13; probado EN VIVO, el manual v1.18 no lo documenta)
 
-- **Qué es:** plata FICTICIA de la casa en un balde aparte (`player.wager`, `wager` en la respuesta del
-  depósito). No sale del saldo del agente, no suma al `balance`, no es retirable ni lleva rollover; se
-  juega después del saldo real y se convierte en real de a 5% de lo apostado por ronda (rastro contable
-  "Conversión wager" del lado de 1girox; "hoy convierte jugando solo con Atomic"). Feat aparte de
-  "Rollover y Bonos": lo habilita el operador. El `netwin` de `/stats` viene neto de lo jugado con wager.
-- **Cómo se otorga (límite de la API):** no hay campo para pedirlo. Lo entrega una regla automática del
-  agente con premio "Promocional" (bienvenida / 1er depósito / código); desde la API: `promo_code` en
-  `POST /deposit`. `bonus_percent`/`bonus_amount` dan bono REAL y además anulan la regla. Código
-  inválido/vencido/ya usado NO es error: la carga entra sin el promocional. Respuesta con `promo_bonus
-  { status, amount, rule }` cuando otorgó.
-- **Cliente (`giroxService`):** `depositToUser(u, amt, desc, ref, { promoCode })` manda `promo_code`
-  SOLO si no hay bono explícito; `{ noBonus:true }` → `no_bonus`. Devuelve `out.promoBonus`,
-  `out.promoCodeSent`, `data.wager`. `getUserInfoByName`/`getUserBalance` exponen `wager` (null = la
-  plataforma no manda el campo = feat apagado).
+- **Qué es:** plata FICTICIA de la casa en un balde aparte (`player.wager`). No sale del saldo del agente,
+  no suma al `balance`, no es retirable ni lleva rollover; se juega después del saldo real (solo juegos de
+  Pulse) y se convierte en real de a 5% de lo apostado por ronda. Se ACUMULA (no se pisa). Al aprobar un
+  retiro el jugador pierde el bono activo y todo el promocional (opción del sitio). El `netwin` de `/stats`
+  viene neto de lo jugado con wager.
+- **`GET /config`** trae `bonus_engine: 'classic'|'unified'` y `wager { enabled, api_enabled, api_max }`
+  (`api_enabled` = "La Partner API también puede cargar promocional"; `api_max` 0 = sin tope por operación).
+- **Cómo se otorga — `girox.creditPromo(username, amount, reference, description)`** =
+  `POST /players/{u}/promo`: responde `{ duplicate, operation{ type:'promo', ledger_id:null,
+  wager_ledger_id }, wager:<saldo promocional total>, promo_bonus{ status:'ok', amount, source:'partner' } }`;
+  el reintento con la misma reference devuelve `duplicate:true` con el mismo detalle. Funciona igual con el
+  motor "clásico" y "unificado". `success` solo si `promo_bonus.status === 'ok'`; devuelve `creditedAs
+  'wager'`, `wagerAmount`, `wagerBalance`, `rolloverApplied 0`.
+- **⚠️ Lo que NO se usa:** `wager_percent` / `wager_amount` adentro de `POST /deposit` existen, pero con el
+  motor "unificado" la plataforma los convierte en BONO REAL con multiplier 0 (retirable al instante) y los
+  suma a `bonus_amount`; solo en "clásico" dan wager. El motor es una opción GLOBAL del sitio que cualquier
+  admin puede cambiar → usar esos campos podría regalar plata real. El promocional suelto no tiene ese riesgo.
+  Los códigos promocionales del manual (`promo_code`, primera versión #226) también quedaron sin uso.
 - **Config `Config['bonusKind']`** (`getBonusKindConfig()`, sin cache; pura en `src/utils/bonusKind.js`):
-  `{ enabled, fallback 'normal'|'skip', flows{install,publisher,roulette,story,lote}, codes[{code,
-  pct, capArs, label, enabled, oncePerPlayer}] }`. Default apagado y todo normal. Elección del código por
-  % EXACTO (`pickCode`). Endpoints `GET /api/admin/bonus-kind` (staff), `POST` y `POST /check` (admin).
-- **En la carga** (`/api/admin/deposit` y `hgcashAutoCarga`): `_wagerPlanFor(user, items)` → `null`
-  (todo normal: camino de siempre, bono adjunto) o `{cfg, plan}`. Con `plan.code` el depósito va con el
-  código y sin bono adjunto; después `_wagerAfterDeposit` (nunca tira) clasifica la respuesta
-  (`readPromoOutcome` + `resolveOutcome`) y acredita con `girox.creditGift` el bono NORMAL que
-  corresponda en una operación APARTE con reference estable (§4.4). De ahí en más las variables de
-  siempre (`bonus`/`bonusRequested`, `_hgBonus`/`_hgBonusApplied`) describen el bono NORMAL real, así
-  mensajes, `Transaction.bonus`, auto-claim y avisos siguen funcionando igual. Sin `plan.code` pero con
-  bonos en espera (`skippedItems`, fallback `skip`) la carga sale con lo normal adjunto y esos quedan
-  pendientes. `_settlePendingBonuses(…, { kinds, wager })` marca SOLO lo entregado. Lote automático: la
-  reserva se settlea con $0 de bono real si salió como wager, o se revierte si no se entregó nada.
-- **Qué NO puede ser wager:** todo regalo sin carga (reembolsos, reembolso en vivo, premios en $ de la
-  ruleta, fueguito, rakeback, nivel VIP, referidos, fichas de lotes, Bonificación manual, código de
-  bienvenida). Si 1girox agrega un campo para pedirlo, se enchufa en `creditGift`.
+  `{ enabled, fallback 'normal'|'skip', flows{…} }`. `DEPOSIT_FLOWS` = install, publisher, roulette, story,
+  lote; `GIFT_FLOWS` = refund, cashback, roulette_cash, fire, rakeback, vip_levelup, lote_fichas,
+  welcome_code, manual_bonus. Default apagado y todo normal. Endpoints `GET /api/admin/bonus-kind` (staff;
+  `depositFlows`, `giftFlows`, `platform`, `platformWarnings`), `POST` y `POST /check` (admin).
+- **En la carga** (`/api/admin/deposit` y `hgcashAutoCarga`): `_wagerPlanFor(user, items)` → `null` (todo
+  normal: camino de siempre) o `{cfg, plan{wagerItems, wagerTotal, normalItems, normalTotal}}`. El depósito
+  viaja con `bonus_amount = normalTotal` (o sin bono) y después `_wagerAfterDeposit` (nunca tira) acredita
+  UN promocional por `wagerTotal` (§4.4). Rechazo 4xx + `fallback 'normal'` → bono normal de respaldo aparte
+  (`girox.creditGift`) y se suma a `bonus` / `_hgBonusApplied`; transitorio → un reintento con la misma
+  reference y, si sigue, queda pendiente SIN respaldo. `_settlePendingBonuses(…, { kinds, wager:[{kind,
+  amount}] })` marca SOLO lo entregado. Lote automático: se settlea con $0 de bono real si salió como wager,
+  o se revierte si no se entregó nada. El agente lo elige con `bonusKind:'wager'` (su `bonus` sale como
+  promocional; sin respaldo automático).
+- **En un regalo sin carga:** el caller pasa `giftFlow` en las opts de `creditGift` / `creditUserBalance`;
+  `giroxService._tryGiftAsWager` consulta el resolver inyectado (`girox.setGiftKindResolver`) y, si ese
+  flujo va como wager, llama `creditPromo` con la MISMA reference del regalo. OK → devuelve el resultado
+  con `creditedAs 'wager'`; rechazo 4xx + fallback normal → sigue por el bono normal (misma reference: el
+  4xx no movió nada); transitorio o fallback `skip` → devuelve el error (el caller libera su reserva). Los
+  mensajes al cliente usan `_giftNote(r)` (= `/sys_wager_gift_note` si fue wager, si no la nota del rollover).
 
 ### 4.6 Stats por jugador — netwin y apostado (Partner API v1.8/v1.9)
 
@@ -1245,14 +1255,14 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   `hgcashAutoCarga` (bonus nativo en la misma operación, salvo multicuenta); al éxito
   `_settlePendingBonuses` marca `firstChargeBonusStatus:'used'` y consume el % de
   ruleta. El botón manual "Marcar como usado" sigue para casos raros.
-- **Bono WAGER en la carga (#226, 2026-11-13; detalle en §4.5b):** cada bono que se aplica en una carga
-  (agente, instalar app, publicista, % de ruleta, historia, lote automático) puede salir como bono normal
-  o como saldo promocional según `Config['bonusKind'].flows`. Con wager: depósito con `promo_code` del
-  código de ese % → `promo_bonus` de la respuesta → Transaction `'wager_bonus'` + `deposit.metadata.
-  wagerBonus` + línea `/sys_wager_bonus` al cliente + nota admin-only (`_wagerAdminNote`). Lo que tenga
-  que salir normal va aparte (`vip-depbonus-*` / `vip-hgb-*`). El agente lo elige en el modal Depositar
-  (`bonusKind:'wager'`, `wagerCode`; el modal arranca siempre en normal y el bono del agente NO es un flujo
-  de la config); sin respaldo automático en ese caso.
+- **Bono WAGER (#226→#227, 2026-11-13; detalle en §4.5b):** cada bono de una carga (instalar app, publicista,
+  % de ruleta, historia, lote automático, o el que elige el agente en el modal) y cada regalo sin carga
+  (reembolsos, reembolso en vivo, ruleta en $, fueguito, rakeback, nivel VIP, fichas de lote, código de
+  bienvenida, Bonificación manual) puede salir como bono normal o como saldo promocional según
+  `Config['bonusKind'].flows`. En la carga: depósito normal → promocional suelto aparte (`vip-depwager-*` /
+  `vip-hgw-*`) → Transaction `'wager_bonus'` + `deposit.metadata.wagerBonus` + línea `/sys_wager_bonus` +
+  nota admin-only (`_wagerAdminNote`). En el regalo: `giftFlow` → `creditPromo` con la reference del regalo →
+  su Transaction de siempre con `metadata.creditedAs 'wager'` + nota `/sys_wager_gift_note`.
 - **Bono de 1ª carga por PUBLICISTA (#221, 2026-11-03):** `Config['publisherFirstBonus'].rules[]`
   = `{ campaign, enabled, pct, capArs, excessPct, fromDate, scope 'panel'|'all' }`
   (`getPublisherFirstBonusRules`, sin cache; `GET/POST/DELETE /api/admin/publisher-first-bonus`).
@@ -1509,14 +1519,16 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   en los hints de las altas. **Config → "🔗 Webhooks salientes"** (#197): lista con último
   resultado / en cola, editor (`webhookEdit/Save/Delete/Test/CopyFormat/GenSecret`,
   `whAuthMode`), publicistas de `Campaign.distinct('publisher')`, formato completo plegado.
-- **COMANDOS → "🎟️ Tipo de bono: normal o wager"** (#226; guardar solo admin general): `bkEnabled`,
-  `bkFlows` (un select por bono), `bkFallback`, `bkCodes` (filas código/%/tope/nota/activo/1 vez por
-  jugador), `bkWarnings`, "🔎 Consultar 1girox" (`bkTest` → `bkPlatform`). Funciones `loadBonusKindCfg` /
-  `saveBonusKind` / `bkAddCode` / `bkRemoveCode` / `bkTest`. **Modal Depositar:** `#depositBonusKindGroup`
-  (oculto si el wager está apagado o sin códigos) con `setDepositBonusKind` / `getDepositBonusKind` /
-  `loadDepositBonusKind`; `handleDeposit` lee `data.wager`. **Transacciones:** filtro y etiqueta
-  `wager_bonus`, tarjeta `summary.wagers` (fuera de `gifts`), sub-etiqueta de la carga con wager.
-  **PWA:** `#userWagerRow` debajo del saldo (`VIP.ui` `updateWagerDisplay`, solo si `wager > 0`).
+- **COMANDOS → "🎟️ Tipo de bono: normal o wager"** (#226→#227; guardar solo admin general): `bkEnabled`,
+  `bkFlowsDeposit` y `bkFlowsGift` (un select `.bk-flow[data-flow]` por bono), `bkFallback`, `bkWarnings`,
+  "🔎 Consultar 1girox" (`bkTest` → `bkPlatform`: motor, wager/API habilitados, tope, saldo promocional de
+  un cliente). Funciones `loadBonusKindCfg` / `saveBonusKind` / `bkTest`. **Modal Depositar:**
+  `#depositBonusKindGroup` (oculto con el wager apagado) con `setDepositBonusKind` / `getDepositBonusKind` /
+  `loadDepositBonusKind`: en "Bono wager" la bonificación de los botones de % sale como promocional;
+  `handleDeposit` lee `data.wager {granted, amount, fallbackOk, byAgent, error}`. **Transacciones:** filtro y
+  etiqueta `wager_bonus`, tarjeta `summary.wagers` (fuera de `gifts`), sub-etiquetas "🎟️ + $X de bono wager"
+  (carga) y "🎟️ como wager" (regalo con `metadata.creditedAs 'wager'`). **PWA:** `#userWagerRow` debajo del
+  saldo (`VIP.ui` `updateWagerDisplay`, solo si `wager > 0`).
 - **Config → "🎯 Rollover GLOBAL de bonos"** (solo admin general, #184): switch + botones
   x0/x2/x3/x5/x10 (los no permitidos por la plataforma en gris con ⚠️), hint con el
   efectivo y aviso de `snapped`. Banner "POSIBLE MULTICUENTA" del chat: señales 📱 ☎️
@@ -1657,14 +1669,14 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `POST /api/gift/claim` (reserva atómica `claimedAt`). El marcado genérico del
   PromoBonus en la carga manual con bonus del agente excluye los lotes auto de "todas
   las cargas" (`$nor`).
-- **Bono WAGER (#226):** (a) nunca mandar `promo_code` junto con `bonus_amount`/`bonus_percent` (la regla no
-  aplica y el caller creería que pidió wager — `depositToUser` ya lo impide); (b) el bono normal "aparte" usa
-  SIEMPRE la reference derivada de la carga (`vip-depbonus-<txId>` / `vip-hgb-<movimiento>`): otra reference =
-  bono doble en un reintento; (c) ante `duplicate` sin `promo_bonus` NO se da respaldo y el bono se marca USADO (con nota para verificar); (d) el saldo promocional
-  no va en `deposit.bonus` ni en un tipo de regalo (todos los reportes son listas blancas: `'wager_bonus'` queda
-  afuera a propósito); (e) `_settlePendingBonuses` con `ctx.kinds` marca solo lo entregado — no volver a "marcar
-  todo lo pendiente" en una carga con plan de wager; (f) el monto de wager NO se calcula acá (lo decide la regla
-  de 1girox): los `pct`/`capArs` de los códigos sirven para elegir el código y estimar, nada más.
+- **Bono WAGER (#226→#227):** (a) el wager se da SOLO con `girox.creditPromo` (promocional suelto); NUNCA con
+  `wager_percent`/`wager_amount` adentro del depósito (con el motor "unificado" se vuelven bono real retirable);
+  (b) la reference del promocional sale de la carga o del regalo (`vip-depwager-<txId>`, `vip-hgw-<movimiento>`,
+  o la reference propia del regalo): otra reference en un reintento = wager doble; (c) respaldo con bono normal
+  SOLO ante rechazo 4xx — un fallo transitorio pudo haber acreditado; (d) en una carga el promocional no va en
+  `deposit.bonus` ni en un tipo de regalo (`'wager_bonus'` queda fuera de los reportes a propósito); (e)
+  `_settlePendingBonuses` con `ctx.kinds` marca solo lo entregado; (f) referidos y devoluciones de retiro nunca
+  llevan `giftFlow`; (g) un regalo nuevo sin `giftFlow` simplemente sale siempre normal (no rompe nada).
 - **Bonos pendientes en la carga (#189/#206/#221):** toda parte nueva de `_pendingBonusFor` tiene que
   (a) marcarse usada en `_settlePendingBonuses` leyendo `ctx.parts` (los callers pasan las partes de ESA
   carga: no asumir que todo lo pendiente se aplicó — el bono por instalar queda sin aplicar cuando entró

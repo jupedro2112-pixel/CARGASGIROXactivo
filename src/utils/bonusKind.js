@@ -1,100 +1,79 @@
 /**
- * bonusKind.js — BONO NORMAL vs BONO WAGER (#226, Partner API v1.18 §2.8 "Premio
- * PROMOCIONAL (saldo Wager)"). Parte PURA: sin DB ni API, para validarla en frío
- * (`node scripts/test-bonus-kind.js`). server.js lee Config['bonusKind'] y llama acá.
+ * bonusKind.js — BONO NORMAL vs BONO WAGER (#226/#227). Parte PURA: sin DB ni API,
+ * para validarla en frío (`node scripts/test-bonus-kind.js`). server.js lee
+ * Config['bonusKind'] y llama acá.
  *
- * QUÉ ES EL WAGER: saldo PROMOCIONAL (plata ficticia de la casa, balde aparte del
- * saldo real; no sale del saldo del agente, no es retirable, sin rollover; se juega
- * después del saldo real y se convierte en real de a 5% de lo apostado por ronda).
+ * QUÉ ES EL WAGER: saldo PROMOCIONAL de 1girox (plata ficticia de la casa, balde
+ * `wager` aparte del saldo real; no sale del saldo del agente, no es retirable, sin
+ * rollover; se juega después del saldo real y se convierte en real de a 5% de lo
+ * apostado por ronda; hoy solo en los juegos de Pulse).
  *
- * CÓMO SE OTORGA (límite de la API, no nuestro): NO hay un campo para pedirlo. Solo
- * lo entrega una REGLA AUTOMÁTICA de 1girox con premio "Promocional"; desde la API se
- * dispara mandando `promo_code` en el POST /deposit. Consecuencias que este módulo
- * modela:
- *   - El wager SOLO puede ir adentro de una CARGA (no hay wager "suelto": reembolsos,
- *     ruleta en $, fueguito, rakeback, etc. siguen siendo bono normal).
- *   - El MONTO lo decide la regla de 1girox (su % y su tope), no nosotros: por eso
- *     cada código se carga acá con el % que tiene allá y se elige por % EXACTO.
- *   - UN solo código por carga, y si el depósito lleva `bonus_amount` la regla NO
- *     aplica ("tus params siempre ganan") → una carga con wager no lleva bono normal
- *     adjunto: lo normal que haya que dar va en una operación aparte.
+ * CÓMO SE OTORGA (#227, PROBADO contra la API el 2026-11-13 — el manual v1.18 no lo
+ * documenta): `POST /players/{u}/promo { amount, reference, description }` =
+ * PROMOCIONAL SUELTO. Da wager de verdad con el motor de bonos en "clásico" Y en
+ * "unificado", responde `promo_bonus { status:'ok', amount }` + `wager`, y un
+ * reintento con la misma reference devuelve `duplicate:true` con el mismo detalle.
+ * ⚠️ NO se usa `wager_percent` / `wager_amount` ADENTRO del depósito: con el motor
+ * "unificado" la plataforma lo convierte en BONO REAL sin rollover (retirable al
+ * instante). El suelto es seguro en los dos motores, por eso es el único camino.
+ *
+ * Entonces, en una carga: el depósito sale como siempre (con el bono NORMAL adjunto
+ * de los bonos que van como normal) y DESPUÉS se acredita aparte el promocional de
+ * los bonos que van como wager, por el monto que calculamos nosotros.
  *
  * Config['bonusKind'] = {
  *   enabled,                       // interruptor general (default APAGADO = todo normal)
- *   fallback: 'normal' | 'skip',   // si el wager no se pudo dar: bono normal / no dar nada (queda pendiente)
- *   flows: { install, publisher, roulette, story, lote } → 'normal' | 'wager',
- *   codes: [{ code, pct, capArs, label, enabled, oncePerPlayer }]
+ *   fallback: 'normal' | 'skip',   // si el wager no se pudo dar: bono normal / no dar nada
+ *   flows: { <flujo>: 'normal' | 'wager' }   // ver DEPOSIT_FLOWS y GIFT_FLOWS
  * }
  */
-// Bonos AUTOMÁTICOS configurables. El bono que pone el agente a mano NO está acá a
-// propósito: lo elige el agente en cada carga (modal Depositar, siempre arranca en
-// "normal") — un default "wager" le mandaría el código a TODAS las cargas manuales,
-// incluidas las que el agente quería sin bono.
-const FLOWS = ['install', 'publisher', 'roulette', 'story', 'lote'];
+// Bonos que se aplican ADENTRO de una carga (los decide el sistema).
+const DEPOSIT_FLOWS = ['install', 'publisher', 'roulette', 'story', 'lote'];
+// Regalos SIN carga (cada uno se acredita solo).
+const GIFT_FLOWS = ['refund', 'cashback', 'roulette_cash', 'fire', 'rakeback', 'vip_levelup', 'lote_fichas', 'welcome_code', 'manual_bonus'];
+// El bono que pone el agente a mano al CARGAR no está acá a propósito: lo elige el
+// agente en cada carga (modal Depositar, arranca siempre en "normal"). Tampoco las
+// comisiones de referidos ni las devoluciones de retiro: es plata del cliente.
+const FLOWS = DEPOSIT_FLOWS.concat(GIFT_FLOWS);
 const FLOW_LABELS = {
   install: 'Bono por instalar la app',
   publisher: 'Bono de 1ª carga por publicista',
-  roulette: 'Ruleta diaria (% EXTRA en la próxima carga)',
+  roulette: 'Ruleta diaria: % EXTRA en la próxima carga',
   story: 'Bono de una historia (+% en la próxima carga)',
-  lote: 'Lote con regalo (% automático)'
+  lote: 'Lote con regalo: % automático en la carga',
+  refund: 'Reembolsos (diario / semanal / mensual)',
+  cashback: 'Reembolso en vivo',
+  roulette_cash: 'Ruleta diaria: premios en $',
+  fire: 'Fueguito (premios de la racha)',
+  rakeback: 'Rakeback semanal VIP',
+  vip_levelup: 'Bono por subir de nivel VIP',
+  lote_fichas: 'Lote con regalo: fichas',
+  welcome_code: 'Código de bienvenida (premio en $)',
+  manual_bonus: 'Botón "Bonificación" del panel (bono suelto del agente)'
 };
 const KINDS = ['normal', 'wager'];
 const FALLBACKS = ['normal', 'skip'];
-const MAX_CODES = 30;
-const CODE_RE = /^[A-Za-z0-9_\-]{2,40}$/;
 
 function defaultConfig() {
   const flows = {};
   FLOWS.forEach((f) => { flows[f] = 'normal'; });
-  return { enabled: false, fallback: 'normal', flows, codes: [] };
-}
-
-function _cleanCode(raw) {
-  const c = String(raw == null ? '' : raw).trim();
-  return CODE_RE.test(c) ? c : null;
-}
-
-/** Normaliza una fila de código. Devuelve null si es inválida. */
-function normalizeCodeRow(r) {
-  if (!r || typeof r !== 'object') return null;
-  const code = _cleanCode(r.code);
-  if (!code) return null;
-  const pct = Math.round(Number(r.pct));
-  if (!Number.isFinite(pct) || pct < 1 || pct > 1000) return null;
-  let capArs = Math.round(Number(r.capArs));
-  if (!Number.isFinite(capArs) || capArs < 0) capArs = 0; // 0 = sin tope
-  return {
-    code, pct, capArs,
-    label: String(r.label == null ? '' : r.label).trim().slice(0, 60),
-    enabled: r.enabled !== false,
-    oncePerPlayer: r.oncePerPlayer === true
-  };
+  return { enabled: false, fallback: 'normal', flows };
 }
 
 /** Lee lo guardado (tolerante: lo inválido se descarta y vale el default). */
 function normalizeConfig(raw) {
-  const d = defaultConfig();
-  if (!raw || typeof raw !== 'object') return d;
   const out = defaultConfig();
+  if (!raw || typeof raw !== 'object') return out;
   out.enabled = raw.enabled === true;
   out.fallback = FALLBACKS.includes(raw.fallback) ? raw.fallback : 'normal';
   const rf = (raw.flows && typeof raw.flows === 'object') ? raw.flows : {};
   FLOWS.forEach((f) => { out.flows[f] = rf[f] === 'wager' ? 'wager' : 'normal'; });
-  const seen = new Set();
-  (Array.isArray(raw.codes) ? raw.codes : []).forEach((r) => {
-    const n = normalizeCodeRow(r);
-    if (!n) return;
-    const k = n.code.toLowerCase();
-    if (seen.has(k) || out.codes.length >= MAX_CODES) return;
-    seen.add(k);
-    out.codes.push(n);
-  });
   return out;
 }
 
 /**
- * Valida lo que manda el panel (estricta: un dato inválido es error, no se descarta
- * en silencio). Devuelve { ok:true, config, warnings[] } | { ok:false, error }.
+ * Valida lo que manda el panel (estricta: un dato inválido es error).
+ * Devuelve { ok:true, config, warnings[] } | { ok:false, error }.
  */
 function validateConfig(body) {
   const b = body && typeof body === 'object' ? body : {};
@@ -108,24 +87,8 @@ function validateConfig(body) {
     if (!KINDS.includes(v)) return { ok: false, error: `Tipo de bono inválido para "${FLOW_LABELS[f]}".` };
     out.flows[f] = v;
   }
-  const rows = Array.isArray(b.codes) ? b.codes : [];
-  if (rows.length > MAX_CODES) return { ok: false, error: `Máximo ${MAX_CODES} códigos.` };
-  const seen = new Set();
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i] || {};
-    if (!_cleanCode(r.code)) return { ok: false, error: `Código ${i + 1}: escribí el código tal cual está en 1girox (2 a 40 letras, números, guion o guion bajo, sin espacios).` };
-    const n = normalizeCodeRow(r);
-    if (!n) return { ok: false, error: `Código "${String(r.code).trim()}": el % tiene que ser un número entre 1 y 1000.` };
-    const k = n.code.toLowerCase();
-    if (seen.has(k)) return { ok: false, error: `El código "${n.code}" está repetido.` };
-    seen.add(k);
-    out.codes.push(n);
-  }
   const warnings = [];
   const wagerFlows = FLOWS.filter((f) => out.flows[f] === 'wager');
-  const active = out.codes.filter((c) => c.enabled);
-  if (out.enabled && !active.length) warnings.push('El bono wager está ACTIVADO pero no hay ningún código activo: todo va a seguir saliendo como bono normal.');
-  if (out.enabled && active.length && !wagerFlows.length) warnings.push('Hay códigos cargados pero ningún bono automático está puesto en "Wager": solo se va a usar cuando el agente elija "Bono wager" a mano al cargar.');
   if (!out.enabled && wagerFlows.length) warnings.push('Hay bonos puestos en "Wager" pero el interruptor general está APAGADO: siguen saliendo como bono normal.');
   return { ok: true, config: out, warnings };
 }
@@ -135,135 +98,58 @@ function flowIsWager(cfg, flow) {
   return !!(cfg && cfg.enabled && cfg.flows && cfg.flows[flow] === 'wager');
 }
 
-/** Fila de un código por su texto (case-insensitive). Solo activos salvo opts.any. */
-function findCode(cfg, code, opts) {
-  const c = String(code == null ? '' : code).trim().toLowerCase();
-  if (!c || !cfg || !Array.isArray(cfg.codes)) return null;
-  const row = cfg.codes.find((r) => r.code.toLowerCase() === c);
-  if (!row) return null;
-  if (!row.enabled && !(opts && opts.any)) return null;
-  return row;
-}
-
-/**
- * Elige el código para dar un wager de `pct`%: activo, con el MISMO %, y que el
- * jugador no haya usado ya si la fila es "una vez por jugador". Entre varios, el
- * primero de la lista (el orden del panel manda).
- */
-function pickCode(cfg, pct, usedCodes) {
-  if (!cfg || !cfg.enabled || !Array.isArray(cfg.codes)) return null;
-  const p = Number(pct); // EXACTO: un premio de 12,5% no usa un código de 13%
-  if (!Number.isFinite(p) || p <= 0) return null;
-  const used = new Set((Array.isArray(usedCodes) ? usedCodes : []).map((c) => String(c).toLowerCase()));
-  return cfg.codes.find((r) => r.enabled && r.pct === p && !(r.oncePerPlayer && used.has(r.code.toLowerCase()))) || null;
-}
-
-/** Wager que DEBERÍA dar un código sobre una carga (estimación: el real lo informa 1girox). */
-function estimateWager(row, amount) {
-  const a = Math.max(0, Number(amount) || 0);
-  if (!row) return 0;
-  const w = Math.floor(a * row.pct / 100);
-  return row.capArs > 0 ? Math.min(w, row.capArs) : w;
-}
-
 /**
  * Plan de los bonos AUTOMÁTICOS de una carga.
  * @param cfg    config normalizada
- * @param items  bonos de esta carga, en orden de prioridad:
- *               [{ kind:'publisher'|'install'|'roulette'|'story'|'lote', pct, amount }]
- *               (`amount` = lo que saldría como bono NORMAL)
- * @param opts   { usedCodes: códigos que el jugador ya usó }
- * @returns { code, wagerItem, normalItems, normalTotal, skippedItems }
- *   - code/wagerItem: el ÚNICO bono de la carga que sale como wager (o null/null).
- *   - normalItems: los que salen como bono normal (flujo en "normal", o flujo en
- *     "wager" sin código y fallback 'normal').
- *   - skippedItems: flujo en "wager" sin código disponible y fallback 'skip' → no se
- *     dan en esta carga (quedan pendientes).
- * Sin wagerItem la carga sale EXACTAMENTE como antes (bono normal adjunto).
+ * @param items  [{ kind:'publisher'|'install'|'roulette'|'story'|'lote', pct, amount }]
+ *               (`amount` = lo que le corresponde por ese bono, calculado por nosotros)
+ * @returns { wagerItems, wagerTotal, normalItems, normalTotal }
+ *   - normalItems/normalTotal: van como bono NORMAL adjunto al depósito (como siempre).
+ *   - wagerItems/wagerTotal: van como promocional suelto DESPUÉS del depósito.
+ * Sin wagerItems la carga sale EXACTAMENTE como antes.
  */
-function planDeposit(cfg, items, opts) {
-  const out = { code: null, wagerItem: null, normalItems: [], normalTotal: 0, skippedItems: [] };
-  const list = (Array.isArray(items) ? items : []).filter((it) => it && Number(it.amount) > 0);
-  const used = (opts && opts.usedCodes) || [];
-  for (const it of list) {
-    if (flowIsWager(cfg, it.kind)) {
-      if (!out.wagerItem) {
-        const row = pickCode(cfg, it.pct, used);
-        if (row) { out.code = row; out.wagerItem = it; continue; }
-      }
-      // en wager pero sin código para ese % (o ya hay otro wager en esta carga)
-      if (cfg.fallback === 'skip') { out.skippedItems.push(it); continue; }
-    }
-    out.normalItems.push(it);
-    out.normalTotal += Number(it.amount) || 0;
-  }
+function planDeposit(cfg, items) {
+  const out = { wagerItems: [], wagerTotal: 0, normalItems: [], normalTotal: 0 };
+  (Array.isArray(items) ? items : []).forEach((it) => {
+    const a = Number(it && it.amount) || 0;
+    if (!(a > 0)) return;
+    if (flowIsWager(cfg, it.kind)) { out.wagerItems.push(it); out.wagerTotal += a; }
+    else { out.normalItems.push(it); out.normalTotal += a; }
+  });
   return out;
 }
 
 /**
- * Lee de la respuesta del depósito qué dio la plataforma por el código.
- * @param result  lo que devuelve giroxService.depositToUser
- * @returns { granted, amount, rule, wagerBalance, ruleBonus, unknown }
- *   - granted/amount/rule: saldo promocional otorgado (bloque promo_bonus status ok).
- *   - ruleBonus: la regla dio un BONO CLÁSICO (plata real) en vez de promocional.
- *   - unknown: respuesta `duplicate` sin detalle → no se sabe qué pasó la 1ª vez.
+ * ¿La respuesta del promocional suelto confirma que se otorgó?
+ * @param data  body crudo de POST /players/{u}/promo
+ * @returns { granted, amount, wagerBalance }
  */
-function readPromoOutcome(result) {
-  const out = { granted: false, amount: 0, rule: null, wagerBalance: null, ruleBonus: 0, unknown: false };
-  if (!result || !result.success) return out;
-  const d = result.data || {};
-  const pb = result.promoBonus || d.promo_bonus || null;
-  if (d.wager != null && Number.isFinite(Number(d.wager))) out.wagerBalance = Number(d.wager);
-  if (pb && String(pb.status || '').toLowerCase() === 'ok' && Number(pb.amount) > 0) {
-    out.granted = true;
-    out.amount = Number(pb.amount);
-    out.rule = pb.rule ? String(pb.rule).slice(0, 120) : null;
-    return out;
-  }
-  const wb = d.wagering && d.wagering.bonus;
-  if (wb && String(wb.status || '').toLowerCase() === 'ok' && Number(wb.amount) > 0) {
-    out.ruleBonus = Number(wb.amount);
-    return out;
-  }
-  if (result.duplicate && !pb) out.unknown = true;
-  return out;
+function readPromoResponse(data) {
+  const d = data || {};
+  const pb = d.promo_bonus || null;
+  const granted = !!(pb && String(pb.status || '').toLowerCase() === 'ok' && Number(pb.amount) > 0);
+  return {
+    granted,
+    amount: granted ? Number(pb.amount) : 0,
+    wagerBalance: (d.wager != null && Number.isFinite(Number(d.wager))) ? Number(d.wager) : null
+  };
 }
 
 /**
- * Qué hacer DESPUÉS del depósito con código.
- * @param plan     lo que devolvió planDeposit (con wagerItem)
- * @param outcome  readPromoOutcome(result)
- * @param cfg      config
- * @returns { wagerKind, sideItems, sideTotal, pendingItems, ruleBonusKind, unknownKind }
- *   - wagerKind: kind entregado como wager (o null).
- *   - unknownKind: la plataforma respondió `duplicate` sin detalle (reintento de una carga
- *     que ya había entrado): NO se sabe si el promocional se otorgó la 1ª vez. Se da por
- *     ENTREGADO (se marca usado, sin respaldo) y se avisa al agente: dejarlo pendiente lo
- *     volvería a dar en la próxima carga encima del que quizá ya recibió.
- *   - sideItems/sideTotal: bonos NORMALES a acreditar en la operación aparte.
- *   - pendingItems: no entregados (quedan pendientes).
- *   - ruleBonusKind: kind que la plataforma ya entregó como bono clásico.
+ * ¿Un fallo del promocional es TRANSITORIO (red / 429 / 5xx)? En ese caso NO se
+ * cambia de vía ni se da respaldo: un timeout puede haber acreditado, y el reintento
+ * con la MISMA reference lo resuelve (duplicate). Un rechazo de negocio (4xx: feat
+ * apagado, tope, validación) NO movió nada → ahí sí vale el respaldo.
  */
-function resolveOutcome(plan, outcome, cfg) {
-  const out = { wagerKind: null, sideItems: [], sideTotal: 0, pendingItems: [], ruleBonusKind: null, unknownKind: null };
-  if (!plan) return out;
-  (plan.normalItems || []).forEach((it) => out.sideItems.push(it));
-  (plan.skippedItems || []).forEach((it) => out.pendingItems.push(it));
-  const w = plan.wagerItem;
-  if (w) {
-    if (outcome && outcome.granted) out.wagerKind = w.kind;
-    else if (outcome && outcome.ruleBonus > 0) out.ruleBonusKind = w.kind;
-    else if (outcome && outcome.unknown) out.unknownKind = w.kind; // duplicate sin detalle: se da por entregado (no arriesgar un doble bono)
-    else if (cfg && cfg.fallback === 'skip') out.pendingItems.push(w);
-    else out.sideItems.push(w);
-  }
-  out.sideTotal = out.sideItems.reduce((s, it) => s + (Number(it.amount) || 0), 0);
-  return out;
+function isTransientFailure(r) {
+  if (!r) return true;
+  const s = Number(r.httpStatus);
+  if (!Number.isFinite(s) || s === 0) return true; // sin respuesta HTTP
+  return s === 429 || s >= 500;
 }
 
 module.exports = {
-  FLOWS, FLOW_LABELS, KINDS, FALLBACKS, MAX_CODES,
-  defaultConfig, normalizeConfig, validateConfig, normalizeCodeRow,
-  flowIsWager, findCode, pickCode, estimateWager,
-  planDeposit, readPromoOutcome, resolveOutcome
+  DEPOSIT_FLOWS, GIFT_FLOWS, FLOWS, FLOW_LABELS, KINDS, FALLBACKS,
+  defaultConfig, normalizeConfig, validateConfig,
+  flowIsWager, planDeposit, readPromoResponse, isTransientFailure
 };
