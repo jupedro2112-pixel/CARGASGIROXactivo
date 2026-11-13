@@ -269,6 +269,8 @@ function setupEventListeners() {
         loadDepositOriginPicker();
         // #188 bonos pendientes del cliente → sugerencia del bono
         renderDepositPendingBonus();
+        // #226 tipo de bono de esta carga (normal / wager) — solo si está activado en COMANDOS
+        if (typeof loadDepositBonusKind === 'function') loadDepositBonusKind();
     });
     if (elements.btnBonus) {
         elements.btnBonus.addEventListener('click', () => {
@@ -328,6 +330,11 @@ function setupEventListeners() {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.bonus-options button').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
+            // #226: elegir un % de bono normal en el modal Depositar saca el "Bono wager" (son excluyentes).
+            if (btn.dataset.bonus !== '0' && btn.closest('#depositModal') && typeof setDepositBonusKind === 'function' && typeof _depositBonusKind !== 'undefined' && _depositBonusKind === 'wager') {
+                setDepositBonusKind('normal');
+                btn.classList.add('active');
+            }
             calculateBonus();
         });
     });
@@ -3457,7 +3464,9 @@ async function sendCBU() {
 
 async function handleDeposit() {
     const amount = parseFloat(document.getElementById('depositAmount').value);
-    const bonus = parseFloat(document.getElementById('depositBonus').value) || 0;
+    // #226: con "Bono wager" elegido la carga NO lleva bono normal (va el código).
+    const _depKind = (typeof getDepositBonusKind === 'function') ? getDepositBonusKind() : {};
+    const bonus = _depKind.bonusKind === 'wager' ? 0 : (parseFloat(document.getElementById('depositBonus').value) || 0);
     const description = document.getElementById('depositDesc').value;
     const confirmBtn = document.getElementById('confirmDeposit');
     
@@ -3486,7 +3495,7 @@ async function handleDeposit() {
                 amount,
                 bonus,
                 description
-            }, (typeof getDepositOrigin === 'function') ? getDepositOrigin() : {}))
+            }, (typeof getDepositOrigin === 'function') ? getDepositOrigin() : {}, _depKind))
         });
         
         const data = await response.json();
@@ -3503,6 +3512,17 @@ async function handleDeposit() {
                 `⚠️ Carga $${amount} OK, pero BONUS $${bonus} NO se aplicó (${data.bonusError || 'la plataforma intermitente'}). Reintentá el bonus desde el botón "Bonus".`,
                 'error'
             );
+        } else if (data.wager && data.wager.granted) {
+            // #226: entró el saldo promocional (bono wager).
+            showToast(`Depósito de ${formatMoney(amount)} realizado + 🎟️ ${formatMoney(data.wager.amount)} de saldo promocional (código ${data.wager.code})` +
+                (data.wager.sideTotal > 0 && data.wager.sideOk ? ` + ${formatMoney(data.wager.sideTotal)} de bono normal` : ''), 'success');
+        } else if (data.wager && data.wager.ruleBonus > 0) {
+            showToast(`Depósito de ${formatMoney(amount)} realizado. ⚠️ El código ${data.wager.code} dio un BONO NORMAL de ${formatMoney(data.wager.ruleBonus)} (no promocional): revisá el premio de esa regla en 1girox.`, 'warning');
+        } else if (data.wager && data.wager.byAgent) {
+            showToast(`Depósito de ${formatMoney(amount)} realizado, pero el código ${data.wager.code} NO dio saldo promocional (inválido, vencido, ya usado por este jugador, o el Wager está apagado en 1girox). La carga entró SIN bono.`, 'error');
+        } else if (data.wager) {
+            showToast(`Depósito de ${formatMoney(amount)} realizado. El código wager ${data.wager.code} no dio saldo promocional` +
+                (data.wager.sideTotal > 0 && data.wager.sideOk ? `: se acreditó el bono normal de ${formatMoney(data.wager.sideTotal)} en su lugar.` : ': mirá la nota en el chat.'), 'warning');
         } else {
             showToast(`Depósito de ${formatMoney(amount + bonus)} realizado`, 'success');
         }
@@ -5687,6 +5707,12 @@ function renderTransactionStats(summary) {
                 <span class="stat-number">${formatMoney(summary.vipLevelups || 0)}</span>
                 <span class="stat-label">Bonos de nivel VIP</span>
             </div>` : ''}
+            ${summary.wagers > 0 ? `
+            <div class="stat-card wager_bonus" title="Saldo PROMOCIONAL (bono wager) otorgado por 1girox en las cargas. Es plata ficticia de la casa: no sale del saldo del agente y NO está sumado en 'Total regalos'.">
+                <span style="font-size:1.2rem">🎟️</span>
+                <span class="stat-number">${formatMoney(summary.wagers || 0)}</span>
+                <span class="stat-label">Bono wager (promocional)</span>
+            </div>` : ''}
             <div class="stat-card gifts" title="Todo lo que NO es carga ni retiro: bonificaciones + reembolsos + reembolso en vivo + fueguito + referidos + rakeback + nivel VIP + ruleta. En 1girox va como BONO.">
                 <span style="font-size:1.2rem">🎁</span>
                 <span class="stat-number">${formatMoney(summary.gifts || 0)}</span>
@@ -5848,6 +5874,7 @@ function getTransactionTypeLabel(type) {
         rakeback: '💎 Rakeback VIP',
         vip_levelup: '👑 Nivel VIP',
         roulette: '🎡 Ruleta',
+        wager_bonus: '🎟️ Bono wager', // #226 saldo promocional (no es plata real)
         transfer: 'Transferencia'
     };
     return labels[type] || type;
@@ -5868,6 +5895,7 @@ function getTransactionSourceLabel(t) {
         notif_batch_auto: '🎁 lote con regalo',
         story_bonus: '📽️ historia (+% reclamado)', // #210
         publisher_first_bonus: '🤝 bono 1ª carga publicista', // #221
+        wager_bonus: '🎟️ saldo promocional (no es plata real)', // #226
         auto_hgcash: '🏦 auto hgcash',
         hgcash_assigned: '🏦 bandeja hgcash',
         payout_refund: '↩️ devolución de retiro',
@@ -5876,8 +5904,11 @@ function getTransactionSourceLabel(t) {
         vip_levelup: '👑 nivel VIP'
     };
     const txt = map[src] || (src ? src.replace(/_/g, ' ') : '');
-    if (!txt) return '';
-    return '<div style="font-size:10.5px;color:#9aa4b2;margin-top:2px;">' + escapeHtml(txt) + '</div>';
+    // #226: la carga trajo saldo promocional (bono wager) → se muestra debajo del tipo.
+    const wb = (t && t.type === 'deposit' && t.metadata && t.metadata.wagerBonus && Number(t.metadata.wagerBonus.amount) > 0) ? t.metadata.wagerBonus : null;
+    const wbHtml = wb ? '<div style="font-size:10.5px;color:#ffb74d;margin-top:2px;">🎟️ + ' + formatMoney(wb.amount) + ' wager' + (wb.code ? ' (' + escapeHtml(String(wb.code)) + ')' : '') + '</div>' : '';
+    if (!txt) return wbHtml;
+    return '<div style="font-size:10.5px;color:#9aa4b2;margin-top:2px;">' + escapeHtml(txt) + '</div>' + wbHtml;
 }
 
 function filterTransactions(type) {
@@ -6115,6 +6146,8 @@ async function loadCBUConfig() {
     loadMetaPixels(); // #214 píxeles de Meta por publicista (solo admin general)
     // #184 Rollover GLOBAL de bonos (solo admin general)
     loadBonusRolloverCfg();
+    // #226 Tipo de bono: normal o wager
+    loadBonusKindCfg();
     // #188 Regla del bono por instalar la app (solo admin general)
     loadInstallBonusCfg();
     // #221 Bono de 1ª carga por publicista (solo admin general)
@@ -7282,6 +7315,243 @@ async function saveBonusRollover() {
 window.brPick = brPick;
 window.saveBonusRollover = saveBonusRollover;
 window.loadBonusRolloverCfg = loadBonusRolloverCfg;
+
+// ====== #226 TIPO DE BONO: normal o wager (COMANDOS; guardar solo admin general) ======
+// Config en el server: Config['bonusKind'] (GET/POST /api/admin/bonus-kind). El modal
+// Depositar usa la misma respuesta (_bkData) para ofrecer "Bono normal / Bono wager".
+let _bkData = null;      // última respuesta de /api/admin/bonus-kind
+let _bkCodesDraft = [];  // filas de códigos que se están editando en la card
+function _bkMoney(n) { return '$' + Math.round(Number(n) || 0).toLocaleString('es-AR'); }
+function _bkReadCodesFromDom() {
+    const rows = document.querySelectorAll('#bkCodes .bk-code-row');
+    const out = [];
+    rows.forEach(function(row) {
+        const g = function(sel) { return row.querySelector(sel); };
+        out.push({
+            code: (g('.bk-code').value || '').trim(),
+            pct: Number(g('.bk-pct').value),
+            capArs: Number(g('.bk-cap').value) || 0,
+            label: (g('.bk-label').value || '').trim(),
+            enabled: g('.bk-on').checked,
+            oncePerPlayer: g('.bk-once').checked
+        });
+    });
+    return out;
+}
+function _bkRenderCodes() {
+    const box = document.getElementById('bkCodes');
+    if (!box) return;
+    if (!_bkCodesDraft.length) {
+        box.innerHTML = '<div style="color:#888;font-size:12px;">Todavía no hay códigos. Sin códigos activos, todo sale como bono normal.</div>';
+        return;
+    }
+    box.innerHTML = _bkCodesDraft.map(function(c, i) {
+        return '<div class="bk-code-row" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:6px 8px;">' +
+            '<input type="text" class="bk-code" value="' + escapeHtml(c.code || '') + '" placeholder="CÓDIGO (igual que en 1girox)" maxlength="40" style="flex:2;min-width:140px;">' +
+            '<input type="number" class="bk-pct" value="' + (c.pct != null && c.pct !== '' ? Number(c.pct) : '') + '" placeholder="%" min="1" max="1000" style="width:74px;" title="% de la carga que da este código en 1girox">' +
+            '<input type="number" class="bk-cap" value="' + (Number(c.capArs) || 0) + '" placeholder="Tope $" min="0" style="width:104px;" title="Tope en $ de la regla en 1girox (0 = sin tope)">' +
+            '<input type="text" class="bk-label" value="' + escapeHtml(c.label || '') + '" placeholder="Nota (opcional)" maxlength="60" style="flex:2;min-width:120px;">' +
+            '<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#ccc;cursor:pointer;"><input type="checkbox" class="bk-on" style="width:auto;"' + (c.enabled !== false ? ' checked' : '') + '> Activo</label>' +
+            '<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#ccc;cursor:pointer;" title="En 1girox este código vale una sola vez por jugador"><input type="checkbox" class="bk-once" style="width:auto;"' + (c.oncePerPlayer ? ' checked' : '') + '> 1 vez por jugador</label>' +
+            '<button type="button" class="btn-secondary btn-small" onclick="bkRemoveCode(' + i + ')" title="Quitar">🗑️</button>' +
+            '</div>';
+    }).join('');
+}
+function bkAddCode() {
+    _bkCodesDraft = _bkReadCodesFromDom();
+    const max = (_bkData && _bkData.maxCodes) || 30;
+    if (_bkCodesDraft.length >= max) { showToast('Máximo ' + max + ' códigos', 'error'); return; }
+    _bkCodesDraft.push({ code: '', pct: '', capArs: 0, label: '', enabled: true, oncePerPlayer: false });
+    _bkRenderCodes();
+}
+function bkRemoveCode(i) {
+    _bkCodesDraft = _bkReadCodesFromDom();
+    _bkCodesDraft.splice(i, 1);
+    _bkRenderCodes();
+}
+function _bkRenderPlatform(d) {
+    const el = document.getElementById('bkPlatform');
+    if (!el) return;
+    const p = d && d.platform;
+    let html = '';
+    if (d && d.player) {
+        if (!d.player.found) html += '<div style="color:#ff8a80;">No se pudo leer ese usuario en 1girox.</div>';
+        else if (d.player.wagerFieldPresent) html += '<div style="color:#7fffb0;">✅ 1girox informa saldo promocional para <b>' + escapeHtml(d.player.username) + '</b>: ' + _bkMoney(d.player.wager) + ' (saldo real ' + _bkMoney(d.player.balance) + '). El saldo promocional (Wager) está habilitado.</div>';
+        else html += '<div style="color:#ffcc80;">⚠️ 1girox NO informa saldo promocional para <b>' + escapeHtml(d.player.username) + '</b>: parece que el feat "Saldo promocional (Wager)" está APAGADO en tu sitio. Pedile a 1girox que lo habilite; mientras tanto ningún código va a dar wager.</div>';
+    }
+    if (!p || !p.ok) {
+        html += '<div style="color:#ffcc80;">No se pudo leer la configuración de 1girox' + (p && p.error ? ' (' + escapeHtml(String(p.error)) + ')' : '') + '.</div>';
+    } else {
+        const promo = p.rules.filter(function(r) { return r.type === 'promo_code'; });
+        const other = p.rules.filter(function(r) { return r.type !== 'promo_code'; });
+        const line = function(r) {
+            return '<li><b>' + escapeHtml(r.code || r.name || '(sin nombre)') + '</b>' + (r.code && r.name ? ' — ' + escapeHtml(r.name) : '') + ': ' +
+                (r.mode === 'percent' ? (r.percent + '%') : (r.mode === 'fixed' ? _bkMoney(r.fixedAmount) + ' fijo' : escapeHtml(String(r.mode || '?')))) +
+                (r.cap ? ', tope ' + _bkMoney(r.cap) : '') + (r.reward ? ', premio ' + escapeHtml(String(r.reward)) : '') +
+                (r.endsAt ? ', vence ' + escapeHtml(String(r.endsAt).slice(0, 10)) : '') + '</li>';
+        };
+        html += '<div style="margin-top:4px;">Códigos promocionales vigentes en 1girox: ' + (promo.length ? '' : '<b>ninguno</b>.') + '</div>' + (promo.length ? '<ul style="margin:4px 0 0 18px;padding:0;">' + promo.map(line).join('') + '</ul>' : '');
+        if (other.length) html += '<div style="margin-top:6px;color:#ffcc80;">Otras reglas automáticas de tu cuenta (se aplican SOLAS a las cargas sin bono, no dependen de este panel):</div><ul style="margin:4px 0 0 18px;padding:0;">' + other.map(function(r) { return '<li>' + escapeHtml(String(r.type)) + ' — ' + line(r).replace(/^<li>|<\/li>$/g, '') + '</li>'; }).join('') + '</ul>';
+    }
+    el.innerHTML = html;
+}
+function _bkRender(d) {
+    _bkData = d;
+    const cfg = d.config || {};
+    const en = document.getElementById('bkEnabled');
+    if (en) en.checked = cfg.enabled === true;
+    const fb = document.getElementById('bkFallback');
+    if (fb) fb.value = cfg.fallback === 'skip' ? 'skip' : 'normal';
+    const fl = document.getElementById('bkFlows');
+    if (fl) {
+        fl.innerHTML = (d.flows || []).map(function(f) {
+            const v = (cfg.flows && cfg.flows[f.key]) === 'wager' ? 'wager' : 'normal';
+            return '<div style="display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:rgba(255,255,255,.04);border-radius:8px;padding:6px 10px;">' +
+                '<span style="font-size:12.5px;color:#ddd;">' + escapeHtml(f.label) + '</span>' +
+                '<select class="bk-flow" data-flow="' + escapeHtml(f.key) + '" style="width:auto;min-width:150px;">' +
+                '<option value="normal"' + (v === 'normal' ? ' selected' : '') + '>💳 Bono normal</option>' +
+                '<option value="wager"' + (v === 'wager' ? ' selected' : '') + '>🎟️ Bono wager</option>' +
+                '</select></div>';
+        }).join('');
+    }
+    _bkCodesDraft = (cfg.codes || []).map(function(c) { return Object.assign({}, c); });
+    _bkRenderCodes();
+    const w = document.getElementById('bkWarnings');
+    if (w) {
+        const list = [].concat(d.warnings || [], d.crossWarnings || []);
+        w.style.display = list.length ? '' : 'none';
+        w.innerHTML = list.map(function(t) { return '⚠️ ' + escapeHtml(t); }).join('<br>');
+    }
+    _bkRenderPlatform(d);
+}
+async function loadBonusKindCfg() {
+    const form = document.getElementById('bonusKindForm');
+    const header = document.getElementById('bonusKindHeader');
+    try {
+        const r = await authFetch('/api/admin/bonus-kind');
+        if (!r.ok) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; return; }
+        const d = await r.json();
+        if (form) form.style.display = '';
+        if (header) header.style.display = '';
+        _bkRender(d);
+    } catch (e) { if (form) form.style.display = 'none'; if (header) header.style.display = 'none'; }
+}
+async function saveBonusKind() {
+    try {
+        const flows = {};
+        document.querySelectorAll('#bkFlows .bk-flow').forEach(function(s) { flows[s.getAttribute('data-flow')] = s.value; });
+        const body = {
+            enabled: document.getElementById('bkEnabled').checked,
+            fallback: document.getElementById('bkFallback').value,
+            flows: flows,
+            codes: _bkReadCodesFromDom()
+        };
+        const r = await authFetch('/api/admin/bonus-kind', { method: 'POST', body: JSON.stringify(body) });
+        const j = await r.json();
+        if (!r.ok) { showToast(j.error || 'No se pudo guardar', 'error'); return; }
+        _bkRender(j);
+        const warn = (j.warnings || []).length + (j.crossWarnings || []).length;
+        showToast(j.config && j.config.enabled ? ('Tipo de bono guardado: wager ACTIVADO' + (warn ? ' (revisá los avisos)' : '')) : 'Tipo de bono guardado: todo sale como bono normal', warn ? 'warning' : 'success');
+    } catch (e) { showToast('Error de conexión', 'error'); }
+}
+async function bkTest() {
+    const el = document.getElementById('bkPlatform');
+    try {
+        if (el) el.innerHTML = 'Consultando 1girox…';
+        const r = await authFetch('/api/admin/bonus-kind/check', { method: 'POST', body: JSON.stringify({ username: (document.getElementById('bkTestUser').value || '').trim() }) });
+        const j = await r.json();
+        if (!r.ok) { if (el) el.innerHTML = '<span style="color:#ff8a80;">' + escapeHtml(j.error || 'No se pudo consultar') + '</span>'; return; }
+        _bkData = Object.assign({}, _bkData || {}, { platform: j.platform, crossWarnings: j.crossWarnings });
+        _bkRenderPlatform(j);
+    } catch (e) { if (el) el.innerHTML = '<span style="color:#ff8a80;">Error de conexión</span>'; }
+}
+window.loadBonusKindCfg = loadBonusKindCfg;
+window.saveBonusKind = saveBonusKind;
+window.bkAddCode = bkAddCode;
+window.bkRemoveCode = bkRemoveCode;
+window.bkTest = bkTest;
+
+// ---- #226 Modal Depositar: "Bono normal / Bono wager" de ESTA carga ----
+// Solo aparece si el wager está ACTIVADO y hay al menos un código activo. Si el cliente
+// tiene bonos pendientes (instalar app, ruleta, publicista…), el tipo lo decide el
+// sistema según COMANDOS y la elección del agente no se usa (igual que el monto).
+let _depositBonusKind = 'normal';
+function _depActiveWagerCodes() {
+    const cfg = _bkData && _bkData.config;
+    if (!cfg || !cfg.enabled) return [];
+    return (cfg.codes || []).filter(function(c) { return c.enabled !== false; });
+}
+function renderDepositBonusKindHint() {
+    const hint = document.getElementById('depositBonusKindHint');
+    if (!hint) return;
+    const pending = typeof _depositSuggestedBonus !== 'undefined' && _depositSuggestedBonus != null;
+    if (pending) { hint.innerHTML = 'Este cliente tiene bonos pendientes: el sistema los aplica solo, y si salen como bono normal o wager lo decide la configuración de COMANDOS → "Tipo de bono".'; return; }
+    if (_depositBonusKind !== 'wager') { hint.innerHTML = 'Bono normal: plata real con rollover (elegí el % arriba).'; return; }
+    const sel = document.getElementById('depositWagerCode');
+    const codes = _depActiveWagerCodes();
+    const row = codes.find(function(c) { return sel && c.code === sel.value; });
+    const amount = parseFloat((document.getElementById('depositAmount') || {}).value) || 0;
+    let est = '';
+    if (row && amount > 0) {
+        let w = Math.floor(amount * row.pct / 100);
+        if (row.capArs > 0) w = Math.min(w, row.capArs);
+        est = ' Estimado para ' + _bkMoney(amount) + ': <b>' + _bkMoney(w) + '</b> de saldo promocional.';
+    }
+    hint.innerHTML = '🎟️ Bono wager: la carga sale con el código <b>' + escapeHtml(row ? row.code : '?') + '</b> y 1girox le da saldo promocional (no es plata real ni sale del saldo del agente). NO lleva bono normal.' + est + ' El monto exacto lo informa 1girox al cargar.';
+}
+function setDepositBonusKind(kind) {
+    const codes = _depActiveWagerCodes();
+    _depositBonusKind = (kind === 'wager' && codes.length) ? 'wager' : 'normal';
+    const bn = document.getElementById('depKindNormal'), bw = document.getElementById('depKindWager'), sel = document.getElementById('depositWagerCode');
+    if (bn) bn.className = 'btn btn-small ' + (_depositBonusKind === 'normal' ? 'btn-primary' : 'btn-secondary');
+    if (bw) bw.className = 'btn btn-small ' + (_depositBonusKind === 'wager' ? 'btn-primary' : 'btn-secondary');
+    if (sel) sel.style.display = _depositBonusKind === 'wager' ? '' : 'none';
+    if (_depositBonusKind === 'wager') {
+        // el wager no lleva bono normal: se limpia lo que hubiera elegido
+        document.querySelectorAll('#depositModal .bonus-options button').forEach(function(b) { b.classList.remove('active'); });
+        const nb = document.querySelector('#depositModal .bonus-options button[data-bonus="0"]');
+        if (nb) nb.classList.add('active');
+        const bi = document.getElementById('depositBonus');
+        if (bi && !(typeof _depositSuggestedBonus !== 'undefined' && _depositSuggestedBonus != null)) bi.value = '';
+    }
+    renderDepositBonusKindHint();
+}
+async function loadDepositBonusKind() {
+    const group = document.getElementById('depositBonusKindGroup');
+    if (!group) return;
+    group.style.display = 'none';
+    _depositBonusKind = 'normal';
+    try {
+        const r = await authFetch('/api/admin/bonus-kind');
+        if (!r.ok) return;
+        _bkData = await r.json();
+    } catch (e) { return; }
+    const codes = _depActiveWagerCodes();
+    if (!codes.length) return; // wager apagado o sin códigos → el modal queda como siempre
+    const sel = document.getElementById('depositWagerCode');
+    if (sel) {
+        sel.innerHTML = codes.map(function(c) {
+            return '<option value="' + escapeHtml(c.code) + '">' + escapeHtml(c.code) + ' — ' + c.pct + '%' + (c.capArs > 0 ? ' (tope ' + _bkMoney(c.capArs) + ')' : '') + (c.label ? ' · ' + escapeHtml(c.label) : '') + '</option>';
+        }).join('');
+    }
+    group.style.display = '';
+    const amt = document.getElementById('depositAmount');
+    if (amt && !amt._bkWired) { amt._bkWired = true; amt.addEventListener('input', renderDepositBonusKindHint); }
+    // Siempre arranca en "Bono normal": el wager lo elige el agente a propósito en cada
+    // carga (un default "wager" le mandaría el código también a las cargas sin bono).
+    setDepositBonusKind('normal');
+}
+// Lo que se suma al body de POST /api/admin/deposit.
+function getDepositBonusKind() {
+    if (_depositBonusKind !== 'wager') return {};
+    const sel = document.getElementById('depositWagerCode');
+    const code = sel ? sel.value : '';
+    return code ? { bonusKind: 'wager', wagerCode: code } : {};
+}
+window.setDepositBonusKind = setDepositBonusKind;
+window.renderDepositBonusKindHint = renderDepositBonusKindHint;
+window.loadDepositBonusKind = loadDepositBonusKind;
+window.getDepositBonusKind = getDepositBonusKind;
 
 // ====== Reembolso EN VIVO acumulativo (ESPEC-REEMBOLSO-1GIROX.md, solo admin general) ======
 async function loadInstantCashbackCfg() {
@@ -12591,7 +12861,7 @@ async function loadRouletteAdmin() {
                 html += '<td style="padding:7px 10px;color:#888;font-size:10px;font-family:monospace;">';
                 if (it.status === 'percent_used') {
                     // #206: cuándo, sobre qué carga, cuánto bono y quién lo aplicó.
-                    html += '<span style="color:#26e07f;font-family:inherit;">' + (it.usedBonusARS > 0 ? fmtMoney(it.usedBonusARS) + ' de bono' : 'sin bono aparte') +
+                    html += '<span style="color:#26e07f;font-family:inherit;">' + (it.usedWagerARS > 0 ? '🎟️ ' + fmtMoney(it.usedWagerARS) + ' de bono wager' : (it.usedBonusARS > 0 ? fmtMoney(it.usedBonusARS) + ' de bono' : 'sin bono aparte')) +
                         (it.usedOnAmount > 0 ? ' sobre carga ' + fmtMoney(it.usedOnAmount) : '') + '</span>' +
                         '<div style="color:#888;">' + (it.usedAt || it.creditedAt ? escapeHtml(fmtFechaHoraAR(it.usedAt || it.creditedAt)) : '') + (it.usedBy ? ' · ' + escapeHtml(it.usedBy) : '') + '</div>';
                 } else if (it.status === 'percent_pending') {

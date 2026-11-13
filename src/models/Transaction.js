@@ -21,7 +21,12 @@ const transactionSchema = new mongoose.Schema({
     // publicistas/clientes cuenta cargas reales. En 1girox todos estos regalos
     // van como BONO (ver ARCHITECTURE §4.5); `metadata.creditedAs` guarda cómo
     // salió de verdad ('bonus' | 'deposit' si hubo fallback).
-    enum: ['deposit', 'withdrawal', 'bonus', 'refund', 'transfer', 'referral_commission', 'fire_reward', 'rakeback', 'vip_levelup', 'roulette'],
+    // #226 'wager_bonus' = SALDO PROMOCIONAL (bono wager, Partner API v1.18) otorgado
+    // adentro de una carga. Es plata FICTICIA de la casa (no sale del saldo del
+    // agente, no es retirable): tipo propio A PROPÓSITO para que NINGÚN reporte de
+    // plata real (regalos, cargas, base del reembolso, cierre) lo cuente. La carga
+    // que lo trajo lleva `bonus: 0` y `metadata.wagerBonus`.
+    enum: ['deposit', 'withdrawal', 'bonus', 'refund', 'transfer', 'referral_commission', 'fire_reward', 'rakeback', 'vip_levelup', 'roulette', 'wager_bonus'],
     required: true,
     index: true
   },

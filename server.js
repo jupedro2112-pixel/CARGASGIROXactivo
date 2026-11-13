@@ -466,6 +466,7 @@ const girox = require('./src/services/giroxService');
 // superior): el 2026-09-16 estaban más abajo y el server no arrancaba
 // ("Cannot access 'bonusRollover' before initialization"). scripts/check-tdz.js lo vigila.
 const bonusRollover = require('./src/utils/bonusRollover');
+const bonusKind = require('./src/utils/bonusKind'); // #226 bono normal vs bono wager
 const { holderKey: _holderKey } = require('./src/utils/holderKey');
 // #183: cada operación de plata exitosa contra 1girox reporta el saldo del CAJERO
 // → CashierSnapshot (cruce sistema ↔ 1girox del cierre diario). Best-effort.
@@ -509,6 +510,149 @@ girox.setRolloverResolver(async () => {
   const g = await getGlobalBonusRollover();
   return g.enabled ? g.effective : null;
 });
+
+// ============================================
+// #226 BONO NORMAL vs BONO WAGER (Partner API v1.18 §2.8 "Premio PROMOCIONAL")
+// ============================================
+// Card "🎟️ Tipo de bono: normal o wager" (panel → COMANDOS, guardar solo admin general).
+// Config['bonusKind'] = { enabled, fallback, flows{install,publisher,roulette,
+// story,lote}, codes[{code,pct,capArs,label,enabled,oncePerPlayer}] } — default TODO
+// NORMAL (apagado = el sistema se comporta exactamente como antes del #226).
+// La parte pura (plan / lectura de la respuesta / qué hacer después) vive en
+// src/utils/bonusKind.js (test en frío: node scripts/test-bonus-kind.js).
+//
+// ⚠️ LÍMITE DE LA API (no nuestro): el saldo promocional NO se puede pedir con un
+// campo; solo lo entrega una REGLA AUTOMÁTICA de 1girox con premio "Promocional", y
+// desde acá se dispara mandando `promo_code` en el depósito. Por eso:
+//   - el wager solo existe ADENTRO de una carga (los regalos sueltos siguen normales);
+//   - el monto lo decide la regla de 1girox (se registra lo que informa promo_bonus);
+//   - una carga con código NO lleva bono normal adjunto (la plataforma ignoraría la
+//     regla): lo normal que corresponda va en una operación aparte (`sideRef`) con
+//     reference estable, DESPUÉS de confirmada la carga.
+// Sin cache a propósito (multi-instancia: el cambio del panel aplica al instante).
+async function getBonusKindConfig() {
+  let raw = null;
+  try { raw = await getConfig('bonusKind', null); } catch (_) {}
+  return bonusKind.normalizeConfig(raw);
+}
+const WAGER_FLOW_SHORT = { agent: 'elegido por el agente', install: 'bono por instalar la app', publisher: 'bono de 1ª carga por publicista', roulette: 'ruleta diaria', story: 'historia', lote: 'lote con regalo' };
+// Plan de los bonos AUTOMÁTICOS de una carga. `items` = [{kind, pct, amount}] en orden
+// de prioridad. Devuelve null si TODO sale como bono normal (= camino de siempre, sin
+// tocar nada) o { cfg, plan } si algún bono va como wager o queda en espera.
+// Fail-safe: ante cualquier error → null (bono normal de siempre).
+async function _wagerPlanFor(user, items) {
+  try {
+    const list = (Array.isArray(items) ? items : []).filter((it) => it && Number(it.amount) > 0);
+    if (!list.length) return null;
+    const cfg = await getBonusKindConfig();
+    if (!cfg.enabled || !list.some((it) => bonusKind.flowIsWager(cfg, it.kind))) return null;
+    let used = [];
+    try { const u = await User.findOne({ id: user.id }).select('wagerCodesUsed').lean(); used = (u && u.wagerCodesUsed) || []; } catch (_) {}
+    const plan = bonusKind.planDeposit(cfg, list, { usedCodes: used });
+    if (!plan.wagerItem && !plan.skippedItems.length) return null;
+    return { cfg, plan };
+  } catch (e) {
+    logger.warn(`[wager] no se pudo armar el plan de ${user && user.username} (sale como bono normal): ${e.message}`);
+    return null;
+  }
+}
+// DESPUÉS de un depósito con código (ya acreditado): lee qué dio la plataforma y
+// acredita, en una operación aparte con reference ESTABLE (`sideRef`), los bonos
+// NORMALES que correspondan (los de flujos en "normal" + el respaldo del wager que
+// no se otorgó, si la config dice "dar bono normal"). Nunca tira.
+// Devuelve { code, granted, wagerAmount, rule, wagerBalance, ruleBonus, unknown,
+//   wagerItem, ruleBonusItem, sideItems, sideTotal, sideOk, sideError, sideRollover,
+//   sideTransferId, pendingItems, deliveredKinds }.
+async function _wagerAfterDeposit({ user, wg, result, sideRef, sideMult, sideDesc }) {
+  const plan = wg.plan;
+  const out = { code: plan.code ? plan.code.code : null, granted: false, wagerAmount: 0, rule: null, wagerBalance: null, ruleBonus: 0, unknown: false,
+    wagerItem: null, ruleBonusItem: null, sideItems: [], sideTotal: 0, sideOk: false, sideError: null, sideRollover: null, sideTransferId: null,
+    pendingItems: [], deliveredKinds: [] };
+  try {
+    const oc = bonusKind.readPromoOutcome(result);
+    const rs = bonusKind.resolveOutcome(plan, oc, wg.cfg);
+    out.granted = oc.granted; out.wagerAmount = oc.amount; out.rule = oc.rule; out.wagerBalance = oc.wagerBalance;
+    out.ruleBonus = oc.ruleBonus; out.unknown = oc.unknown;
+    out.sideItems = rs.sideItems; out.sideTotal = rs.sideTotal; out.pendingItems = rs.pendingItems.slice();
+    if (rs.wagerKind) {
+      out.wagerItem = plan.wagerItem; out.deliveredKinds.push(rs.wagerKind);
+      try { await User.updateOne({ id: user.id }, { $addToSet: { wagerCodesUsed: out.code } }); } catch (_) {}
+    }
+    if (rs.ruleBonusKind) { out.ruleBonusItem = plan.wagerItem; out.deliveredKinds.push(rs.ruleBonusKind); }
+    // `duplicate` sin detalle (reintento de una carga que ya había entrado): se da por
+    // ENTREGADO como wager de monto desconocido (se marca usado, sin fila ni respaldo).
+    if (rs.unknownKind) { out.wagerItem = plan.wagerItem; out.deliveredKinds.push(rs.unknownKind); }
+    if (rs.sideTotal > 0) {
+      try {
+        // Misma reference en los dos intentos: si el 1º entró y se perdió la respuesta,
+        // el 2º vuelve `duplicate` y no paga dos veces.
+        let r = await girox.creditGift(user.username, rs.sideTotal, { reference: sideRef, rolloverX: sideMult, description: sideDesc || 'Bonificación de la carga' });
+        if (!(r && r.success)) {
+          logger.warn(`[wager] bono normal aparte de ${user.username} falló (${girox.errToString(r && r.error)}) — reintento con la MISMA reference ${sideRef}`);
+          r = await girox.creditGift(user.username, rs.sideTotal, { reference: sideRef, rolloverX: sideMult, description: sideDesc || 'Bonificación de la carga' });
+        }
+        if (r && r.success) {
+          out.sideOk = true;
+          out.sideRollover = r.rolloverApplied != null ? r.rolloverApplied : sideMult;
+          out.sideTransferId = (r.data && (r.data.transfer_id || r.data.transferId)) || null;
+          rs.sideItems.forEach((it) => out.deliveredKinds.push(it.kind));
+        } else {
+          out.sideError = girox.errToString(r && r.error) || 'la plataforma rechazó el bono';
+        }
+      } catch (e) { out.sideError = e.message; }
+      if (!out.sideOk) rs.sideItems.forEach((it) => out.pendingItems.push(it));
+    }
+    logger.info(`[wager] ${user.username} código=${out.code} → ${out.granted ? 'PROMOCIONAL $' + out.wagerAmount + (out.rule ? ' (' + out.rule + ')' : '') : (out.ruleBonus > 0 ? 'la regla dio BONO CLÁSICO $' + out.ruleBonus : (out.unknown ? 'duplicate sin detalle' : 'NO otorgó promocional'))}` +
+      `${rs.sideTotal > 0 ? ` · bono normal aparte $${rs.sideTotal} ${out.sideOk ? 'OK' : 'FALLÓ (' + out.sideError + ')'} ref=${sideRef}` : ''}`);
+  } catch (e) {
+    logger.error(`[wager] post-depósito de ${user && user.username} falló: ${e.message}`);
+  }
+  return out;
+}
+// Fila propia en Transacciones del saldo promocional otorgado (tipo 'wager_bonus':
+// ningún reporte de plata real lo cuenta). Nunca hace fallar el flujo.
+async function _recordWagerTx(o) {
+  try {
+    const w = Number(o && o.wagerAmount) || 0;
+    if (!(w > 0) || !o.user) return null;
+    const amt = Number(o.depositAmount) || 0;
+    return await Transaction.create({
+      id: uuidv4(), type: 'wager_bonus', amount: w, username: o.user.username, userId: o.user.id,
+      description: `Bono WAGER (saldo promocional) — ${WAGER_FLOW_SHORT[o.kind] || o.kind || 'carga'}${o.pct ? ' ' + o.pct + '%' : ''} — código ${o.code || '?'} en carga de $${amt.toLocaleString('es-AR')}`,
+      adminUsername: o.adminUsername || 'auto', adminRole: o.adminRole || 'system',
+      transactionId: o.transactionId || null,
+      metadata: { source: 'wager_bonus', flow: o.kind || null, appliedOnDeposit: true, depositTxId: o.depositTxId || null, depositAmount: amt,
+        pct: Number(o.pct) || 0, code: o.code || null, rule: o.rule || null, label: o.label || null },
+      timestamp: new Date()
+    });
+  } catch (e) {
+    logger.warn(`[wager] no se pudo registrar el bono wager de ${o && o.user && o.user.username}: ${e.message}`);
+    return null;
+  }
+}
+// Línea que se AGREGA al mensaje de la carga cuando entró saldo promocional
+// (editable: /sys_wager_bonus; vacío = no se agrega nada).
+async function _wagerClientLine(wout) {
+  return renderSystemCommand('/sys_wager_bonus',
+    '🎟️ ¡Además recibiste ${wager} de SALDO PROMOCIONAL (bono wager)! Se juega cuando se termina tu saldo real y, a medida que jugás, se va convirtiendo en saldo real. No se puede retirar hasta que se convierte.',
+    { wager: Math.round(Number(wout && wout.wagerAmount) || 0).toLocaleString('es-AR'), codigo: (wout && wout.code) || '', regla: (wout && wout.rule) || '' });
+}
+// Resumen para la nota admin-only de una carga que pasó por el plan de wager.
+function _wagerAdminNote(wout, opts) {
+  const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('es-AR');
+  const lab = (it) => (it && it.kind === 'lote') ? 'lote con regalo +' + it.pct + '%' : (it && it.kind === 'agent' ? 'bono elegido por el agente' : _pendingPartLabel(it));
+  const bits = [];
+  if (wout.granted) bits.push(`🎟️ BONO WAGER otorgado: ${money(wout.wagerAmount)} de saldo promocional (código ${wout.code}${wout.rule ? ', regla "' + wout.rule + '"' : ''}${wout.wagerItem ? ' — ' + lab(wout.wagerItem) : ''}). No es plata real ni sale del saldo del agente.`);
+  else if (wout.ruleBonus > 0) bits.push(`⚠️ El código ${wout.code} NO dio saldo promocional: la regla de 1girox entregó un BONO CLÁSICO de ${money(wout.ruleBonus)} (plata real). Revisá que el premio de esa regla sea "Promocional".`);
+  else if (wout.unknown) bits.push(`⚠️ La plataforma respondió "operación repetida" (reintento de una carga que ya había entrado) sin el detalle del código ${wout.code}: no se puede confirmar si dio el saldo promocional${wout.wagerItem ? ' de ' + lab(wout.wagerItem) : ''}. Para no darlo dos veces quedó marcado como USADO y sin bono de respaldo. Revisalo en 1girox: si NO entró, dáselo a mano con Bonificación.`);
+  else if (wout.code) bits.push(`⚠️ El código ${wout.code} NO otorgó saldo promocional (inválido, vencido, ya usado por este jugador, o el feat Wager está apagado en 1girox).`);
+  if (wout.sideTotal > 0 && wout.sideOk) bits.push(`💳 Bono NORMAL acreditado aparte: ${money(wout.sideTotal)} (${wout.sideItems.map(lab).join(' + ')}${wout.sideRollover ? ', rollover x' + wout.sideRollover : ''}).`);
+  else if (wout.sideTotal > 0) bits.push(`❌ El bono NORMAL de ${money(wout.sideTotal)} (${wout.sideItems.map(lab).join(' + ')}) NO se pudo acreditar: ${wout.sideError || 'error'}. Sigue PENDIENTE: el sistema lo aplica solo en la próxima carga — NO lo des a mano (se duplicaría).`);
+  // (el bono elegido a mano por el agente no "queda pendiente": no hay nada guardado)
+  const stillPending = wout.pendingItems.filter((it) => it.kind !== 'agent' && !(wout.sideItems.includes(it) && !wout.sideOk));
+  if (stillPending.length) bits.push(`⏳ Queda PENDIENTE para la próxima carga: ${stillPending.map(lab).join(' + ')}${opts && opts.noCodeHint ? ' (no hay un código wager activo para ese % — cargalo en COMANDOS → Tipo de bono)' : ''}.`);
+  return bits.join(' ');
+}
 
 // ============================================
 // PREFIJO de los usuarios nuevos (#197, réplica del #328 del gemelo AUTOGIROXcompartido)
@@ -2674,10 +2818,29 @@ async function hgcashAutoCarga({ movement, comprobante, mode, assign = null }) {
         }
       } catch (eL) { logger.warn(`[hgcash] bono de lote no evaluado (sigue sin lote): ${eL.message}`); }
     }
+    // #226 BONO WAGER: ¿alguno de los bonos automáticos de esta carga sale como saldo
+    // promocional? Con código → la carga viaja con `promo_code` y SIN bono adjunto (lo
+    // normal va aparte, después, con reference estable). `_hgWgSkip` = bonos en "wager"
+    // sin código que quedan en espera (config "no dar nada"). Sin plan = camino de siempre.
+    let _hgWg = null, _hgWgOut = null, _hgWgSkip = null, _hgWaitNote = '';
+    if (_hgBonus > 0) {
+      const _hgItems = _hgLote ? [{ kind: 'lote', pct: _hgLote.pct, amount: _hgBonus }] : _hgPend.parts;
+      const _hp = await _wagerPlanFor(user, _hgItems);
+      if (_hp && _hp.plan.code) { _hgWg = _hp; }
+      else if (_hp && _hgLote) {
+        await revertAutoPromoPercent(_hgLote);
+        _hgWaitNote = ` ⏳ El lote con regalo +${_hgLote.pct}% (${_hgLote.label}) está configurado como BONO WAGER pero no hay un código wager activo para ${_hgLote.pct}%: la carga salió SIN ese bono y el lote sigue vigente (COMANDOS → Tipo de bono).`;
+        _hgLote = null; _hgMult = null; _hgBonus = 0;
+      } else if (_hp) {
+        _hgWgSkip = _hp.plan; _hgBonus = _hp.plan.normalTotal;
+        _hgWaitNote = ` ⏳ BONO WAGER en espera: ${_hp.plan.skippedItems.map(p => _pendingPartLabel(p)).join(' + ')} está configurado como wager pero no hay un código wager activo para ese %: sigue PENDIENTE (COMANDOS → Tipo de bono).`;
+      }
+    }
     const result = await girox.depositToUser(user.username, Number(amount),
       assign ? `Carga asignada desde bandeja (hgcash) por ${agentLabel}` : 'Carga automática (hgcash)', _ref,
-      _hgBonus > 0 ? { bonusAmount: _hgBonus, bonusMultiplier: _hgLote ? _hgMult : await getGiroxBonusMultiplier() } : null);
-    const _hgBonusApplied = _hgBonus > 0 && result.success && !result.bonusFailed ? _hgBonus : 0;
+      _hgWg ? { promoCode: _hgWg.plan.code.code }
+        : (_hgBonus > 0 ? { bonusAmount: _hgBonus, bonusMultiplier: _hgLote ? _hgMult : await getGiroxBonusMultiplier() } : null));
+    let _hgBonusApplied = !_hgWg && _hgBonus > 0 && result.success && !result.bonusFailed ? _hgBonus : 0; // #226: `let` (con código se define después)
     if (!result.success) {
       if (chargeLocked) { try { await HgcashCharge.deleteOne({ chargeKey }); } catch (_) {} }
       if (_hgLote) { await revertAutoPromoPercent(_hgLote); _hgLote = null; } // #191
@@ -2685,7 +2848,25 @@ async function hgcashAutoCarga({ movement, comprobante, mode, assign = null }) {
       return { ok: false, reason: 'deposit_failed', error: girox.errToString(result.error || 'fallo deposit') };
     }
     const _hgLoteCap = _hgLote ? _loteCapTxt(_hgLote.pct, _loteCfgFor(_hgLote, await getInstallBonusConfig())) : '';
-    if (_hgLote && !_hgBonusApplied) {
+    // #226 Carga con código: qué otorgó la plataforma + bono NORMAL aparte (reference
+    // estable derivada de la del movimiento: un reintento no lo paga dos veces). Va en
+    // su propio try: la carga YA entró y un fallo acá no puede dispararle un reintento.
+    // Desde acá `_hgBonus` / `_hgBonusApplied` describen el bono NORMAL (plata real).
+    let _hgLoteWager = false;
+    if (_hgWg) {
+      try {
+        _hgWgOut = await _wagerAfterDeposit({ user, wg: _hgWg, result, sideRef: `vip-hgb-${chargeKey || movement.movementId}`.slice(0, 100),
+          sideMult: _hgLote ? _hgMult : await getGiroxBonusMultiplier(), sideDesc: 'Bonificación de la carga (hgcash)' });
+      } catch (eW) { logger.error(`[hgcash] post-depósito del bono wager falló user=${user.username}: ${eW.message}`); }
+      if (_hgWgOut) {
+        const _realBonus = (Number(_hgWgOut.ruleBonus) || 0) + (_hgWgOut.sideOk ? _hgWgOut.sideTotal : 0);
+        if (_realBonus > 0) { _hgBonus = _realBonus; _hgBonusApplied = _realBonus; }
+        else { _hgBonus = 0; _hgBonusApplied = 0; } // bono aparte fallido = sigue pendiente (lo dice la nota del wager)
+        result.bonusFailed = false; // habla de un bono ADJUNTO, que acá no se mandó
+        _hgLoteWager = !!(_hgLote && _hgWgOut.wagerItem && _hgWgOut.wagerItem.kind === 'lote');
+      } else { _hgBonus = 0; _hgBonusApplied = 0; }
+    }
+    if (_hgLote && !_hgBonusApplied && !_hgLoteWager) {
       // La carga entró pero la plataforma rechazó el bono adjunto → el lote sigue vigente.
       await revertAutoPromoPercent(_hgLote);
     }
@@ -2711,6 +2892,8 @@ async function hgcashAutoCarga({ movement, comprobante, mode, assign = null }) {
       transactionId: result.data?.transfer_id || result.data?.transferId,
       metadata: Object.assign(
         { source: assign ? 'hgcash_assigned' : 'auto_hgcash', movementId: movement.movementId, comprobanteId: compId, duplicate: !!result.duplicate },
+        // #226 saldo promocional (bono wager) que trajo esta carga — NO va en `bonus` (no es plata real).
+        (_hgWgOut && _hgWgOut.granted) ? { wagerBonus: { amount: _hgWgOut.wagerAmount, code: _hgWgOut.code, rule: _hgWgOut.rule, flow: _hgWgOut.wagerItem ? _hgWgOut.wagerItem.kind : null } } : {},
         (_hgLote && _hgBonusApplied > 0) ? { loteBonus: { promoBonusId: _hgLote.id, pct: _hgLote.pct, label: _hgLote.label, scope: _hgLote.scope } } : {} // #191
       ),
       timestamp: new Date()
@@ -2733,8 +2916,12 @@ async function hgcashAutoCarga({ movement, comprobante, mode, assign = null }) {
       let clientMsg = depositTpl.replace(/\{amount\}/g, Number(amount)).replace(/\{bonus\}/g, _hgBonusApplied).replace(/\{balance\}/g, newBalance !== null ? newBalance : 'actualizándose').replace(/\{rollover\}/g, _hgRollNote);
       if (_hgLote && _hgBonusApplied > 0) clientMsg += `\n🎁 Incluye tu regalo: +${_hgLote.pct}% extra por el lote de regalo${_hgLote.scope === 'first' ? ' (ya utilizado)' : ''}.`; // #191
       // #221: bono de 1ª carga por publicista aplicado en esta carga → se lo decimos.
-      const _hgPubPart = _hgBonusApplied > 0 ? _hgPend.parts.find(p => p && p.kind === 'publisher') : null;
+      // (#226: no si ese bono salió como wager, ni si no fue de los entregados.)
+      const _hgPubOk = !_hgWgOut || (_hgWgOut.deliveredKinds.includes('publisher') && !(_hgWgOut.wagerItem && _hgWgOut.wagerItem.kind === 'publisher'));
+      const _hgPubPart = (_hgBonusApplied > 0 && _hgPubOk) ? (_hgWgSkip ? _hgWgSkip.normalItems : _hgPend.parts).find(p => p && p.kind === 'publisher') : null;
       if (_hgPubPart) { try { const l = await _publisherFirstBonusClientLine(_hgPubPart); if (l) clientMsg += '\n' + l; } catch (_) {} }
+      // #226: entró saldo promocional (bono wager) → línea editable /sys_wager_bonus.
+      if (_hgWgOut && _hgWgOut.granted) { try { const l = await _wagerClientLine(_hgWgOut); if (l) clientMsg += '\n' + l; } catch (_) {} }
       const sysMsg = await Message.create({
         id: uuidv4(), senderId: 'admin', senderUsername: 'Sistema', senderRole: 'admin',
         receiverId: user.id, receiverRole: 'user', content: clientMsg, type: 'system', timestamp: new Date(), read: false
@@ -2756,7 +2943,34 @@ async function hgcashAutoCarga({ movement, comprobante, mode, assign = null }) {
 
     // #189 marcar usados los bonos pendientes que se aplicaron en esta carga.
     let _hgBonusNote = '';
-    if (_hgLote && _hgBonusApplied > 0) {
+    const _hgAdminRole = assign ? (assign.agentRole || 'depositor') : 'system';
+    const _hgTransferId = result.data?.transfer_id || result.data?.transferId;
+    if (_hgWgOut) {
+      // #226 La carga pasó por el plan de wager: se marcan SOLO los bonos entregados
+      // (como saldo promocional o como bono normal aparte); el resto sigue pendiente.
+      if (_hgLote) {
+        if (_hgLoteWager) {
+          await settleAutoPromoPercent(_hgLote, Number(amount), 0);
+          await _recordWagerTx({ user, kind: 'lote', pct: _hgLote.pct, label: _hgLote.label, wagerAmount: _hgWgOut.wagerAmount, code: _hgWgOut.code, rule: _hgWgOut.rule,
+            depositAmount: Number(amount), depositTxId: txId, transactionId: _hgTransferId, adminUsername: agentLabel, adminRole: _hgAdminRole });
+        } else if (_hgBonusApplied > 0) {
+          await settleAutoPromoPercent(_hgLote, Number(amount), _hgBonusApplied);
+          await _recordAppliedBonusTx({ user, kind: 'auto_promo', pct: _hgLote.pct, label: _hgLote.label, bonusAmount: _hgBonusApplied, depositAmount: Number(amount),
+            depositTxId: txId, transactionId: _hgWgOut.sideTransferId || _hgTransferId, adminUsername: agentLabel, adminRole: _hgAdminRole });
+        } // si no se entregó nada, la reserva del lote ya se liberó arriba
+      } else {
+        const _hgKinds = _hgWgOut.deliveredKinds.filter(k => k !== 'lote' && k !== 'agent');
+        if (_hgKinds.length) {
+          const _hgW = (_hgWgOut.wagerItem && _hgKinds.includes(_hgWgOut.wagerItem.kind))
+            ? { kind: _hgWgOut.wagerItem.kind, amount: _hgWgOut.wagerAmount, code: _hgWgOut.code, rule: _hgWgOut.rule } : undefined;
+          await _settlePendingBonuses(user, assign ? agentLabel : 'auto-hgcash', { amount: Number(amount), bonus: _hgBonusApplied, txId,
+            transactionId: _hgTransferId, adminRole: _hgAdminRole, parts: _hgPend.parts, kinds: _hgKinds, wager: _hgW });
+        }
+      }
+      _hgBonusNote = ' ' + _wagerAdminNote(_hgWgOut);
+    } else if (_hgWg) {
+      _hgBonusNote = ` ⚠️ La carga salió con el código wager ${_hgWg.plan.code.code} pero no se pudo leer el resultado: revisá en 1girox si entró el saldo promocional. Los bonos pendientes NO se marcaron como usados.`;
+    } else if (_hgLote && _hgBonusApplied > 0) {
       // #191 bono de LOTE automático en la carga hgcash: settle (ROI) + nota al agente.
       await settleAutoPromoPercent(_hgLote, Number(amount), _hgBonusApplied);
       // #206: Bonificación propia en Transacciones (origen "lote con regalo").
@@ -2767,15 +2981,18 @@ async function hgcashAutoCarga({ movement, comprobante, mode, assign = null }) {
       _hgBonusNote = ` ⚠️ El bono de LOTE automático (+${_hgLote.pct}%${_hgLoteCap}) NO se pudo acreditar en la carga (la plataforma rechazó el bono adjunto). Sigue vigente: aplicalo a mano si corresponde.`;
     } else if (_hgBonusApplied > 0) {
       // #206: además de marcar usados, deja la Bonificación propia de cada bono (ruleta / instalar app).
+      // #226: con bonos en espera (_hgWgSkip) solo se marcan los que salieron como bono normal.
+      const _hgNormParts = _hgWgSkip ? _hgWgSkip.normalItems : _hgPend.parts;
       await _settlePendingBonuses(user, assign ? agentLabel : 'auto-hgcash', { amount: Number(amount), bonus: _hgBonusApplied, txId,
-        transactionId: result.data?.transfer_id || result.data?.transferId, adminRole: assign ? (assign.agentRole || 'depositor') : 'system', parts: _hgPend.parts });
-      _hgBonusNote = ` 🤖 Con $${_hgBonusApplied.toLocaleString('es-AR')} de bono automático (${_hgPend.parts.map(p => _pendingPartLabel(p) + ' = $' + p.amount.toLocaleString('es-AR')).join(' + ')}).`;
+        transactionId: result.data?.transfer_id || result.data?.transferId, adminRole: assign ? (assign.agentRole || 'depositor') : 'system', parts: _hgPend.parts,
+        kinds: _hgWgSkip ? _hgNormParts.map(it => it.kind) : undefined });
+      _hgBonusNote = ` 🤖 Con $${_hgBonusApplied.toLocaleString('es-AR')} de bono automático (${_hgNormParts.map(p => _pendingPartLabel(p) + ' = $' + p.amount.toLocaleString('es-AR')).join(' + ')}).`;
     } else if (_hgBonus > 0 && result.bonusFailed) {
       _hgBonusNote = ` ⚠️ El bono pendiente de $${_hgBonus.toLocaleString('es-AR')} NO entró (la plataforma lo rechazó): aplicalo a mano con Bonificación. El bono sigue PENDIENTE.`;
     }
     await _emitAdminOnlyChatNote(user.id, user.username, assign
-      ? `🏦 ✅ CARGA ASIGNADA desde la bandeja del banco por ${agentLabel} — ${dataDesc}. Acreditado.${_hgBonusNote}`
-      : `🏦 ✅ CARGA AUTOMÁTICA hgcash — ${dataDesc}. Acreditado.${_hgBonusNote}`);
+      ? `🏦 ✅ CARGA ASIGNADA desde la bandeja del banco por ${agentLabel} — ${dataDesc}. Acreditado.${_hgBonusNote}${_hgWaitNote}`
+      : `🏦 ✅ CARGA AUTOMÁTICA hgcash — ${dataDesc}. Acreditado.${_hgBonusNote}${_hgWaitNote}`);
     // #197: webhook saliente 'carga' (primera_carga si es el FTD). Fire-and-forget.
     try {
       const _hgFTD = await _isFirstDeposit(user.id);
@@ -8931,6 +9148,88 @@ app.post('/api/admin/bonus-rollover', authMiddleware, adminMiddleware, async (re
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
 
+// #226 BONO NORMAL vs BONO WAGER (GET cualquier staff: el modal Depositar necesita la
+// lista de códigos; POST y la prueba solo admin general).
+// Reglas de código promocional que la plataforma informa en GET /config (para cruzar
+// con lo cargado en el panel). Nunca tira: sin config devuelve { ok:false }.
+async function _wagerPlatformRules(force) {
+  try {
+    const r = await girox.getPlatformConfig({ force: !!force });
+    if (!r.success) return { ok: false, error: girox.errToString(r.error), rules: [] };
+    const all = (r.config && r.config.bonus && Array.isArray(r.config.bonus.auto_rules)) ? r.config.bonus.auto_rules : [];
+    const rules = all.map((x) => ({
+      type: x.type || null, name: x.name || null, code: x.code || null, mode: x.mode || null,
+      percent: x.percent != null ? Number(x.percent) : null, fixedAmount: x.fixed_amount != null ? Number(x.fixed_amount) : null,
+      multiplier: x.multiplier != null ? Number(x.multiplier) : null, cap: x.cap != null ? Number(x.cap) : null,
+      endsAt: x.ends_at || null, scope: x.scope || null,
+      // La doc no dice cómo viene marcado el premio "Promocional": se pasa lo que haya.
+      reward: x.reward || x.reward_type || x.prize || x.prize_type || x.kind || null
+    }));
+    return { ok: true, rules, bonusEnabled: !!(r.config && r.config.bonus && r.config.bonus.enabled !== false) };
+  } catch (e) { return { ok: false, error: e.message, rules: [] }; }
+}
+// Avisos (no bloquean) al cruzar los códigos del panel con las reglas de la plataforma.
+function _wagerCrossWarnings(cfg, plat) {
+  const w = [];
+  if (!plat || !plat.ok) return w;
+  const promo = plat.rules.filter((r) => r.type === 'promo_code' && r.code);
+  cfg.codes.filter((c) => c.enabled).forEach((c) => {
+    const r = promo.find((x) => String(x.code).toLowerCase() === c.code.toLowerCase());
+    if (!r) { w.push(`El código "${c.code}" no aparece entre los códigos promocionales vigentes de 1girox: creálo allá (Solicitudes → Cargas → código promocional, premio "Promocional") o revisá cómo está escrito.`); return; }
+    if (r.percent != null && r.percent !== c.pct) w.push(`El código "${c.code}" está cargado acá con ${c.pct}% pero en 1girox figura con ${r.percent}%: el monto lo decide 1girox.`);
+    if (r.mode && r.mode !== 'percent') w.push(`El código "${c.code}" en 1girox es de monto fijo ($${r.fixedAmount}), no un %: va a dar ese monto sin importar la carga.`);
+    if (r.endsAt && new Date(r.endsAt).getTime() < Date.now()) w.push(`El código "${c.code}" figura VENCIDO en 1girox.`);
+  });
+  return w;
+}
+async function _bonusKindPayload(force) {
+  const config = await getBonusKindConfig();
+  const platform = await _wagerPlatformRules(force);
+  return {
+    config,
+    flows: bonusKind.FLOWS.map((k) => ({ key: k, label: bonusKind.FLOW_LABELS[k] })),
+    maxCodes: bonusKind.MAX_CODES,
+    platform,
+    crossWarnings: _wagerCrossWarnings(config, platform)
+  };
+}
+app.get('/api/admin/bonus-kind', authMiddleware, adminMiddleware, async (req, res) => {
+  try { res.json(await _bonusKindPayload(false)); }
+  catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
+});
+app.post('/api/admin/bonus-kind', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const v = bonusKind.validateConfig(req.body || {});
+    if (!v.ok) return res.status(400).json({ error: v.error });
+    await Config.set('bonusKind', v.config, req.user.username);
+    logger.info(`[bonus-kind] ${req.user.username}: wager ${v.config.enabled ? 'ON' : 'OFF'} · respaldo=${v.config.fallback} · ` +
+      `flujos=${bonusKind.FLOWS.map((f) => f + ':' + v.config.flows[f]).join(',')} · códigos=${v.config.codes.map((c) => c.code + '=' + c.pct + '%' + (c.enabled ? '' : '(off)')).join(',') || '-'}`);
+    const out = await _bonusKindPayload(true);
+    out.success = true;
+    out.warnings = v.warnings;
+    res.json(out);
+  } catch (e) { logger.error(`[bonus-kind] guardar falló: ${e.message}`); res.status(500).json({ error: 'Error del servidor' }); }
+});
+// Prueba de solo lectura: ¿la plataforma tiene el feat Wager prendido? Se nota porque
+// GET /players/{u} trae el campo `wager`. No mueve plata ni otorga nada.
+app.post('/api/admin/bonus-kind/check', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo admin general' });
+    const username = String((req.body && req.body.username) || '').trim();
+    const out = await _bonusKindPayload(true);
+    out.player = null;
+    if (username) {
+      const u = await findUserByUsernameCI(username);
+      const info = await girox.getUserInfoByName(u ? u.username : username, { fresh: true });
+      out.player = info
+        ? { found: true, username: info.username, balance: info.balance, wagerFieldPresent: info.wager != null, wager: info.wager }
+        : { found: false };
+    }
+    res.json(out);
+  } catch (e) { logger.warn(`[bonus-kind] check falló: ${e.message}`); res.status(500).json({ error: 'Error del servidor' }); }
+});
+
 // Config del reembolso en vivo (GET cualquier staff; POST solo admin general).
 app.get('/api/admin/instant-cashback', authMiddleware, adminMiddleware, async (req, res) => {
   try { res.json(await getInstantCashbackConfig()); }
@@ -10079,6 +10378,7 @@ app.get('/api/balance', authMiddleware, async (req, res) => {
         available: result.available,
         locked: result.locked,
         claimableTotal: result.claimableTotal,
+        wager: result.wager != null ? result.wager : null, // #226 saldo PROMOCIONAL (aparte del balance; null = feat apagado)
         username: result.username
       });
     } else {
@@ -10106,6 +10406,7 @@ app.get('/api/balance/live', authMiddleware, async (req, res) => {
         available: result.available,
         locked: result.locked,
         claimableTotal: result.claimableTotal,
+        wager: result.wager != null ? result.wager : null, // #226 saldo PROMOCIONAL (aparte del balance; null = feat apagado)
         username: result.username,
         updatedAt: new Date().toISOString()
       });
@@ -10232,6 +10533,27 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
     const _depTxId = uuidv4();
     let _settledPending = []; // #206 qué bonos pendientes se aplicaron (ya dejan su Bonificación propia)
 
+    // #226 BONO WAGER (saldo promocional, ver getBonusKindConfig). `_wg` = plan de wager
+    // de ESTA carga (null = todo sale como bono normal, el camino de siempre); `_wgOut` =
+    // qué pasó después del depósito; `_wgSkip` = plan SIN código cuyos bonos en "wager"
+    // quedan en espera (config "no dar nada si el wager no se puede").
+    let _wg = null, _wgOut = null, _wgSkip = null;
+    // (a) Elegido A MANO por el agente en el modal (bonusKind:'wager' + wagerCode). Solo
+    // si el cliente no tiene bonos pendientes (esos los decide el sistema, como siempre).
+    // Se valida ACÁ, antes de reclamar la transferencia del banco (nada que liberar).
+    const _agentWagerCode = req.body.bonusKind === 'wager' ? String(req.body.wagerCode || '').trim() : '';
+    if (_agentWagerCode && !(_pend.total > 0)) {
+      const _bkCfg = await getBonusKindConfig();
+      if (!_bkCfg.enabled) return res.status(400).json({ error: 'El bono wager está APAGADO (COMANDOS → Tipo de bono). Elegí bono normal.' });
+      const _bkRow = bonusKind.findCode(_bkCfg, _agentWagerCode);
+      if (!_bkRow) return res.status(400).json({ error: `El código wager "${_agentWagerCode}" no está cargado o está desactivado (COMANDOS → Tipo de bono).` });
+      // fallback 'skip' forzado: si el código no da el promocional NO se regala plata real
+      // por las dudas — el agente ve el aviso y decide.
+      _wg = { byAgent: true, cfg: Object.assign({}, _bkCfg, { fallback: 'skip' }),
+        plan: { code: _bkRow, wagerItem: { kind: 'agent', pct: _bkRow.pct, amount: Math.max(1, bonusKind.estimateWager(_bkRow, amount)) }, normalItems: [], normalTotal: 0, skippedItems: [] } };
+      bonus = 0;
+    }
+
     // #183: si el agente eligió una transferencia de la bandeja, el monto tiene que
     // ser EXACTAMENTE el de la transferencia y se reclama atómico antes de acreditar
     // (así la carga automática no la puede tomar en el medio).
@@ -10247,13 +10569,25 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
     }
     const _bankRelease = (toStatus, extra) => _bankReleaseClaim(_bankMovementId, _bankClaimed, toStatus, extra);
 
+    // #226 (b) Bonos PENDIENTES del cliente: ¿alguno sale como WAGER? Con código → la
+    // carga viaja con `promo_code` y SIN bono adjunto (lo normal va aparte, después).
+    if (!_wg && _pend.total > 0) {
+      const _pp = await _wagerPlanFor(user, _pend.parts);
+      if (_pp && _pp.plan.code) { _wg = _pp; bonus = 0; }
+      else if (_pp) {
+        _wgSkip = _pp.plan; bonus = _pp.plan.normalTotal;
+        if (_autoBonus) { _autoBonus.total = _pp.plan.normalTotal; _autoBonus.parts = _pp.plan.normalItems; _autoBonus.replaced = Math.abs(_autoBonus.agentBonus - _pp.plan.normalTotal) >= 1; }
+      }
+    }
+
     // #191 BONO DE LOTE AUTOMÁTICO (carga manual SIN bonus del agente y SIN otro bono
     // pendiente — una carga = como mucho UN bono automático): si el cliente tiene un %
     // de "Lote con regalo" automático vigente (alcance y franja incluidos), se RESERVA
     // atómico y viaja como bonus nativo de la MISMA operación de 1girox (tope #172).
     // Si el agente puso un bonus a mano, va el suyo (el lote NO se suma). Va DESPUÉS
     // de todas las validaciones que pueden cortar la request (nada que revertir antes).
-    if (!(parseFloat(bonus) > 0)) {
+    let _loteWaitNote = '';
+    if (!(parseFloat(bonus) > 0) && !_wg && !_wgSkip) {
       const _lc = await claimAutoPromoPercent(user, req.user.username || 'agente');
       if (_lc.claimed) {
         const _loteAmt = _loteBonusAmount(parseFloat(amount), _lc.pct, _loteCfgFor(_lc, await getInstallBonusConfig()));
@@ -10262,22 +10596,48 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
           _loteMult = await _loteMultiplierFor(_lc);
           bonus = String(_loteAmt);
           logger.info(`[deposit] bono de LOTE automático reservado para ${user.username}: +${_lc.pct}% = $${_loteAmt} (${_lc.label}, rollover x${_loteMult}) by=${req.user.username}`);
+          // #226 (c) ¿el % del lote sale como WAGER?
+          const _lp = await _wagerPlanFor(user, [{ kind: 'lote', pct: _lc.pct, amount: _loteAmt }]);
+          if (_lp && _lp.plan.code) { _wg = _lp; bonus = 0; }
+          else if (_lp) { // en "wager" sin código y la config dice no dar nada: el lote sigue vigente
+            await revertAutoPromoPercent(_lc); _loteClaim = null; _loteMult = null; bonus = 0;
+            _loteWaitNote = `⏳ El lote con regalo +${_lc.pct}% (${_lc.label}) está configurado como BONO WAGER pero no hay un código wager activo para ${_lc.pct}%: esta carga salió SIN ese bono y el lote sigue vigente. Cargá el código en COMANDOS → Tipo de bono.`;
+          }
         } else {
           await revertAutoPromoPercent(_lc);
         }
       }
     }
-    const bonusRequested = parseFloat(bonus) > 0;
+    let bonusRequested = parseFloat(bonus) > 0; // #226: `let` — tras un depósito con código pasa a reflejar el bono NORMAL acreditado aparte
 
     // bonusMultiplier OBLIGATORIO cuando va bonus_amount (lo exige la API).
+    // #226: con plan de wager la carga lleva SOLO el código (un bono adjunto anularía la regla).
     const result = await girox.depositToUser(
       user.username, parseFloat(amount), description, `vip-dep-${_depTxId}`,
-      bonusRequested
-        ? { bonusAmount: parseFloat(bonus), bonusMultiplier: _loteClaim ? _loteMult : await getGiroxBonusMultiplier() }
-        : null
+      _wg
+        ? { promoCode: _wg.plan.code.code }
+        : (bonusRequested
+          ? { bonusAmount: parseFloat(bonus), bonusMultiplier: _loteClaim ? _loteMult : await getGiroxBonusMultiplier() }
+          : null)
     );
 
     if (result.success) {
+      // #226 Carga con código: leer qué otorgó la plataforma y acreditar APARTE (reference
+      // estable vip-depbonus-<txId>) lo que tenga que salir como bono normal. Desde acá
+      // `bonus` / `bonusRequested` describen el bono NORMAL (plata real) de esta carga,
+      // así todo lo que sigue (mensajes, Transaction, avisos) funciona igual que siempre.
+      if (_wg) {
+        _wgOut = await _wagerAfterDeposit({ user, wg: _wg, result, sideRef: `vip-depbonus-${_depTxId}`,
+          sideMult: _loteClaim ? _loteMult : await getGiroxBonusMultiplier(), sideDesc: `Bonificación de la carga de $${amount}` });
+        // Si el bono aparte falló NO se usa el aviso viejo "reintentá con el botón Bonus":
+        // ese bono sigue PENDIENTE y el sistema lo aplica en la próxima carga (darlo a mano
+        // lo duplicaría) — lo explica la nota del wager.
+        const _realBonus = (Number(_wgOut.ruleBonus) || 0) + (_wgOut.sideOk ? _wgOut.sideTotal : 0);
+        if (_realBonus > 0) { bonus = String(_realBonus); bonusRequested = true; }
+        else { bonus = 0; bonusRequested = false; }
+        // El `bonusFailed` del cliente habla de un bono ADJUNTO, que acá no se mandó.
+        result.bonusFailed = false;
+      }
       // SLA: atender al cliente con una carga cuenta como respuesta (resuelve el reloj).
       await delayClockResolve(user.id, { responded: true, agentId: req.user.userId, agentUsername: req.user.username, via: 'operation', queueHint: 'cargas' });
       // Caso excepcional documentado por 1girox: la carga entró pero el bono
@@ -10287,7 +10647,14 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
       const bonusActuallyApplied = bonusRequested && !result.bonusFailed;
       // #191 bono de LOTE automático: settle (ROI) si entró; si la plataforma rechazó el
       // bono adjunto, se libera la reserva (el bono sigue vigente para la próxima).
-      if (_loteClaim) {
+      if (_loteClaim && _wgOut && _wgOut.wagerItem && _wgOut.wagerItem.kind === 'lote') {
+        // #226: el % del lote salió como BONO WAGER (saldo promocional): el lote queda
+        // usado/contado igual, con $0 de bono real (ROI) y su fila 'wager_bonus'.
+        await settleAutoPromoPercent(_loteClaim, parseFloat(amount), 0);
+        await _recordWagerTx({ user, kind: 'lote', pct: _loteClaim.pct, label: _loteClaim.label, wagerAmount: _wgOut.wagerAmount, code: _wgOut.code, rule: _wgOut.rule,
+          depositAmount: parseFloat(amount), depositTxId: _depTxId, transactionId: result.data?.transfer_id || result.data?.transferId,
+          adminUsername: req.user?.username, adminRole: req.user?.role || 'admin' });
+      } else if (_loteClaim) {
         const _lcCap = _loteCapTxt(_loteClaim.pct, _loteCfgFor(_loteClaim, await getInstallBonusConfig()));
         if (bonusActuallyApplied) {
           await settleAutoPromoPercent(_loteClaim, parseFloat(amount), parseFloat(bonus));
@@ -10296,21 +10663,44 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
             (_loteClaim.scope === 'first' ? 'El bono quedó USADO (era por una sola carga).' : 'El bono sigue vigente para sus próximas cargas.') + ' No hay que marcar nada.').catch(() => {});
         } else {
           await revertAutoPromoPercent(_loteClaim);
-          await _emitAdminOnlyChatNote(user.id, user.username,
+          // #226: con plan de wager el motivo lo explica la nota del wager (más abajo).
+          if (!_wgOut) await _emitAdminOnlyChatNote(user.id, user.username,
             `⚠️ El bono de LOTE automático (+${_loteClaim.pct}%${_lcCap} = $${Number(bonus).toLocaleString('es-AR')}) NO se pudo acreditar en esta carga (la plataforma rechazó el bono adjunto). El bono sigue vigente: aplicalo a mano con Bonificación si corresponde.`).catch(() => {});
           _loteClaim = null; // ya revertido: que el catch no lo toque
         }
       }
       // #188/#189 Bonos PENDIENTES aplicados en ESTA carga → quedan marcados como
       // usados solos (bono por instalar la app + % de la ruleta).
-      if (bonusActuallyApplied) {
+      // #226: con plan de wager se marcan SOLO los bonos efectivamente entregados (como
+      // wager o como bono normal aparte); el resto sigue pendiente para la próxima carga.
+      const _wgPendKinds = _wgOut ? _wgOut.deliveredKinds.filter(k => k !== 'lote' && k !== 'agent') : null;
+      const _wgPendWager = (_wgOut && _wgOut.wagerItem && _wgPendKinds.includes(_wgOut.wagerItem.kind))
+        ? { kind: _wgOut.wagerItem.kind, amount: _wgOut.wagerAmount, code: _wgOut.code, rule: _wgOut.rule } : undefined;
+      if (_wgOut ? _wgPendKinds.length > 0 : bonusActuallyApplied) {
         _settledPending = await _settlePendingBonuses(user, req.user.username, { amount: Number(amount), bonus: Number(bonus), txId: _depTxId,
-          transactionId: result.data?.transfer_id || result.data?.transferId, adminRole: req.user?.role || 'admin', parts: _pend.parts });
-        if (_autoBonus && _autoBonus.replaced) {
+          transactionId: result.data?.transfer_id || result.data?.transferId, adminRole: req.user?.role || 'admin', parts: _pend.parts,
+          kinds: _wgOut ? _wgPendKinds : (_wgSkip ? _wgSkip.normalItems.map(it => it.kind) : undefined), wager: _wgPendWager });
+        if (!_wgOut && _autoBonus && _autoBonus.replaced) {
           await _emitAdminOnlyChatNote(user.id, user.username,
             `🤖 BONO AUTOMÁTICO: la carga de $${Number(amount).toLocaleString('es-AR')} salió con $${Number(bonus).toLocaleString('es-AR')} de bono (${_autoBonus.parts.map(p => _pendingPartLabel(p) + ' = $' + p.amount.toLocaleString('es-AR')).join(' + ')}) en vez de los $${Number(_autoBonus.agentBonus).toLocaleString('es-AR')} que había puesto ${req.user.username}. El bono pendiente lo calcula y aplica el sistema.`).catch(() => {});
         }
       }
+
+      // #226 Notas admin-only del bono wager de esta carga (qué se dio, qué quedó pendiente).
+      if (_wgOut) {
+        if (_wgOut.granted && _wg.byAgent) {
+          await _recordWagerTx({ user, kind: 'agent', pct: _wg.plan.code.pct, label: _wg.plan.code.label, wagerAmount: _wgOut.wagerAmount, code: _wgOut.code, rule: _wgOut.rule,
+            depositAmount: parseFloat(amount), depositTxId: _depTxId, transactionId: result.data?.transfer_id || result.data?.transferId,
+            adminUsername: req.user?.username, adminRole: req.user?.role || 'admin' });
+        }
+        const _wgNote = _wagerAdminNote(_wgOut);
+        if (_wgNote) await _emitAdminOnlyChatNote(user.id, user.username, _wgNote).catch(() => {});
+      }
+      if (_wgSkip && _wgSkip.skippedItems.length) {
+        await _emitAdminOnlyChatNote(user.id, user.username,
+          `⏳ BONO WAGER en espera: ${_wgSkip.skippedItems.map(p => _pendingPartLabel(p)).join(' + ')} está configurado como wager pero no hay un código wager activo para ese %. Esta carga salió sin ese bono y sigue PENDIENTE. Cargá el código en COMANDOS → Tipo de bono.`).catch(() => {});
+      }
+      if (_loteWaitNote) await _emitAdminOnlyChatNote(user.id, user.username, _loteWaitNote).catch(() => {});
 
       // claim_required=true en la config del owner: el bono adjunto puede quedar
       // "a reclamar" en el casino → se libera acá para que el cliente lo vea en
@@ -10443,10 +10833,12 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
       // #191: la carga incluyó el % de un lote automático → se lo decimos.
       if (_loteClaim && includeBonusInMessage) messageContent += `\n🎁 Incluye tu regalo: +${_loteClaim.pct}% extra por el lote de regalo${_loteClaim.scope === 'first' ? ' (ya utilizado)' : ''}.`;
       // #221: bono de 1ª carga por publicista aplicado en esta carga → se lo decimos.
-      if (includeBonusInMessage && _autoBonus && _settledPending.includes('publisher')) {
+      if (includeBonusInMessage && _autoBonus && _settledPending.includes('publisher') && !(_wgPendWager && _wgPendWager.kind === 'publisher')) {
         const _depPubPart = _autoBonus.parts.find(p => p && p.kind === 'publisher');
         if (_depPubPart) { try { const l = await _publisherFirstBonusClientLine(_depPubPart); if (l) messageContent += '\n' + l; } catch (_) {} }
       }
+      // #226: entró saldo promocional (bono wager) → línea editable /sys_wager_bonus.
+      if (_wgOut && _wgOut.granted) { try { const l = await _wagerClientLine(_wgOut); if (l) messageContent += '\n' + l; } catch (_) {} }
 
       const systemMessage = await Message.create({
         id: uuidv4(),
@@ -10658,6 +11050,8 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
         metadata: Object.assign(
           // #183 origen declarado de la carga manual (lo cruza el cierre diario).
           { origin: _bankOrigin, originNote: _bankOriginNote || undefined, movementId: _bankClaimed ? _bankMovementId : undefined },
+          // #226 saldo promocional (bono wager) que trajo esta carga — NO va en `bonus` (no es plata real).
+          (_wgOut && _wgOut.granted) ? { wagerBonus: { amount: _wgOut.wagerAmount, code: _wgOut.code, rule: _wgOut.rule, flow: _wgOut.wagerItem ? _wgOut.wagerItem.kind : null } } : {},
           bonusRequested && !bonusActuallyApplied ? {
             // Trazabilidad: agente pidió bonus pero no entró. Sirve para reportes
             // de discrepancias y para que el admin sepa que hubo intento fallido.
@@ -10741,6 +11135,9 @@ app.post('/api/admin/deposit', authMiddleware, depositorMiddleware, async (req, 
         bonusRequested: bonusRequested,
         bonusApplied: bonusActuallyApplied,
         autoBonus: _autoBonus, // #189: bono pendiente aplicado por el sistema (null si no había)
+        // #226: qué pasó con el bono wager de esta carga (null si no hubo plan de wager)
+        wager: _wgOut ? { code: _wgOut.code, granted: _wgOut.granted, amount: _wgOut.wagerAmount, rule: _wgOut.rule, ruleBonus: _wgOut.ruleBonus,
+          unknown: _wgOut.unknown, byAgent: !!_wg.byAgent, sideTotal: _wgOut.sideTotal, sideOk: _wgOut.sideOk, sideError: _wgOut.sideError } : null,
         bonusError: bonusRequested && !bonusActuallyApplied ? bonusJgResult?.error : null
       });
     } else {
@@ -10763,7 +11160,8 @@ app.get('/api/admin/balance/:username', authMiddleware, adminMiddleware, async (
     const result = await girox.getUserBalance(username);
     
     if (result.success) {
-      res.json({ balance: result.balance });
+      // #226: + saldo promocional (wager) y disponible, para la cabecera del chat del panel.
+      res.json({ balance: result.balance, available: result.available, wager: result.wager != null ? result.wager : null });
     } else {
       res.status(400).json({ error: result.error });
     }
@@ -12290,6 +12688,12 @@ async function initializeData() {
       description: 'Línea que se AGREGA al mensaje de la carga cuando el cliente recibió el bono de 1ª carga por publicista (regla en Configuración → "🤝 Bono de 1ª carga por publicista"). Variables: ${bono} (monto del bono), {regla} (ej. "50% hasta $20.000, el resto al 20%"), {pct}, ${tope}, {excedente}, {publicista} (código de la campaña). Si lo dejás vacío, no se agrega nada.',
       type: 'message',
       response: '🎁 Incluye tu BONO DE BIENVENIDA por tu primera carga: ${bono} extra ({regla}). ¡Es por única vez!'
+    },
+    {
+      name: '/sys_wager_bonus',
+      description: 'Línea que se AGREGA al mensaje de la carga cuando el cliente recibió BONO WAGER (saldo promocional de 1girox; se configura en COMANDOS → "🎟️ Tipo de bono: normal o wager"). Variables: ${wager} (monto de saldo promocional que otorgó la plataforma), {codigo} (código promocional usado), {regla} (nombre de la regla en 1girox). Si lo dejás vacío, no se agrega nada.',
+      type: 'message',
+      response: '🎟️ ¡Además recibiste ${wager} de SALDO PROMOCIONAL (bono wager)! Se juega cuando se termina tu saldo real y, a medida que jugás, se va convirtiendo en saldo real. No se puede retirar hasta que se convierte.'
     },
     {
       name: '/sys_payout_paid',
@@ -16177,6 +16581,7 @@ app.get('/api/admin/transactions', authMiddleware, adminMiddleware, async (req, 
     ]);
     let deposits = 0, withdrawals = 0, bonuses = 0, refunds = 0, fireRewards = 0, referrals = 0,
       rakebacks = 0, vipLevelups = 0, roulette = 0, cashback = 0, totalAll = 0;
+    let wagers = 0; // #226 saldo PROMOCIONAL otorgado (bono wager): NO es plata real → fuera de `gifts`
     for (const g of sumAgg) {
       totalAll += g.count;
       if (g._id.cb) { cashback += g.total; continue; }
@@ -16190,6 +16595,7 @@ app.get('/api/admin/transactions', authMiddleware, adminMiddleware, async (req, 
         case 'rakeback': rakebacks = g.total; break;
         case 'vip_levelup': vipLevelups = g.total; break;
         case 'roulette': roulette = g.total; break;
+        case 'wager_bonus': wagers = g.total; break; // #226
       }
     }
 
@@ -16208,6 +16614,7 @@ app.get('/api/admin/transactions', authMiddleware, adminMiddleware, async (req, 
       roulette,
       cashback,
       gifts,
+      wagers, // #226 informativo (plata ficticia de la casa; no entra en gifts ni en el saldo neto)
       netBalance: deposits - withdrawals,
       totalTransactions: totalAll
     };
@@ -17729,6 +18136,14 @@ async function _consumeStoryBonus(userId, agent, ctx) {
   ).select('id username storyBonus').lean();
   const sb = u && u.storyBonus; if (!sb || !(sb.pct > 0)) return null;
   const pct = Number(sb.pct) || 0; const a = Number(ctx && ctx.amount) || 0;
+  const _w = (ctx && ctx.wagerInfo) || null; // #226: el +% salió como BONO WAGER (saldo promocional)
+  if (_w) {
+    await _recordWagerTx({ user: u, kind: 'story', pct, label: sb.label, wagerAmount: _w.amount, code: _w.code, rule: _w.rule, depositAmount: a, depositTxId: ctx.txId, transactionId: ctx.transactionId, adminUsername: agent, adminRole: ctx.adminRole || (agent === 'auto-hgcash' ? 'system' : 'admin') });
+    try { await Story.updateOne({ id: sb.storyId }, { $inc: { bonusUses: 1, bonusDepositTotal: Math.round(a) } }); } catch (_) {}
+    try { await _emitAdminOnlyChatNote(u.id, u.username, `✅ HISTORIA: el +${pct}% (${sb.label || ''}) quedó APLICADO por ${agent} como BONO WAGER en la carga de $${a.toLocaleString('es-AR')}: $${(Number(_w.amount) || 0).toLocaleString('es-AR')} de saldo promocional (código ${_w.code}).`); } catch (_) {}
+    logger.info(`[stories] ${u.username} — +${pct}% de historia consumido por ${agent} como WAGER ($${_w.amount})`);
+    return { pct, bonusArs: 0, wagerArs: Number(_w.amount) || 0 };
+  }
   const bonusArs = ctx && a > 0 ? Math.min(Math.floor(a * pct / 100), Number(ctx.bonus) || Infinity) : 0;
   if (bonusArs > 0) {
     await _recordAppliedBonusTx({ user: u, kind: 'story_bonus', pct, label: sb.label, bonusAmount: bonusArs, depositAmount: a, depositTxId: ctx.txId, transactionId: ctx.transactionId, adminUsername: agent, adminRole: ctx.adminRole || (agent === 'auto-hgcash' ? 'system' : 'admin') });
@@ -21539,6 +21954,7 @@ async function _markDailySpinPctUsed(userId, o) {
     await DailyRouletteSpin.findOneAndUpdate(q,
       { $set: { status: 'percent_used', usedAt: new Date(), usedBy: (o && o.usedBy) || 'auto',
                 usedOnAmount: Number(o && o.depositAmount) || 0, usedBonusARS: Number(o && o.bonusAmount) || 0,
+                usedWagerARS: Number(o && o.wagerAmount) || 0, // #226
                 creditTxId: (o && o.txId) || null, creditedAt: new Date() } },
       { sort: { spunAt: -1 } });
   } catch (e) { logger.warn(`[ROULETTE] no se pudo marcar el % como usado (${userId}): ${e.message}`); }
@@ -21607,24 +22023,39 @@ async function _settlePendingBonuses(user, agent, ctx) {
   // #221: ctx.parts = lo que devolvió _pendingBonusFor para ESTA carga. Si entró el bono de
   // 1ª carga por publicista, el de instalar NO se marca usado (no se aplicó: sigue pendiente).
   const _parts = Array.isArray(ctx && ctx.parts) ? ctx.parts : null;
-  const _pubPart = _parts ? _parts.find(p => p && p.kind === 'publisher') : null;
-  const _skipInstall = !!_pubPart && !_parts.some(p => p && p.kind === 'install');
+  // #226: ctx.kinds = SOLO estos bonos se entregaron en esta carga (los demás siguen
+  // pendientes); ctx.wager = { kind, amount, code, rule } = el que salió como BONO WAGER
+  // (saldo promocional: se registra como 'wager_bonus', no como Bonificación de plata real).
+  // Sin ctx.kinds (camino de siempre) se marca todo lo pendiente, como antes.
+  const _kinds = Array.isArray(ctx && ctx.kinds) ? ctx.kinds : null;
+  const _kOk = (k) => !_kinds || _kinds.includes(k);
+  const _wg = (ctx && ctx.wager && ctx.wager.kind) ? ctx.wager : null;
+  const _wgFor = (k) => (_wg && _wg.kind === k) ? _wg : null;
+  const _wgTx = (k, pct, label) => _recordWagerTx({ user, kind: k, pct, label, wagerAmount: _wg.amount, code: _wg.code, rule: _wg.rule, depositAmount: a,
+    depositTxId: ctx && ctx.txId, transactionId: ctx && ctx.transactionId, adminUsername: agent, adminRole: (ctx && ctx.adminRole) || (agent === 'auto-hgcash' ? 'system' : 'admin') });
+  const _pubPart = (_parts && _kOk('publisher')) ? _parts.find(p => p && p.kind === 'publisher') : null;
+  // El de instalar NO se marca usado si en esta carga entró el de publicista en su lugar (#221)
+  // o si no fue uno de los bonos entregados (#226).
+  const _hasPubPart = !!(_parts && _parts.some(p => p && p.kind === 'publisher'));
+  const _skipInstall = (_hasPubPart && !_parts.some(p => p && p.kind === 'install')) || !_kOk('install');
   if (_pubPart) {
     try {
       const usedPub = await User.findOneAndUpdate(
         { id: user.id, publisherFirstBonusStatus: { $ne: 'used' } },
         { $set: { publisherFirstBonusStatus: 'used', publisherFirstBonusUsedAt: new Date(), publisherFirstBonusUsedBy: agent,
-                  publisherFirstBonusCampaign: _pubPart.campaign || null, publisherFirstBonusAmount: Math.min(Number(_pubPart.amount) || 0, Number(ctx && ctx.bonus) || Infinity) } },
+                  publisherFirstBonusCampaign: _pubPart.campaign || null, publisherFirstBonusAmount: _wgFor('publisher') ? (Number(_wg.amount) || 0) : Math.min(Number(_pubPart.amount) || 0, Number(ctx && ctx.bonus) || Infinity) } },
         { new: true }
       ).select('id').lean();
       if (usedPub) {
         done.push('publisher');
-        const _pubAmt = Math.min(Number(_pubPart.amount) || 0, Number(ctx && ctx.bonus) || Infinity);
-        await _recordAppliedBonusTx({ user, kind: 'publisher_first', pct: _pubPart.pct, label: _pubPart.campaign, bonusAmount: _pubAmt, depositAmount: a,
+        const _pubW = _wgFor('publisher');
+        const _pubAmt = _pubW ? (Number(_pubW.amount) || 0) : Math.min(Number(_pubPart.amount) || 0, Number(ctx && ctx.bonus) || Infinity);
+        if (_pubW) await _wgTx('publisher', _pubPart.pct, _pubPart.campaign);
+        else await _recordAppliedBonusTx({ user, kind: 'publisher_first', pct: _pubPart.pct, label: _pubPart.campaign, bonusAmount: _pubAmt, depositAmount: a,
           depositTxId: ctx && ctx.txId, transactionId: ctx && ctx.transactionId,
           adminUsername: agent, adminRole: (ctx && ctx.adminRole) || (agent === 'auto-hgcash' ? 'system' : 'admin') });
         await _emitAdminOnlyChatNote(user.id, user.username,
-          `🤝 BONO DE 1ª CARGA (publicista ${_pubPart.campaign}) USADO — aplicado ${agent === 'auto-hgcash' ? 'AUTOMÁTICAMENTE' : 'por ' + agent} en la carga de $${a.toLocaleString('es-AR')}: $${_pubAmt.toLocaleString('es-AR')} de bono (regla: ${_pubFirstShortRule(_pubPart.cfg)}). Era por única vez: este cliente ya no lo tiene.${_skipInstall ? ' El bono por instalar la app sigue PENDIENTE para su próxima carga.' : ''}`).catch(() => {});
+          `🤝 BONO DE 1ª CARGA (publicista ${_pubPart.campaign}) USADO — aplicado ${agent === 'auto-hgcash' ? 'AUTOMÁTICAMENTE' : 'por ' + agent} en la carga de $${a.toLocaleString('es-AR')}: $${_pubAmt.toLocaleString('es-AR')} de ${_pubW ? 'SALDO PROMOCIONAL (bono wager, código ' + _pubW.code + ')' : 'bono'} (regla: ${_pubFirstShortRule(_pubPart.cfg)}). Era por única vez: este cliente ya no lo tiene.${(_parts && !_parts.some(p => p && p.kind === 'install')) ? ' El bono por instalar la app sigue PENDIENTE para su próxima carga.' : ''}`).catch(() => {});
         logger.info(`[pub-first-bonus] ${user.username} — $${_pubAmt} (${_pubPart.campaign}) marcado USADO por ${agent}`);
       }
     } catch (e) { logger.warn(`[deposit] no se pudo marcar el bono de 1ª carga por publicista: ${e.message}`); }
@@ -21638,17 +22069,22 @@ async function _settlePendingBonuses(user, agent, ctx) {
     if (usedIb) {
       const _ib = await getInstallBonusConfig();
       done.push('install');
+      const _ibW = _wgFor('install');
       const _ibAmt = Math.min(computeInstallBonus(a, _ib), Number(ctx && ctx.bonus) || Infinity);
-      await _recordAppliedBonusTx({ user, kind: 'install_bonus', pct: _ib.pct, bonusAmount: _ibAmt, depositAmount: a,
+      if (_ibW) await _wgTx('install', _ib.pct, null);
+      else await _recordAppliedBonusTx({ user, kind: 'install_bonus', pct: _ib.pct, bonusAmount: _ibAmt, depositAmount: a,
         depositTxId: ctx && ctx.txId, transactionId: ctx && ctx.transactionId,
         adminUsername: agent, adminRole: (ctx && ctx.adminRole) || (agent === 'auto-hgcash' ? 'system' : 'admin') });
-      await _emitAdminOnlyChatNote(user.id, user.username,
-        `✅ BONO ${_ib.pct}% (instalar app) USADO — aplicado ${agent === 'auto-hgcash' ? 'AUTOMÁTICAMENTE' : 'por ' + agent} en la carga de $${Number(ctx.amount).toLocaleString('es-AR')} con $${Number(ctx.bonus).toLocaleString('es-AR')} de bono (regla: ${_ib.pct}% hasta $${_ib.capArs.toLocaleString('es-AR')} + ${_ib.excessPct}% del resto). Este cliente ya no tiene bono pendiente.`).catch(() => {});
+      await _emitAdminOnlyChatNote(user.id, user.username, _ibW
+        ? `✅ BONO ${_ib.pct}% (instalar app) USADO — entregado ${agent === 'auto-hgcash' ? 'AUTOMÁTICAMENTE' : 'por ' + agent} como BONO WAGER en la carga de $${Number(ctx.amount).toLocaleString('es-AR')}: $${(Number(_ibW.amount) || 0).toLocaleString('es-AR')} de saldo promocional (código ${_ibW.code}). Este cliente ya no tiene bono pendiente.`
+        : `✅ BONO ${_ib.pct}% (instalar app) USADO — aplicado ${agent === 'auto-hgcash' ? 'AUTOMÁTICAMENTE' : 'por ' + agent} en la carga de $${Number(ctx.amount).toLocaleString('es-AR')} con $${Number(ctx.bonus).toLocaleString('es-AR')} de bono (regla: ${_ib.pct}% hasta $${_ib.capArs.toLocaleString('es-AR')} + ${_ib.excessPct}% del resto). Este cliente ya no tiene bono pendiente.`).catch(() => {});
       logger.info(`[bono-100] ${user.username} — marcado USADO por la carga con bono (${agent})`);
     }
   } catch (e) { logger.warn(`[deposit] no se pudo marcar el bono de instalación: ${e.message}`); }
-  try { const r = await _consumeRoulettePercent(user.id, agent, ctx); if (r) done.push('roulette'); } catch (e) { logger.warn(`[deposit] no se pudo consumir el % de ruleta: ${e.message}`); }
-  try { const r = await _consumeStoryBonus(user.id, agent, ctx); if (r) done.push('story'); } catch (e) { logger.warn(`[deposit] no se pudo consumir el bono de historia: ${e.message}`); } // #210
+  // #226: ctx.wagerInfo le avisa al consumidor que ESE bono salió como saldo promocional.
+  const _ctxFor = (k) => _wgFor(k) ? Object.assign({}, ctx, { wagerInfo: _wg }) : ctx;
+  if (_kOk('roulette')) { try { const r = await _consumeRoulettePercent(user.id, agent, _ctxFor('roulette')); if (r) done.push('roulette'); } catch (e) { logger.warn(`[deposit] no se pudo consumir el % de ruleta: ${e.message}`); } }
+  if (_kOk('story')) { try { const r = await _consumeStoryBonus(user.id, agent, _ctxFor('story')); if (r) done.push('story'); } catch (e) { logger.warn(`[deposit] no se pudo consumir el bono de historia: ${e.message}`); } } // #210
   return done;
 }
 // Consume el % de ruleta pendiente de un usuario (aplicado por el server en una
@@ -21664,8 +22100,17 @@ async function _consumeRoulettePercent(userId, agent, ctx) {
   if (!u || !(u.dailyRoulettePendingPct > 0)) return null;
   const pct = u.dailyRoulettePendingPct;
   const a = Number(ctx && ctx.amount) || 0;
-  const bonusArs = ctx && a > 0 ? Math.min(Math.floor(a * pct / 100), Number(ctx.bonus) || Infinity) : 0;
-  await _markDailySpinPctUsed(u.id, { spinId: u.dailyRoulettePendingSpinId, usedBy: agent, depositAmount: a, bonusAmount: bonusArs, txId: ctx && ctx.txId });
+  const _w = (ctx && ctx.wagerInfo) || null; // #226: el % salió como BONO WAGER (saldo promocional), no como bono real
+  const bonusArs = _w ? 0 : (ctx && a > 0 ? Math.min(Math.floor(a * pct / 100), Number(ctx.bonus) || Infinity) : 0);
+  await _markDailySpinPctUsed(u.id, { spinId: u.dailyRoulettePendingSpinId, usedBy: agent, depositAmount: a, bonusAmount: bonusArs, wagerAmount: _w ? _w.amount : 0, txId: ctx && ctx.txId });
+  if (_w) {
+    await _recordWagerTx({ user: u, kind: 'roulette', pct, label: u.dailyRoulettePendingLabel, wagerAmount: _w.amount, code: _w.code, rule: _w.rule, depositAmount: a,
+      depositTxId: ctx.txId, transactionId: ctx.transactionId, adminUsername: agent, adminRole: ctx.adminRole || (agent === 'auto-hgcash' ? 'system' : 'admin') });
+    await _emitAdminOnlyChatNote(u.id, u.username,
+      `✅ RULETA DIARIA: el ${pct}% EXTRA (${u.dailyRoulettePendingLabel || ''}) quedó APLICADO por ${agent} como BONO WAGER en la carga de $${a.toLocaleString('es-AR')}: $${(Number(_w.amount) || 0).toLocaleString('es-AR')} de saldo promocional (código ${_w.code}). Este cliente ya no tiene % de ruleta pendiente.`).catch(() => {});
+    logger.info(`[ROULETTE] ${u.username} — ${pct}% consumido por ${agent} como WAGER ($${_w.amount})`);
+    return { pct, bonusArs: 0, wagerArs: Number(_w.amount) || 0 };
+  }
   if (bonusArs > 0) {
     await _recordAppliedBonusTx({ user: u, kind: 'daily_roulette', pct, label: u.dailyRoulettePendingLabel, bonusAmount: bonusArs, depositAmount: a,
       depositTxId: ctx.txId, transactionId: ctx.transactionId, adminUsername: agent, adminRole: ctx.adminRole || (agent === 'auto-hgcash' ? 'system' : 'admin') });

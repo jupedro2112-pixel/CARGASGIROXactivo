@@ -499,7 +499,12 @@ function _moneyResult(data) {
       type: op.type || null,
       created_at: op.created_at || null,
       duplicate: !!data.duplicate,
-      wagering: data.wagering || null
+      wagering: data.wagering || null,
+      // #226 (Partner API v1.18): saldo PROMOCIONAL (Wager) del jugador tras la
+      // operación y, si una regla automática lo otorgó, el bloque promo_bonus.
+      // Solo vienen con el feat "Saldo promocional (Wager)" habilitado.
+      wager: (data.wager != null && Number.isFinite(Number(data.wager))) ? Number(data.wager) : null,
+      promo_bonus: data.promo_bonus || null
     }
   };
 }
@@ -523,6 +528,10 @@ function _playerBalances(player) {
     // saldo disponible: conviene avisárselo.
     claimableTotal: w && w.claimable_total != null ? Number(w.claimable_total) : 0,
     claimable: (w && Array.isArray(w.claimable)) ? w.claimable : [],
+    // #226 SALDO PROMOCIONAL (Wager, v1.18): plata ficticia de la casa en un balde
+    // APARTE del `balance` (no lo suma, no es retirable). null = la plataforma no
+    // manda el campo (feat apagado) → distinto de 0 (feat prendido, sin saldo).
+    wager: (player.wager != null && Number.isFinite(Number(player.wager))) ? Number(player.wager) : null,
     wagering: w
   };
 }
@@ -692,6 +701,7 @@ async function _fetchPlayer(username) {
     bonusLocked: bal.bonusLocked,
     claimableTotal: bal.claimableTotal,
     claimable: bal.claimable,
+    wager: bal.wager, // #226 saldo promocional (null = feat apagado)
     wagering: bal.wagering,
     createdAt: player.created_at || null
   };
@@ -916,6 +926,12 @@ function _buildReference(prefix, explicit) {
  * @param {string} [reference]   llave de idempotencia (RECOMENDADO: id de la Transaction)
  * @param {object} [wagering]    opcional, sólo si el feat "Rollover y Bonos" está activo:
  *                               { multiplier, bonusPercent, bonusAmount, bonusMultiplier }
+ *                               #226 (v1.12/v1.18): { promoCode } = código promocional de una
+ *                               regla automática del agente (así se otorga el saldo PROMOCIONAL
+ *                               / Wager: no hay campo suelto). ⚠️ Excluyente con bonusAmount /
+ *                               bonusPercent ("tus params siempre ganan": con bono explícito la
+ *                               regla NO aplica) → si vienen los dos, el código NO se manda.
+ *                               { noBonus:true } = este depósito no hereda ninguna regla.
  * @returns { success, duplicate, data:{ transfer_id, user_balance_after, ... } } | { success:false, error, code }
  */
 async function depositToUser(username, amount, description = '', reference = null, wagering = null) {
@@ -937,13 +953,19 @@ async function depositToUser(username, amount, description = '', reference = nul
       const g = await _globalRollover();
       if (g != null) body.bonus_multiplier = g;
     }
+    // #226 código promocional (bono WAGER / regla automática). Nunca junto con un bono
+    // explícito: la plataforma ignoraría la regla y el caller creería que pidió wager.
+    if (wagering.promoCode && !(body.bonus_amount > 0 || body.bonus_percent > 0)) {
+      body.promo_code = String(wagering.promoCode).trim().slice(0, 60);
+    }
+    if (wagering.noBonus === true) body.no_bonus = true;
   }
 
   let r = await _request({
     method: 'post',
     path: `/players/${encodeURIComponent(String(username))}/deposit`,
     body,
-    label: `deposit(${username}, $${amt}, ref=${body.reference})`,
+    label: `deposit(${username}, $${amt}, ref=${body.reference}${body.promo_code ? ', promo=' + body.promo_code : ''})`,
     username
   });
 
@@ -987,6 +1009,12 @@ async function depositToUser(username, amount, description = '', reference = nul
     logger.error(`[girox] deposit(${username}) — la carga se acreditó pero el BONO falló (ref=${body.reference}). ` +
       'NO reintentar el depósito completo: la reference devolvería duplicate. Escalar a soporte de 1girox.');
     out.bonusFailed = true;
+  }
+  // #226: lo que otorgó la regla del código (saldo promocional). Sin bloque = el
+  // código no dio promocional (inválido, vencido, ya usado, o la regla da bono clásico).
+  if (body.promo_code) {
+    out.promoCodeSent = body.promo_code;
+    out.promoBonus = (r.data && r.data.promo_bonus) || null;
   }
   return out;
 }
@@ -1312,6 +1340,7 @@ async function getUserBalance(username, opts = {}) {
     locked: info.locked,
     bonusLocked: info.bonusLocked,
     claimableTotal: info.claimableTotal,
+    wager: info.wager != null ? info.wager : null, // #226 saldo promocional (aparte del balance)
     wagering: info.wagering
   };
 }

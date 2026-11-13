@@ -194,6 +194,16 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   (`claimAutoPromoPercent` → bonus de la MISMA operación con tope `_loteBonusAmount` →
   `settle`/`revert`). Una carga = como mucho UN bono automático. Las fichas de un lote
   por tiempo se acreditan recién cuando el cliente toca 🎁 RECLAMAR (`/api/gift/claim`).
+- **BONO WAGER / saldo promocional (#226, 2026-11-13, manual `docs/PARTNER-APIv1.18.pdf` §2.8):** la API NO tiene un campo
+  para pedir wager: solo lo da una regla de 1girox con premio "Promocional", disparada con `promo_code` en el depósito → el wager solo
+  existe ADENTRO de una carga, el monto lo decide 1girox (`promo_bonus.amount`) y una carga con código NO puede llevar `bonus_amount`
+  (la regla no aplicaría). Config `Config['bonusKind']` (COMANDOS → "🎟️ Tipo de bono", default TODO normal y apagado), lógica pura en
+  `src/utils/bonusKind.js` + test `node scripts/test-bonus-kind.js` (correrlo tras tocar cargas/bonos). Un flujo de carga nuevo tiene
+  que repetir el patrón `_wagerPlanFor` → depósito con `{ promoCode }` → `_wagerAfterDeposit` (bono normal APARTE con reference
+  estable `vip-depbonus-*` / `vip-hgb-*`) → `_settlePendingBonuses` con `ctx.kinds` (solo lo entregado) y `ctx.wager`. El saldo
+  promocional NO es plata real: va como Transaction `'wager_bonus'` + `deposit.metadata.wagerBonus`, NUNCA en `deposit.bonus` ni en un
+  tipo de regalo (inflaría regalos, cierre y la base de los reembolsos). Una parte nueva de `_pendingBonusFor` ⇒ sumar su flujo a
+  `bonusKind.FLOWS`. Mensaje al cliente: `/sys_wager_bonus`.
 - **Bono de 1ª carga por PUBLICISTA (#221, 2026-11-03):** regla pct/tope/excedente POR CAMPAÑA en
   `Config['publisherFirstBonus']` (card "🤝" de Configuración), resuelta AL VUELO por
   `_publisherFirstBonusRuleFor` (campaña + creado desde el panel + fecha de alta + sin cargas previas)

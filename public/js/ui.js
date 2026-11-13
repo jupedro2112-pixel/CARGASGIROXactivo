@@ -185,6 +185,7 @@ VIP.ui = (function () {
                 if (data.balance !== undefined) {
                     VIP.state.currentUser.balance = data.balance;
                     updateBalanceDisplay(data.balance);
+                    updateWagerDisplay(data.wager); // #226 saldo promocional (bono wager)
 
                     const previousBalance = parseFloat(localStorage.getItem('lastBalance') || '0');
                     const newBalance      = parseFloat(data.balance);
@@ -347,6 +348,24 @@ VIP.ui = (function () {
         if (balanceElement) {
             balanceElement.textContent = `$${balance.toLocaleString()}`;
         }
+    }
+
+    // #226 Saldo PROMOCIONAL (bono wager de 1girox): balde aparte del saldo real. La
+    // línea solo aparece si el cliente tiene saldo promocional (> 0); con un back
+    // viejo o el feat apagado `wager` no viene y queda oculta.
+    function updateWagerDisplay(wager) {
+        try {
+            const row = document.getElementById('userWagerRow');
+            const el = document.getElementById('userWager');
+            if (!row || !el) return;
+            const w = Number(wager);
+            if (Number.isFinite(w) && w > 0) {
+                el.textContent = '$' + w.toLocaleString('es-AR');
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        } catch (_) {}
     }
 
     function startBalancePolling() {

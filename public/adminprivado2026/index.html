@@ -592,6 +592,7 @@ document.addEventListener('change', function (ev) {
                     <button class="filter-btn" data-filter="roulette" onclick="filterTransactions('roulette')">🎡 Ruleta</button>
                     <button class="filter-btn" data-filter="rakeback" onclick="filterTransactions('rakeback')">💎 Rakeback</button>
                     <button class="filter-btn" data-filter="vip_levelup" onclick="filterTransactions('vip_levelup')">👑 Nivel VIP</button>
+                    <button class="filter-btn" data-filter="wager_bonus" onclick="filterTransactions('wager_bonus')">🎟️ Bono wager</button>
                 </div>
                 <div id="transactionsList" class="transactions-list">
                     <table class="data-table">
@@ -1001,6 +1002,65 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                                 <small id="brHint" style="color:#aaa;font-size:11px;display:block;margin-top:6px;"></small>
                             </div>
                             <button type="button" class="btn-primary" onclick="saveBonusRollover()">💾 Guardar rollover global</button>
+                        </div>
+
+                        <!-- #226 TIPO DE BONO: normal o wager (guardar solo admin general) -->
+                        <div class="panel-subheader" style="margin-top: 24px;" id="bonusKindHeader">
+                            <h3>🎟️ Tipo de bono: normal o wager</h3>
+                        </div>
+                        <div class="cbu-form" id="bonusKindForm">
+                            <p style="color:#aaa;font-size:12px;line-height:1.55;margin:0 0 10px;">
+                                <b>Bono normal</b> = plata real con rollover (lo de siempre; sale del saldo del agente).
+                                <b>Bono wager</b> = <b>saldo promocional</b> de 1girox: plata ficticia de la casa en un saldo aparte, que
+                                <b>no sale del saldo del agente</b>, no es retirable y no lleva rollover; el cliente lo juega cuando se le
+                                termina el saldo real y se va convirtiendo en saldo real mientras juega.<br>
+                                ⚠️ <b>Cómo funciona con 1girox:</b> el wager no se puede pedir por un monto: solo lo entrega un
+                                <b>código promocional</b> creado en el panel de 1girox (Solicitudes → Cargas → código promocional, con
+                                premio <b>"Promocional"</b>). Por eso el wager <b>solo se da adentro de una carga</b>, y <b>cuánto</b> da lo
+                                decide ese código (su % y su tope). Cargá acá abajo cada código con el mismo % que tiene en 1girox.
+                                Los regalos sin carga (reembolsos, premios en $ de la ruleta, fueguito, rakeback, nivel VIP, referidos)
+                                siguen siendo bono normal.
+                            </p>
+                            <div class="form-group">
+                                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <input type="checkbox" id="bkEnabled" style="width:auto;"> Bono wager ACTIVADO (apagado = todo sale como bono normal, como siempre)
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>Qué bono da cada bono automático (por defecto: normal)</label>
+                                <div id="bkFlows" style="display:grid;gap:6px;"></div>
+                                <small style="color:#aaa;font-size:11px;display:block;margin-top:6px;">
+                                    Un bono en "Wager" usa el código que tenga <b>exactamente su mismo %</b>.
+                                    El bono que pone el <b>agente a mano</b> no se configura acá: con el wager activado, en el modal Depositar
+                                    aparece "💳 Bono normal / 🎟️ Bono wager" y lo elige en cada carga (arranca siempre en normal).
+                                </small>
+                            </div>
+                            <div class="form-group">
+                                <label for="bkFallback">Si el wager no se puede dar (no hay código para ese %, o 1girox no lo otorga)</label>
+                                <select id="bkFallback" style="width:100%;">
+                                    <option value="normal">Dar el bono NORMAL en su lugar (recomendado: el cliente nunca se queda sin su bono)</option>
+                                    <option value="skip">No dar nada en esa carga: el bono queda pendiente y se avisa al agente</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Códigos wager (los mismos que están creados en 1girox)</label>
+                                <div id="bkCodes" style="display:grid;gap:6px;"></div>
+                                <button type="button" class="btn-secondary btn-small" style="margin-top:8px;" onclick="bkAddCode()">➕ Agregar código</button>
+                                <small style="color:#aaa;font-size:11px;display:block;margin-top:6px;">
+                                    <b>%</b> y <b>tope</b>: los mismos de la regla en 1girox (tope 0 = sin tope; sirve solo para mostrarle una estimación al agente).
+                                    <b>1 vez por jugador</b>: tildalo si en 1girox ese código se puede usar una sola vez por jugador (así el sistema no lo vuelve a intentar con quien ya lo usó).
+                                </small>
+                            </div>
+                            <div id="bkWarnings" style="display:none;background:rgba(255,193,7,.10);border:1px solid rgba(255,193,7,.5);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.5;color:#ffe9a8;margin-bottom:10px;"></div>
+                            <button type="button" class="btn-primary" onclick="saveBonusKind()">💾 Guardar tipo de bono</button>
+                            <div style="margin-top:14px;border-top:1px solid rgba(255,255,255,.08);padding-top:10px;">
+                                <label style="font-size:12px;color:#ccc;">🧪 Probar (solo consulta, no mueve plata): ¿1girox tiene el saldo promocional habilitado y qué códigos informa?</label>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+                                    <input type="text" id="bkTestUser" placeholder="Usuario de un cliente (opcional)" style="flex:1;min-width:180px;">
+                                    <button type="button" class="btn-secondary btn-small" onclick="bkTest()">🔎 Consultar 1girox</button>
+                                </div>
+                                <div id="bkPlatform" style="font-size:12px;line-height:1.5;color:#bbb;margin-top:8px;"></div>
+                            </div>
                         </div>
 
                         <!-- REEMBOLSO EN VIVO acumulativo de por vida (ESPEC-REEMBOLSO-1GIROX.md, solo admin general) -->
@@ -3896,6 +3956,16 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                         <button data-bonus="50">+50%</button>
                         <button data-bonus="100">+100%</button>
                     </div>
+                </div>
+                <!-- #226 Tipo de bono de ESTA carga (solo aparece con el bono wager activado en COMANDOS) -->
+                <div class="form-group" id="depositBonusKindGroup" style="display:none;">
+                    <label>Tipo de bono:</label>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                        <button type="button" id="depKindNormal" class="btn btn-primary btn-small" onclick="setDepositBonusKind('normal')">💳 Bono normal</button>
+                        <button type="button" id="depKindWager" class="btn btn-secondary btn-small" onclick="setDepositBonusKind('wager')">🎟️ Bono wager</button>
+                        <select id="depositWagerCode" style="display:none;flex:1;min-width:170px;" onchange="renderDepositBonusKindHint()"></select>
+                    </div>
+                    <small id="depositBonusKindHint" style="color:#aaa;font-size:11px;display:block;margin-top:6px;line-height:1.45;"></small>
                 </div>
                 <div class="form-group">
                     <label for="depositAmount">Monto ($):</label>

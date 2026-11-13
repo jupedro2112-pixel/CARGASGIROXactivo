@@ -59,7 +59,8 @@ const spinSchema = new mongoose.Schema({
   usedAt: { type: Date, default: null },
   usedBy: { type: String, default: null },          // 'auto-hgcash' | agente | 'vencido (24 h)'
   usedOnAmount: { type: Number, default: 0 },       // carga sobre la que se aplicó
-  usedBonusARS: { type: Number, default: 0 }        // bono que generó (0 si se marcó a mano)
+  usedBonusARS: { type: Number, default: 0 },       // bono que generó (0 si se marcó a mano)
+  usedWagerARS: { type: Number, default: 0 }        // #226: saldo PROMOCIONAL (wager) que generó, si el % salió como bono wager
 }, { timestamps: true });
 
 // Garantiza 1 spin/día por user — incluso con race / reinstall.

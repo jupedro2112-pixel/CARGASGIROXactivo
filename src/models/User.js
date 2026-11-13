@@ -595,6 +595,9 @@ const userSchema = new mongoose.Schema({
   publisherFirstBonusUsedBy: { type: String, default: null },
   publisherFirstBonusCampaign: { type: String, default: null },
   publisherFirstBonusAmount: { type: Number, default: null },
+  // #226 BONO WAGER: códigos promocionales de 1girox con los que este jugador YA recibió
+  // saldo promocional (para los códigos marcados "una vez por jugador" en el panel).
+  wagerCodesUsed: { type: [String], default: [] },
 
   // ============================================
   // CÓDIGO DE BIENVENIDA de la Comunidad de Telegram (2026-08-03)

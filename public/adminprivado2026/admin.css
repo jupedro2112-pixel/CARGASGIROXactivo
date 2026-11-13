@@ -1834,6 +1834,8 @@ body {
 .type-badge.cashback { background: rgba(77, 208, 255, 0.16); color: #4dd0ff; }
 .type-badge.rakeback { background: rgba(56, 189, 248, 0.18); color: #7dd3fc; }
 .type-badge.vip_levelup { background: rgba(250, 204, 21, 0.18); color: #fde047; }
+/* #226 saldo promocional (bono wager): plata ficticia, no entra en los totales de plata real */
+.type-badge.wager_bonus { background: rgba(255, 152, 0, 0.18); color: #ffb74d; }
 .type-badge.fire_reward { background: rgba(249, 115, 22, 0.18); color: #fb923c; }
 .stat-card.roulette { border-left: 4px solid #a855f7; }
 .stat-card.roulette .stat-number { color: #c084fc; }

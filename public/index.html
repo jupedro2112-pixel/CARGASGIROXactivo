@@ -871,6 +871,9 @@
                 }
                 .dash-balance-label { font-size:10px; color:#aaffcc; font-weight:800; white-space:nowrap; }
                 .dash-balance-amount { font-size:15px; font-weight:900; color:#00ff88; white-space:nowrap; }
+                .dash-wager { margin-top:5px; text-align:center; font-size:11px; font-weight:700; color:#ffe9a8;
+                    background:rgba(255,193,7,.12); border:1px dashed rgba(255,193,7,.55); border-radius:9px; padding:4px 8px; }
+                .dash-wager b { color:#ffd54f; font-weight:900; }
                 .chat-section .chat-container { min-height:0; }
                 /* Panel del home colapsable: "subir" el menú agranda el chat.
                    flex:0 1 auto + min-height:0 → si la pantalla es baja, el panel
@@ -979,6 +982,10 @@
                         <span class="dash-balance-label">💰 TU SALDO</span>
                         <span class="dash-balance-amount" id="userBalance">$0</span>
                     </div>
+                </div>
+                <!-- #226 Saldo PROMOCIONAL (bono wager de 1girox): solo se ve si el cliente tiene. -->
+                <div id="userWagerRow" class="dash-wager" style="display:none" title="Saldo promocional: se juega después de tu saldo real y se va convirtiendo en saldo real a medida que jugás. No es retirable hasta que se convierte.">
+                    🎟️ Saldo promocional: <b id="userWager">$0</b>
                 </div>
 
                 <!-- Soporte por Telegram, abajo de Jugá Aquí. 🪦 Acá también vivía el
