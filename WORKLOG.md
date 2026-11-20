@@ -8,6 +8,18 @@
 
 ## Sesión 2026-11-20
 
+### 231. 🏦 Cambiar la cuenta en uso desde cualquier pantalla (todos los roles menos comunidad) + registro de quién la cambió — admin-sw v67
+- **Pedido del owner (2026-11-20):** que TODOS los roles del panel puedan cambiar la cuenta en uso, salvo `comunidad`, y que quede
+  registro de quién, con qué rol y a qué hora se hizo cada cambio manual.
+- **Botón fijo "🏦 <cuenta>"** (abajo a la izquierda, `bankQuickChip` en `admin.js`, se dibuja solo): abre un cuadro con el selector de
+  todas las cuentas de los dos bancos + "USAR ESTA" + el registro. No depende de ninguna sección, así que lo ven los encargados aunque no
+  entren a 🏛️ Bancos — Configuración. Usa `GET/POST /api/admin/bank-in-use`, ahora con `_bankCanSwitch` (cualquier rol del panel menos
+  `comunidad` / `publisher_admin`).
+- **Registro:** `Config['bankSwitchLog']` (últimos 200: `at, by, role, bank, account, from, via`), escrito por `_bankSwitchLog` desde la
+  barra y desde el "USAR ESTA" de las cards de hgcash y de Finpro. Se lee con `GET /api/admin/bank-in-use/log`. La rotación AUTOMÁTICA
+  sigue en su propio "Últimos cambios".
+- Validado solo con `node --check`, `check-tdz` y los tests de bancos; **no probado en navegador**.
+
 ### 230. 🏛️ BANCOS igual que AUTOREEMBOLSOSjygactivo: Finpro hasta 3 cuentas + 3ª llave "qué cuenta ve el cliente" + rotación automática + barra única + pagar por el otro banco — admin-sw v66
 - **Owner:** replicar acá, "tal cual quedó", todo lo de bancos de AUTOREEMBOLSOSjygactivo (sus #202, #207–#210, #212–#214, #216). Finpro
   había nacido ACÁ con una sola cuenta (#217–#220); el hermano lo copió y lo extendió. Esto trae de vuelta la versión extendida.
