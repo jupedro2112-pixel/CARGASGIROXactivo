@@ -5,7 +5,10 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-11-13 (b)** — **BONO WAGER (#226→#227)**: saldo promocional de 1girox como alternativa al
+> Última actualización: **2026-11-20** — **BANCOS como AUTOREEMBOLSOSjygactivo (#230)**: Finpro hasta 3 cuentas (`Config['finproAccounts']`,
+> migra sola la cuenta única a `f1`), 3ª llave `Config['bankShown']` (qué cuenta ve el cliente), rotación automática (`Config['bankRotation']`),
+> barra única `/api/admin/bank-in-use`, pago por el otro banco (`body.provider`) y candados anti doble pago entre bancos (§5 "Bancos desde el #230").
+> Antes: **2026-11-13 (b)** — **BONO WAGER (#226→#227)**: saldo promocional de 1girox como alternativa al
 > bono normal, tanto en los bonos de una carga como en los regalos sin carga; se da con el PROMOCIONAL SUELTO
 > (`girox.creditPromo`, `POST /players/{u}/promo`, probado en vivo), `Config['bonusKind']` (COMANDOS → "🎟️ Tipo de bono", sin
 > códigos), `src/utils/bonusKind.js`, references `vip-depwager-*` / `vip-hgw-*`, Transaction `'wager_bonus'`, `giftFlow` en los
@@ -710,7 +713,7 @@ tenían los 4 clientes viejos.
 
 Opcionales/afinado: `GIROX_TIMEOUT_MS` (20000) y las `GIROX_MIGRATION_*` del script.
 
-**Finpro (#217, todas de respaldo: el PANEL manda — `Config['finproCredentials']`):**
+**Finpro (#217, todas de respaldo: el PANEL manda — `Config['finproAccounts']` desde el #230, antes `Config['finproCredentials']`):**
 `FINPRO_API_KEY` / `FINPRO_API_SECRET` (headers `X-API-Key`/`X-API-Secret`), `FINPRO_API_URL`
 (default `https://mw-dev.finpro.com.ar` = host de **DESARROLLO** de la doc; el de producción
 no está documentado → cargarlo en el panel cuando Finpro lo informe; el panel avisa en rojo si
@@ -978,6 +981,40 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   /api/finpro/webhook` (secundario), `POST /api/finpro/callback` (principal).
   `GET /api/admin/hgcash/movements?provider=` y `/api/admin/bank/tray` devuelve `finproEnabled`.
   Test en frío de firma/parseo: `node scripts/test-finpro-webhook.js`.
+- **Bancos desde el #230 (réplica #202–#216 de AUTOREEMBOLSOSjygactivo) — ESTO MANDA sobre el párrafo de arriba donde difieran:**
+  - **Tres llaves** (`GET/POST /api/admin/banks`, `_banksPayload`): cargas (`hgcash.enabled` / `Config['finpro'].enabled`), retiros
+    (`Config['bankProvider']`, `getBankProvider()`), **cuenta que ve el cliente** (`Config['bankShown']` ∈ `hgcash|finpro|manual`,
+    `getBankShown()`, default `hgcash`). Solo el banco elegido reescribe `Config['cbu']` (`_hgApplyActiveToConfigs` / `_fpApplyShownToCbu`),
+    sin heredar nada de la cuenta anterior.
+  - **Cuentas Finpro** — `Config['finproAccounts']` = `{ accounts:[{ key 'f1'…, label, apiKeyEnc, apiSecretEnc, webhookSecretEnc, bankId,
+    account, fromCvu, extraCvus, baseUrl, alias, bank, titular, cuit, incomingEnabled }], activeKey, incomingMode, legacyKey }`. En memoria
+    `_fpAccounts` / `_fpActiveKey` (recarga cada 15 s; la EN USO es el estado global de `finproService`). Helpers: `_fpList()` (panel, o la
+    de SSM con key null), `_fpCtx(a)` (contexto de una cuenta para `finproService`), **`_fpCtxFor(key)`** (cuenta que hizo una operación; `null`
+    → cuenta migrada `legacyKey`, si no SSM), `_fpAccountForCvu`, `_fpAccountOfMovement`, `_fpAccountReceives`, `_fpReceivingAccounts`,
+    `_fpReadyPayouts/_fpReadyIncoming`, `_fpMovementAutoOff`, `_fpWebhookSecretEntries`, `_fpHolderOf` (titular de nuestro CVU,
+    `_refreshFinproHolders`). **Migración:** si no existe `finproAccounts` y hay `Config['finproCredentials']` (#217–#220) se crea `f1` con
+    eso; `finproCredentials` queda sin uso (no se borra). Excepción: si ese panel viejo no tenía key/secret propios (credenciales de AWS) no
+    se migra y sus datos de cuenta / secreto de webhook siguen aplicándose mientras no haya cuentas (`_fpLegacySettingsOn`). Ya no existen `_finproAccountCache`, `_finproWebhookSecrets`, `_finproPublicState`.
+  - **Endpoints:** `GET/POST /api/admin/finpro/accounts`, `DELETE /api/admin/finpro/accounts/:key`, `POST …/:key/activate`,
+    `POST …/:key/incoming`, `POST …/accounts/incoming-mode`, `GET /api/admin/finpro/balance` (ver/rotar/pausar: admin, depositor,
+    withdrawer; credenciales: solo admin). Se fueron `/api/admin/finpro/credentials` y `/api/admin/finpro/account`. `finpro/verify` acepta
+    `key` (una cuenta) o pregunta a todas. `GET /api/admin/payouts` devuelve `bankAccount`, `otherBank`, `otherReady`, `otherAccount`.
+  - **Webhook / verificación multi-cuenta:** la firma vale con el secreto de CUALQUIER cuenta (`sig.key` = cuál); la cuenta de una entrante
+    se reconoce por el CVU destino (un CVU va en UNA sola cuenta) → `BankMovement.accountKey`. La verificación del comprobante pregunta a
+    todas las que reciben (`_finproVerifyAcross`, la en uso primero); dos confirmaciones distintas = ambigua.
+  - **Pagos:** `_payPayoutViaFinpro` sale por la cuenta EN USO y guarda `fpAccountKey`; `_finproSyncPayout` consulta con `_fpCtxFor`.
+    `POST /api/admin/payouts/:id/pay` acepta `body.provider` (pagar ESE retiro por el otro banco) y `body.confirmOtherBank`. Candados: ver
+    CLAUDE.md (rechazo definitivo, lote en vuelo `_finproInFlight`, `hgSendUnknown`, "POSIBLE PAGO DOBLE", `needsConfirm`).
+  - **Rotación automática** — `Config['bankRotation']` = `{ enabled, onFailure, failChecks, onLimit, crossBank, movePayouts, loop,
+    limits:{'hgcash:a1':{day,month,next}…}, log }` + `Config['bankRotationLap']` `{dayKey, n}` + candado `Config['bankRotationLock']`.
+    `_bankRotationTick` (cada 2 min por instancia): mira la cuenta EN USO del banco que ve el cliente (`_rotCurrent`); tope = suma de
+    `BankMovement` Inbound hoy/mes hora AR (`_rotUsage`, incluye los sin `accountKey` atribuibles); caída = N `_rotProbe` fallidos (contador
+    por instancia). `_bankRotate` elige destino (el elegido `next` primero; mismo banco; otro banco con `crossBank`), reclama el candado y usa
+    `_hgActivateAccount` / `_fpActivateAccount`. `GET/POST /api/admin/bank-rotation` (solo admin).
+  - **Barra única de 🏦 Banco:** `GET/POST /api/admin/bank-in-use` (`_bankInUsePayload`; POST `{id:'finpro:f2'}` = cuenta EN USO de su banco +
+    `bankShown` a ese banco; los retiros no se tocan).
+  - Tests en frío: `node scripts/test-finpro-accounts.js` (45) y `node scripts/test-bank-rotation.js` (19) recortan bloques REALES de
+    server.js por marcadores de texto (si se mueve un bloque de Finpro, ajustar los `cut(...)` del test).
 - **AUTO-CARGA hgcash** (`POST /api/hgcash/webhook`, firma HMAC sobre rawBody,
   fail-closed en prod): guarda BankMovement → matching contra Comprobantes por
   monto + (N° operación==coelsa/externalID, o nombre de origen + destino consistente)

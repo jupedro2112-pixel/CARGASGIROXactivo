@@ -4,7 +4,71 @@
 > commit por commit está en `git log --oneline`. Esto captura decisiones, umbrales de
 > negocio y pendientes que NO se ven leyendo el código.
 >
-> **Última actualización: 2026-11-13**
+> **Última actualización: 2026-11-20**
+
+## Sesión 2026-11-20
+
+### 230. 🏛️ BANCOS igual que AUTOREEMBOLSOSjygactivo: Finpro hasta 3 cuentas + 3ª llave "qué cuenta ve el cliente" + rotación automática + barra única + pagar por el otro banco — admin-sw v66
+- **Owner:** replicar acá, "tal cual quedó", todo lo de bancos de AUTOREEMBOLSOSjygactivo (sus #202, #207–#210, #212–#214, #216). Finpro
+  había nacido ACÁ con una sola cuenta (#217–#220); el hermano lo copió y lo extendió. Esto trae de vuelta la versión extendida.
+- **Qué cambia para el owner (Bancos — Configuración):**
+  1. **🟣 Cuentas Finpro (hasta 3)** — como las de hgcash (#223): una EN USO (paga los retiros si salen por Finpro; es la que ve el cliente
+     si así está elegido) y las otras de RESPALDO (siguen recibiendo cargas). USAR ESTA / Pausar cargas / Editar / Borrar, modo "todas / solo
+     la en uso". Antes de guardar se prueba token + saldo. **La cuenta que ya estaba cargada pasa sola a ser "Cuenta 1" (`f1`)**: no hay que
+     recargar nada.
+  2. **🏦 Bancos automáticos — tercera llave:** además de por dónde ENTRAN las cargas y por dónde SALEN los retiros, ahora se elige **qué
+     cuenta VE el cliente** para transferir: la hgcash en uso (default = igual que hasta hoy) / la Finpro en uso / lo cargado a mano
+     (`Config['bankShown']`). Solo el banco elegido reescribe `Config['cbu']` al tocar USAR ESTA.
+  3. **🔁 Rotación automática de cuentas** (card nueva, TODO apagado por defecto): cambia sola la cuenta en uso por CAÍDA (N controles sin
+     respuesta) o por TOPE de lo que entró en el día / mes; columna "Al rotar pasa a" (destino elegido), otro banco opcional, mover también
+     los retiros (solo por caída), y VUELTAS cuando todas llegaron al tope del día (el del mes no da vueltas). Avisa por Telegram.
+  4. **🏦 Banco: una sola barra "👁️ El cliente transfiere a…"** con las cuentas de los dos bancos + USAR ESTA (admin / depositor / withdrawer).
+  5. **Retiro en el chat:** 💸 Pagar $X (o 🔁 Pagar nuevamente si falló) · 🏦 Pagar con otro banco (paga ESE retiro por el otro banco con API,
+     si está listo) · ✅ Ya lo pagué por fuera (el viejo "Pagar con otro banco", que solo marca pagado a mano).
+  6. **Una cuenta no se guarda sin CBU/CVU de 22 dígitos + alias** (hgcash y Finpro), y al rotar el cliente **nunca hereda** banco/titular/CBU/
+     alias de la cuenta anterior (antes `_hgApplyActiveToConfigs` completaba lo vacío con lo viejo → un alias viejo mandaba la plata a la otra cuenta).
+  7. Nota interna en el chat cuando una carga entró por una cuenta que NO es la que está en uso ("avisale cuál es la cuenta actual").
+- **Seguridad de pagos que vino con la réplica (cambia comportamiento):**
+  - Un pago por Finpro recuerda su cuenta (`PendingPayout.fpAccountKey`) y se consulta SIEMPRE con esa (`_fpCtxFor`), aunque se rote.
+  - Rechazo DEFINITIVO de Finpro = sin error de red, HTTP < 500 y (4xx salvo 408/429, o código de la tabla de errores). Todo lo demás (red,
+    5xx, 2xx con código desconocido) queda "en proceso" y lo resuelve la consulta; antes solo el error de red quedaba en proceso.
+  - Un lote que todavía se está enviando no se consulta (`_finproInFlight`, tope 15 min); "Finpro no lo conoce" recién es fallo a los 2 min.
+  - Un lote que Finpro informa `failed` se cierra (antes quedaba en proceso). El poll sigue los pagos de Finpro hasta 24 h (antes 2 h).
+  - Un `ERROR` tardío solo actúa sobre un pago `paying` (hgcash y Finpro). Un estado de un banco nunca toca un pago que salió por el otro;
+    si el otro banco avisa `DONE` → alerta "🛑 POSIBLE PAGO DOBLE" (chat + Telegram). El callback firmado solo decide si habla del lote vigente.
+  - Cambio de banco con intento anterior dudoso: hgcash sin respuesta (`hgSendUnknown`) → Finpro pide confirmar (409 `needsConfirm` →
+    cartel del panel → `confirmOtherBank`); Finpro sin resultado → hgcash primero consulta a Finpro.
+  - No se editan credenciales/URL/banco/CVU ni se borra una cuenta Finpro con pagos `paying` suyos; no se borra la EN USO habiendo otras, ni
+    la última si Finpro está en uso. `cleanup-old` no descarta un pago de Finpro que sigue en curso.
+  - Cargas: Finpro confirma SIN informar el monto → no se carga sola; coincidencia por monto con titular distinto → a revisión; comprobante
+    cuyo destino es una cuenta hgcash → no se le pregunta a Finpro; dos cuentas confirman transferencias distintas → ambigua; la
+    verificación respeta la cuenta pausada. `_hgMovementAutoOff(m)` ahora cubre los dos bancos.
+- **Adaptaciones propias de esta página (distinto a la fuente, a propósito):**
+  - **Migración `Config['finproCredentials']` → `Config['finproAccounts']`** (la fuente no la tiene: nunca tuvo el diseño de una cuenta):
+    `_fpReadAccountsConfig` crea `f1` con lo guardado (key/secret/secreto de webhook cifrados tal cual, bankId, cuenta, CVU, otros CVUs, URL),
+    la deja EN USO y anota `legacyKey:'f1'`. `finproCredentials` NO se borra. Un pago viejo sin `fpAccountKey` se consulta con esa cuenta
+    (`_fpCtxFor(null)` → `_fpLegacyKey`), o con SSM si nunca hubo panel. El bloqueo "pagos en proceso" de `f1` cuenta también los sin cuenta.
+    Si el panel viejo NO tenía API Key/Secret propios (credenciales de AWS + solo datos de la cuenta / secreto del webhook) no se crea
+    ninguna cuenta: sigue andando como hasta hoy (SSM + esos datos, `_fpLegacySettingsOn` / `_fpLegacyWebhookSecret`) hasta que se cargue una.
+  - **La plata no cambió de camino:** acá no existe `plat.*`; `hgcashAutoCarga` sigue con `girox.depositToUser` (bonos, wager, reference
+    `vip-hg-*`) y `/pay` con `_deductChipsAtConfirm` y el guard `debitConfirmed !== true`, intactos. De la fuente solo vinieron la etiqueta
+    del banco en los textos (`_bankLabel`, antes decía "hgcash" también para Finpro) y `metadata.bank`.
+  - Se conservan `resolvedCbu`/`lookupName` ya guardados del payout en `_payPayoutViaFinpro`, `bankProviderBadge` (ahora muestra también la
+    cuenta Finpro) y la fecha "verificada +N min" de Movimientos. `_cbuSameAccount` se agregó como helper (acá no existía).
+  - Fuera de alcance, NO traído: control del banco / archivar pendientes viejos, bono app de hgcash, multicuenta `other_cbu`, mudanza.
+  - Se fueron `GET/POST/DELETE /api/admin/finpro/credentials` y `GET /api/admin/finpro/account` (los reemplazan `/api/admin/finpro/accounts*`
+    y `/api/admin/finpro/balance`); un panel viejo cacheado no puede editar Finpro hasta recargar (admin-sw v66 lo fuerza).
+  - Los comentarios del HTML/JS traídos conservan la numeración de la fuente (#194/#195/#202/#207/#208…): son de AUTOREEMBOLSOSjygactivo.
+- **Archivos:** `server.js`, `src/services/finproService.js` (versión con `ctx` por cuenta y token por cuenta; la API vieja con `creds` sigue),
+  `src/models/PendingPayout.js` (`hgSendUnknown`, `fpAccountKey`), `src/models/BankMovement.js` (comentario), panel (`index.html`, `admin.js`),
+  `public/admin-sw.js` v66, `scripts/test-finpro-accounts.js` (nuevo, 45), `scripts/test-bank-rotation.js` (nuevo, 19).
+- **Pruebas (en frío):** `node --check` de todo lo tocado, `check-tdz`, `test-finpro-accounts` 45/45 (incluye la migración a `f1` y el panel viejo sin credenciales propias),
+  `test-bank-rotation` 19, `test-finpro-webhook` 17, y los tests que ya había (bonus-kind, cashback, rollover-multicuenta) siguen en verde.
+- **⚠️ NO probado:** nada corrió contra Finpro ni hgcash reales ni contra Mongo (no hay node_modules ni credenciales en Tails). En
+  particular: la migración a `f1` con datos reales, la rotación automática, el pago por el otro banco y el panel en un navegador.
+- **Para el owner al desplegar:** 1) entrar a Bancos — Configuración y verificar que aparece "Cuenta 1" de Finpro EN USO con sus datos;
+  2) para EDITARLA ahora pide CVU + alias (cargarlos); 3) "Bancos automáticos" queda como estaba (el cliente ve hgcash); 4) la rotación
+  arranca apagada; 5) hacer un retiro chico de prueba por Finpro antes de confiar.
 
 ## Sesión 2026-11-13
 

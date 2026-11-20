@@ -1,8 +1,13 @@
 /**
  * Servicio Finpro (banco con API, #217) — segundo banco, paralelo a hgcash.
- * Copia 1:1 del servicio del gemelo AUTOGIROXcompartido (#368): no divergir — los
- * parches se portan entre páginas tal cual. Acá no hubo GH Wallet: Finpro es el PRIMER
- * segundo banco de esta página.
+ * #230: versión MULTI-CUENTA traída de AUTOREEMBOLSOSjygactivo (su #202, que nació de este mismo
+ * servicio #217–#220 y le sumó el contexto por cuenta): hasta 3
+ * cuentas de Finpro cargadas desde el panel. El estado global (setCredentialsOverride /
+ * setSettingsOverride) es la cuenta EN USO; toda operación acepta además `ctx` = el
+ * contexto de UNA cuenta puntual ({ key, creds:{apiKey,apiSecret}, baseUrl, bankId,
+ * account, fromCvu }) para consultar/pagar/verificar con una cuenta que no es la activa
+ * (un pago hecho por la cuenta A se sigue consultando con A aunque después se rote a B).
+ * Con `ctx`, baseUrl/bankId caen a env/default si faltan; creds/account/fromCvu NO.
  *
  * Doc oficial: app.finpro.com.ar/docs (transcripción del owner, 2026-10-27). Todo lo que
  * la doc no aclara está marcado como DECISIÓN en los comentarios y en ARCHITECTURE §5.
@@ -66,9 +71,7 @@ function setCredentialsOverride(c) {
   const k = c && typeof c.apiKey === 'string' ? c.apiKey.trim() : '';
   const s = c && typeof c.apiSecret === 'string' ? c.apiSecret.trim() : '';
   const next = (k && s) ? { apiKey: k, apiSecret: s } : null;
-  const changed = _keyTag(next || _envCreds()) !== _keyTag(_credsOverride || _envCreds());
-  _credsOverride = next;
-  if (changed) _token = { token: null, expiresAt: 0, keyTag: null }; // credenciales nuevas → token nuevo
+  _credsOverride = next; // el token se cachea por (credenciales + URL + banco): no hace falta invalidarlo
 }
 function setSettingsOverride(s) {
   const o = s && typeof s === 'object' ? s : {};
@@ -128,21 +131,44 @@ function getDiag() {
   return {
     credentials: getCredentialSource(),
     settings: settingsPublic(),
-    token: { has: !!_token.token, expiresAt: _token.expiresAt ? new Date(_token.expiresAt) : null, secondsLeft: _token.token ? Math.max(0, Math.round((_token.expiresAt - Date.now()) / 1000)) : 0 },
+    token: (() => { const x = _cx(); const t = x.creds ? _tokens.get(_tokenKey(x)) : null; return { has: !!(t && t.token), expiresAt: t ? new Date(t.expiresAt) : null, secondsLeft: t ? Math.max(0, Math.round((t.expiresAt - Date.now()) / 1000)) : 0, cached: _tokens.size }; })(),
     queue: Array.from(_cvuQueues.keys()).map((k) => ({ fromCvu: '…' + k.slice(-6), inFlight: _cvuInFlight.get(k) || 0 })),
     lastCalls: _lastCalls.slice(0, 25)
   };
 }
 
+// ───────────────────────── contexto de cuenta (#202 multi-cuenta) ─────────────────────────
+/**
+ * Resuelve con QUÉ cuenta se hace una llamada. Sin `ctx` → la cuenta en uso (overrides del
+ * panel / env). Con `ctx` → esa cuenta puntual (baseUrl/bankId caen a env/default).
+ * `creds` suelto (API vieja) pisa solo las credenciales.
+ */
+function _cx(ctx, creds) {
+  const o = ctx && typeof ctx === 'object' ? ctx : null;
+  if (!o) return { key: null, creds: creds || getCredentials(), baseUrl: baseUrl(), bankId: bankId(), account: account(), fromCvu: fromCvu() };
+  const c = creds || o.creds || ((o.apiKey && o.apiSecret) ? { apiKey: String(o.apiKey), apiSecret: String(o.apiSecret) } : null);
+  return {
+    key: o.key != null ? String(o.key) : null,
+    creds: (c && c.apiKey && c.apiSecret) ? c : null,
+    baseUrl: String(o.baseUrl || process.env.FINPRO_API_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, ''),
+    bankId: String(o.bankId || process.env.FINPRO_BANK_ID || DEFAULT_BANK_ID).trim(),
+    account: String(o.account || '').trim(),
+    fromCvu: String(o.fromCvu || '').replace(/\D/g, '')
+  };
+}
+function _tokenKey(cx) { return _keyTag(cx.creds) + '|' + cx.baseUrl + '|' + cx.bankId; }
+
 // ───────────────────────── request genérico ─────────────────────────
-function _path(p) { return `/api/banks/${encodeURIComponent(bankId())}${p}`; }
+function _path(p, cx) { return `/api/banks/${encodeURIComponent(cx ? cx.bankId : bankId())}${p}`; }
 /**
  * Devuelve SIEMPRE un objeto (nunca tira):
  *   { ok, httpStatus, data, code, description, error, ms }
  * `code`/`description` salen del body de Finpro (`code`, `description` / `message`).
  */
-async function _request(method, path, { body, creds, token, timeoutMs, kind } = {}) {
-  const c = creds || getCredentials();
+async function _request(method, p, { body, cx, token, timeoutMs, kind } = {}) {
+  const x = cx || _cx();
+  const path = _path(p, x);
+  const c = x.creds;
   if (!c) return { ok: false, httpStatus: 0, data: null, code: null, description: null, error: 'Finpro sin credenciales (panel → Finpro, o FINPRO_API_KEY/SECRET en SSM)' };
   const headers = { 'X-API-Key': c.apiKey, 'X-API-Secret': c.apiSecret, 'Content-Type': 'application/json', Accept: 'application/json' };
   if (token) headers['x-access-token'] = token;
@@ -150,7 +176,7 @@ async function _request(method, path, { body, creds, token, timeoutMs, kind } = 
   let out;
   try {
     const resp = await axios({
-      method, url: baseUrl() + path, data: body === undefined ? {} : body, headers,
+      method, url: x.baseUrl + path, data: body === undefined ? {} : body, headers,
       timeout: Number(timeoutMs || process.env.FINPRO_TIMEOUT_MS || 20000),
       validateStatus: () => true, maxRedirects: 0
     });
@@ -166,22 +192,23 @@ async function _request(method, path, { body, creds, token, timeoutMs, kind } = 
   } catch (e) {
     out = { ok: false, httpStatus: 0, data: null, code: null, description: null, error: e.code === 'ECONNABORTED' ? 'timeout' : (e.message || 'red'), network: true, ms: Date.now() - t0 };
   }
-  _logCall({ kind: kind || path, method, path, ok: out.ok, httpStatus: out.httpStatus, code: out.code, error: out.error ? String(out.error).slice(0, 160) : null, ms: out.ms });
+  _logCall({ kind: kind || p, acct: x.key || null, method, path, ok: out.ok, httpStatus: out.httpStatus, code: out.code, error: out.error ? String(out.error).slice(0, 160) : null, ms: out.ms });
   return out;
 }
 
 // ───────────────────────── token de cliente (1 h) ─────────────────────────
-let _token = { token: null, expiresAt: 0, keyTag: null };
+const _tokens = new Map(); // (credenciales|url|banco) → { token, expiresAt }
 function _keyTag(c) { return c ? crypto.createHash('sha256').update(c.apiKey + ':' + c.apiSecret).digest('hex').slice(0, 12) : null; }
 /** Token de cliente (`x-access-token`). Cacheado; se renueva si quedan < 120 s o con force. */
-async function getClientToken({ creds, force } = {}) {
-  const c = creds || getCredentials();
-  if (!c) return { ok: false, error: 'sin credenciales' };
-  const tag = _keyTag(c);
-  if (!force && _token.token && _token.keyTag === tag && _token.expiresAt - Date.now() > TOKEN_RENEW_MARGIN_SEC * 1000) {
-    return { ok: true, token: _token.token, cached: true, expiresAt: _token.expiresAt };
+async function getClientToken({ creds, ctx, force } = {}) {
+  const x = _cx(ctx, creds);
+  if (!x.creds) return { ok: false, error: 'sin credenciales' };
+  const tk = _tokenKey(x);
+  const hit = _tokens.get(tk);
+  if (!force && hit && hit.token && hit.expiresAt - Date.now() > TOKEN_RENEW_MARGIN_SEC * 1000) {
+    return { ok: true, token: hit.token, cached: true, expiresAt: hit.expiresAt };
   }
-  const r = await _request('POST', _path('/auth/token/client'), { body: {}, creds: c, kind: 'auth/token' });
+  const r = await _request('POST', '/auth/token/client', { body: {}, cx: x, kind: 'auth/token' });
   const d = r.data || {};
   const tok = d.token || d.access_token || (d.data && (d.data.token || d.data.access_token)) || null;
   if (!r.ok || !tok) {
@@ -189,17 +216,18 @@ async function getClientToken({ creds, force } = {}) {
   }
   const expiresIn = Number(d.expires_in || (d.data && d.data.expires_in)) || 3600;
   const expiresAt = Date.now() + expiresIn * 1000;
-  if (!creds || tag === _keyTag(getCredentials())) _token = { token: tok, expiresAt, keyTag: tag };
+  if (_tokens.size > 20) _tokens.clear(); // credenciales viejas/rotadas: no acumular
+  _tokens.set(tk, { token: tok, expiresAt });
   return { ok: true, token: tok, cached: false, expiresAt, tokenType: d.token_type || null, httpStatus: r.httpStatus, code: r.code };
 }
-function invalidateToken() { _token = { token: null, expiresAt: 0, keyTag: null }; }
+function invalidateToken() { _tokens.clear(); }
 /** Ejecuta `fn(token)`; ante un 401 renueva el token y reintenta UNA vez. */
-async function _withToken(fn, creds) {
-  let t = await getClientToken({ creds });
+async function _withToken(fn, x) {
+  let t = await getClientToken({ ctx: x });
   if (!t.ok) return { ok: false, httpStatus: t.httpStatus || 0, error: 'token: ' + (t.error || 'falló'), code: t.code || null, data: t.data || null };
   let r = await fn(t.token);
   if (r.httpStatus === 401) {
-    t = await getClientToken({ creds, force: true });
+    t = await getClientToken({ ctx: x, force: true });
     if (t.ok) r = await fn(t.token);
   }
   return r;
@@ -295,10 +323,11 @@ function withCvuLock(cvu, fn) {
 
 // ───────────────────────── operaciones ─────────────────────────
 /** Saldo de la cuenta (`accounts/balance`). Campos no documentados → `balance`/`available` best-effort + `raw`. */
-async function getBalance({ account: acc, creds } = {}) {
-  const a = acc || account();
+async function getBalance({ account: acc, creds, ctx } = {}) {
+  const x = _cx(ctx, creds);
+  const a = acc || x.account;
   if (!a) return { ok: false, error: 'Falta el número de cuenta de Finpro (panel → Finpro, o FINPRO_ACCOUNT).' };
-  const r = await _request('POST', _path('/accounts/balance'), { body: { account: a, trace: newTrace(), retrieval: newRetrieval() }, creds, kind: 'accounts/balance' });
+  const r = await _request('POST', '/accounts/balance', { body: { account: a, trace: newTrace(), retrieval: newRetrieval() }, cx: x, kind: 'accounts/balance' });
   if (!r.ok) return r;
   const d = r.data || {};
   return Object.assign(r, {
@@ -312,11 +341,12 @@ async function getBalance({ account: acc, creds } = {}) {
  * Titular de un CVU o alias (Coelsa). Devuelve { ok, found, nombre, cuit, tipoPersona, cvu, code, description, raw }.
  * `found` = la red devolvió un titular. Un alias resuelto trae `cvu` si la respuesta lo incluye.
  */
-async function getAccountInformation({ cvu, alias, creds } = {}) {
+async function getAccountInformation({ cvu, alias, creds, ctx } = {}) {
+  const x = _cx(ctx, creds);
   const body = {};
   const c = String(cvu || '').replace(/\D/g, '');
   if (c.length === 22) body.cvu = c; else if (alias) body.alias = String(alias).trim().toLowerCase(); else return { ok: false, error: 'CVU (22 dígitos) o alias requerido' };
-  const r = await _withToken((token) => _request('POST', _path('/accounts/information'), { body, token, creds, kind: 'accounts/information' }), creds);
+  const r = await _withToken((token) => _request('POST', '/accounts/information', { body, token, cx: x, kind: 'accounts/information' }), x);
   const d = r.data || {};
   const info = d.data && typeof d.data === 'object' ? Object.assign({}, d, d.data) : d;
   const nombre = _pickString(info, ['nombre', 'name', 'titular', 'holder', 'owner_name', 'denominacion']);
@@ -334,7 +364,8 @@ async function getAccountInformation({ cvu, alias, creds } = {}) {
  * Lote de UNA transferencia a CVU. `code '0201'` = aceptado (accepted:true). El resultado
  * final (coelsa_id / response_code) llega después por `getProcessResult`.
  */
-async function createCvuTransfer({ processId, transactionId, fromCvu: from, toCvu, amount, description, callbackUrl, initialDatetime, concept, creds }) {
+async function createCvuTransfer({ processId, transactionId, fromCvu: from, toCvu, amount, description, callbackUrl, initialDatetime, concept, creds, ctx }) {
+  const x = _cx(ctx, creds);
   const txId = String(transactionId || '').slice(0, 11);
   const body = {
     process_id: String(processId),
@@ -342,7 +373,7 @@ async function createCvuTransfer({ processId, transactionId, fromCvu: from, toCv
     initial_datetime: initialDatetime || isoWithOffsetAR(),
     data: [{
       transaction_id: txId,
-      from_cvu: String(from || fromCvu()).replace(/\D/g, ''),
+      from_cvu: String(from || x.fromCvu).replace(/\D/g, ''),
       to_cvu: String(toCvu || '').replace(/\D/g, ''),
       amount: Number(amount),
       concept: concept || 'VAR',
@@ -350,16 +381,16 @@ async function createCvuTransfer({ processId, transactionId, fromCvu: from, toCv
     }]
   };
   if (callbackUrl) body.callback_url = callbackUrl;
-  const r = await _request('POST', _path('/transfers/cvu'), { body, creds, timeoutMs: 30000, kind: 'transfers/cvu' });
+  const r = await _request('POST', '/transfers/cvu', { body, cx: x, timeoutMs: 30000, kind: 'transfers/cvu' });
   const code = r.code;
   const accepted = r.ok && (code === '0201' || code === '201' || (code == null && !!(r.data && (r.data.process_id || r.data.processId))));
   return Object.assign(r, { accepted, processId: (r.data && (r.data.process_id || r.data.processId)) || String(processId), transactionId: txId });
 }
 
 /** Estado de uno o varios procesos. Normaliza el primero: { status, successCount, failCount, processedCount, raw }. */
-async function getProcessStatus(processIds, { creds } = {}) {
+async function getProcessStatus(processIds, { creds, ctx } = {}) {
   const ids = (Array.isArray(processIds) ? processIds : [processIds]).map(String).filter(Boolean);
-  const r = await _request('POST', _path('/processes/status'), { body: { process_ids: ids }, creds, kind: 'processes/status' });
+  const r = await _request('POST', '/processes/status', { body: { process_ids: ids }, cx: _cx(ctx, creds), kind: 'processes/status' });
   const d = r.data || {};
   let row = d;
   const list = Array.isArray(d) ? d : (Array.isArray(d.data) ? d.data : (Array.isArray(d.processes) ? d.processes : (Array.isArray(d.results) ? d.results : null)));
@@ -368,7 +399,8 @@ async function getProcessStatus(processIds, { creds } = {}) {
   const status = _pickString(row, ['status', 'state', 'process_status']);
   return Object.assign(r, {
     status: status ? status.toLowerCase() : null,
-    finished: /^(finished|finalizado|completed|done|processed)$/i.test(status || ''),
+    finished: /^(finished|finalizado|completed|done|processed|failed|error|rejected|rechazado|cancelled|canceled)$/i.test(status || ''),
+    failed: /^(failed|error|rejected|rechazado|cancelled|canceled)$/i.test(status || ''), // el LOTE terminó mal (sin esto quedaba 'en proceso' para siempre)
     successCount: _pickNumber(row, ['transaction_success_count', 'success_count']),
     failCount: _pickNumber(row, ['transaction_fail_count', 'fail_count']),
     processedCount: _pickNumber(row, ['transaction_processed_count', 'processed_count']),
@@ -377,8 +409,8 @@ async function getProcessStatus(processIds, { creds } = {}) {
 }
 
 /** Resultado por transacción de un proceso: { transactions: [{ transactionId, coelsaId, responseCode, responseDescription, amount, cbuFrom, cbuTo, authorizationCode, raw }] }. */
-async function getProcessResult(processId, { creds } = {}) {
-  const r = await _request('POST', _path(`/processes/${encodeURIComponent(String(processId))}/result`), { body: {}, creds, kind: 'processes/result' });
+async function getProcessResult(processId, { creds, ctx } = {}) {
+  const r = await _request('POST', `/processes/${encodeURIComponent(String(processId))}/result`, { body: {}, cx: _cx(ctx, creds), kind: 'processes/result' });
   const d = r.data || {};
   let list = Array.isArray(d) ? d : (Array.isArray(d.data) ? d.data : (Array.isArray(d.transactions) ? d.transactions : (Array.isArray(d.results) ? d.results : (Array.isArray(d.result) ? d.result : null))));
   if (!list && d.data && typeof d.data === 'object' && Array.isArray(d.data.transactions)) list = d.data.transactions;
@@ -405,7 +437,8 @@ async function getProcessResult(processId, { creds } = {}) {
  * matchedBy, confidence, notification, matches, httpStatus, error, raw }.
  * Un 400/401/403 queda en `error` (sin status). NO detecta reversiones.
  */
-async function verifyIncoming({ coelsaId, authorizationCode, amount, occurredAt, windowMinutes, toCvu, toAccount, creds } = {}) {
+async function verifyIncoming({ coelsaId, authorizationCode, amount, occurredAt, windowMinutes, toCvu, toAccount, creds, ctx } = {}) {
+  const x = _cx(ctx, creds);
   const body = {};
   if (coelsaId) body.coelsa_id = String(coelsaId).trim();
   else if (authorizationCode) body.authorization_code = String(authorizationCode).trim();
@@ -414,11 +447,11 @@ async function verifyIncoming({ coelsaId, authorizationCode, amount, occurredAt,
     body.amount = Number(amount);
     body.occurred_at = occurredAt ? (occurredAt instanceof Date ? occurredAt.toISOString() : String(occurredAt)) : new Date().toISOString();
     body.window_minutes = Math.min(1440, Math.max(1, Number(windowMinutes) || 180));
-    const tc = String(toCvu || fromCvu() || '').replace(/\D/g, '');
+    const tc = String(toCvu || x.fromCvu || '').replace(/\D/g, '');
     if (tc.length === 22) body.to_cvu = tc;
-    else if (toAccount || account()) body.to_account = String(toAccount || account());
+    else if (toAccount || x.account) body.to_account = String(toAccount || x.account);
   }
-  const r = await _request('POST', _path('/transfers/verify/incoming'), { body, creds, kind: 'verify/incoming' });
+  const r = await _request('POST', '/transfers/verify/incoming', { body, cx: x, kind: 'verify/incoming' });
   const d = r.data || {};
   const info = d.data && typeof d.data === 'object' && !Array.isArray(d.data) ? Object.assign({}, d, d.data) : d;
   const st = _pickString(info, ['status', 'result']);
@@ -582,13 +615,13 @@ function parsePayoutCallback(body) {
 const PAYER_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const PAYER_CACHE_MAX = 2000;
 const _payerCache = new Map(); // cvu → { at, nombre, cuit, found }
-async function lookupPayerCached({ cvu, creds, force } = {}) {
+async function lookupPayerCached({ cvu, creds, ctx, force } = {}) {
   const c = String(cvu || '').replace(/\D/g, '');
   if (c.length !== 22) return { ok: false, found: false, error: 'CVU inválido' };
   const hit = _payerCache.get(c);
   if (!force && hit && Date.now() - hit.at < PAYER_CACHE_TTL_MS) return Object.assign({ ok: true, cached: true }, hit);
   let r;
-  try { r = await getAccountInformation({ cvu: c, creds }); } catch (e) { r = { ok: false, found: false, error: e.message }; }
+  try { r = await getAccountInformation({ cvu: c, creds, ctx }); } catch (e) { r = { ok: false, found: false, error: e.message }; }
   if (r && r.ok && r.found) {
     const entry = { at: Date.now(), nombre: r.nombre, cuit: r.cuit || null, found: true };
     if (_payerCache.size >= PAYER_CACHE_MAX) _payerCache.delete(_payerCache.keys().next().value); // FIFO

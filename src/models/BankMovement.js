@@ -35,6 +35,7 @@ const bankMovementSchema = new mongoose.Schema({
   status: { type: String, default: null },
   type: { type: String, default: null },
   accountId: { type: String, default: null },
+  // #230 Para Finpro, `accountKey` = perfil de Config['finproAccounts'] ('f1'…) por el que entró.
   // #223 perfil de cuenta hgcash (Config['hgcashAccounts'].accounts[].key) por cuyo secreto
   // entró el aviso → la bandeja/movimientos muestran de qué cuenta vino.
   accountKey: { type: String, default: null },

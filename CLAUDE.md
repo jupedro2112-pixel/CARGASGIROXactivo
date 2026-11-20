@@ -103,8 +103,8 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   #183 de siempre: "toda carga del banco deja el vínculo en las dos direcciones" aplica a Finpro
   igual). `not_found_yet` se re-consulta cada 2 min hasta 90 min (`_finproReverifyTick`);
   `ambiguous`/confianza media NO carga. Ni webhook ni verify informan reversiones → no hay débito
-  automático. **Secreto de firma:** panel (`Config['finproCredentials'].webhookSecretEnc`) > SSM
-  `FINPRO_WEBHOOK_SECRET`, vía `_finproWebhookSecrets()` (acepta los dos). El callback de retiros
+  automático. **Secreto de firma:** panel (el de cada cuenta de `Config['finproAccounts']`) > SSM
+  `FINPRO_WEBHOOK_SECRET`, vía `_fpWebhookSecretEntries()` (#230: el de CADA cuenta del panel + el de SSM). El callback de retiros
   (`/api/finpro/callback`, webhook principal) con firma válida decide desde el payload; sin ella
   sigue confirmando por consulta — nunca plata por un body sin firma. Test: `node
   scripts/test-finpro-webhook.js`.
@@ -114,9 +114,24 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   pago es el `coelsa_id` (`fpCoelsaId`); no hay PDF. **Token 1 h** solo para `accounts/information`;
   el resto va con `X-API-Key`/`X-API-Secret`. **La URL default es la de DESARROLLO**
   (`mw-dev.finpro.com.ar`): la de producción se carga en el panel (aviso rojo). Credenciales +
-  bankId/cuenta/CVU/URL: panel (`Config['finproCredentials']`, cifrado con `_credEncrypt`) > SSM
+  bankId/cuenta/CVU/URL: panel (`Config['finproAccounts']` desde el #230 — antes `Config['finproCredentials']` —, cifrado con `_credEncrypt`) > SSM
   (`FINPRO_*`). Arranca APAGADO para cargas y hgcash sigue pagando los retiros hasta que el owner lo
   cambie en "🏦 Bancos automáticos". Un cambio en `hgcashAutoCarga`/`hgcashMatch*` afecta a los DOS bancos.
+- **Dos bancos con API, hasta 3 cuentas cada uno (#230, réplica #202–#216 de AUTOREEMBOLSOSjygactivo):** tres llaves en
+  **🏛️ Bancos — Configuración → 🏦 Bancos automáticos**: por dónde ENTRAN las cargas (`hgcash.enabled` / `Config['finpro'].enabled`), por
+  dónde SALEN los retiros (`getBankProvider()`) y qué cuenta VE el cliente (`getBankShown()`: solo ese banco reescribe `Config['cbu']`, y al
+  reescribirlo NO se hereda nada de la cuenta anterior). Las cuentas Finpro viven en `Config['finproAccounts']` (cifradas, panel > SSM; lo
+  de `Config['finproCredentials']` se migró solo a `f1` y ya NO se lee — no volver a escribirlo) y funcionan como las de hgcash: una EN USO,
+  las otras de respaldo. **Reglas:** un pago existente se consulta con **`_fpCtxFor(p.fpAccountKey)`**, nunca con la cuenta en uso ni con
+  `finpro.*` sin `ctx`; todo flujo nuevo que pague por Finpro guarda `fpAccountKey`; `_hgMovementAutoOff(m)` cubre los dos bancos (único
+  punto de "no se carga solo"); un `BankMovement` sin `provider` es de hgcash; **nunca se reenvía un lote de Finpro sin respuesta** (se
+  consulta con `_finproSyncPayout`); rechazo definitivo = no-red, http<500 y (4xx salvo 408/429, o código de error); un `ERROR` tardío solo
+  actúa sobre pagos `paying`; reintento por el otro banco con intento anterior dudoso → 409 `needsConfirm` / `confirmOtherBank`; un texto
+  nuevo sobre una carga usa `_bankLabel(m.provider)`. No usar `finpro.isReadyForPayouts()/isReadyForIncoming()/fromCvu()` para decidir:
+  usar `_fpReadyPayouts(a)`, `_fpReceivingAccounts()`, `_fpActiveAccount()`. **Rotación automática** (`Config['bankRotation']`,
+  `_bankRotationTick` cada 2 min): todo apagado por defecto, candado `Config['bankRotationLock']` (5 min), usa `_hgActivateAccount` /
+  `_fpActivateAccount` (los mismos de USAR ESTA); el tope del mes no da vueltas. Las credenciales NO van en el repo.
+  Tests: `node scripts/test-finpro-accounts.js`, `node scripts/test-bank-rotation.js`, `node scripts/test-finpro-webhook.js`.
 - **JWT_SECRET y otros secrets** se cargan desde AWS SSM en el bootstrap async, NO al
   `require()`. Por eso hay lazy getters en `src/middlewares/auth.js` y rutas.
 - **IDEMPOTENCIA POR `reference` (lo más importante de la plataforma nueva).** Cargas,
