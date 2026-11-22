@@ -132,6 +132,18 @@ Deploy: AWS Elastic Beanstalk. Dominio público: vipcargas.com. Git user: jupedr
   `_bankRotationTick` cada 2 min): todo apagado por defecto, candado `Config['bankRotationLock']` (5 min), usa `_hgActivateAccount` /
   `_fpActivateAccount` (los mismos de USAR ESTA); el tope del mes no da vueltas. Las credenciales NO van en el repo.
   Tests: `node scripts/test-finpro-accounts.js`, `node scripts/test-bank-rotation.js`, `node scripts/test-finpro-webhook.js`.
+- **Pagos de retiros: candado anti pago doble (#232, réplica #219 de AUTOREEMBOLSOSjygactivo; incidente 2026-11-20 de $2,4M en aquel
+  proyecto):** la idempotencia del banco solo vale dentro de UNA cuenta. Todo camino que mande un retiro llama a `_payoutResendGuard(...)`
+  antes de reclamarlo, `_payoutNoteSend(...)` justo antes del POST al banco y `_payoutNoteResult(...)` con la respuesta. En hgcash el token
+  va EXPLÍCITO (`createCashOut({ token })`, cuenta fijada al empezar el pedido), nunca el global de "la cuenta en uso". No aflojar la espera
+  de 2 minutos ni dar por "rechazado" un envío sin respuesta clara. Test: `node scripts/test-payout-guard.js`.
+- **Salientes del banco SIEMPRE vinculados (#233):** una salida que el banco informa sin vínculo a un retiro o bajada (`outKind:'unknown'`)
+  dispara `_alertUnknownOutbound` (Telegram + "POSIBLE PAGO DOBLE" en el chat). Todo flujo nuevo que saque plata del banco tiene que mandar
+  su `externalID` / dejar `payoutId` o `sweepId`, o va a alertar en falso. Un pago confirmado por Finpro manda `maybeSendFinproReceipt`
+  (comprobante en texto con COELSA, `/sys_payout_receipt_finpro`).
+- **Retiro "VERIFICANDO" (#234):** un envío a hgcash sin respuesta clara deja el retiro `failed` + `hgSendUnknown` + `verifyUntil` (3 min):
+  el pago pudo haber salido. Toda ruta que pague, marque pagado, rechace o descarte un `PendingPayout` llama a `_payoutVerifyBlock(payout)`
+  primero. El cartel del chat (`?status=chat`) muestra también EN PROCESO y FALLADO: no volver a esconderlos.
 - **JWT_SECRET y otros secrets** se cargan desde AWS SSM en el bootstrap async, NO al
   `require()`. Por eso hay lazy getters en `src/middlewares/auth.js` y rutas.
 - **IDEMPOTENCIA POR `reference` (lo más importante de la plataforma nueva).** Cargas,

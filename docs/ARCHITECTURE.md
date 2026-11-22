@@ -5,7 +5,9 @@
 > verdad y este doc puede quedar viejo. Si encontrás algo desactualizado acá, corregilo
 > (regla permanente en CLAUDE.md: este doc se actualiza junto con WORKLOG.md).
 >
-> Última actualización: **2026-11-20** — **BANCOS como AUTOREEMBOLSOSjygactivo (#230)**: Finpro hasta 3 cuentas (`Config['finproAccounts']`,
+> Última actualización: **2026-11-22** — **Retiros: candado anti pago doble, alerta de pagos por fuera de la app, comprobante Finpro y
+> estado VERIFICANDO (#232–#234, réplica #219–#221 de AUTOREEMBOLSOSjygactivo)**: ver las secciones del final ("Candado anti pago doble…").
+> Antes: **2026-11-20** — **BANCOS como AUTOREEMBOLSOSjygactivo (#230)**: Finpro hasta 3 cuentas (`Config['finproAccounts']`,
 > migra sola la cuenta única a `f1`), 3ª llave `Config['bankShown']` (qué cuenta ve el cliente), rotación automática (`Config['bankRotation']`),
 > barra única `/api/admin/bank-in-use`, pago por el otro banco (`body.provider`) y candados anti doble pago entre bancos (§5 "Bancos desde el #230").
 > Antes: **2026-11-13 (b)** — **BONO WAGER (#226→#227)**: saldo promocional de 1girox como alternativa al
@@ -1903,6 +1905,60 @@ El backfill de `usernameLower` corre en CADA arranque (idempotente) y setea
   `sendEvent` resuelve el publicista del cliente (`resolveEventScope`: `lastTouchCampaign` → `acquisitionCampaign` →
   `giroxOwnerCampaign` → `Campaign.publisher`) y manda a `_capiDestinations(scopeInfo)`. Rutas admin `/api/admin/meta-pixels*`.
   Toda ruta nueva que dispare un evento de Meta tiene que pasar `externalId` (User.id) en `userInfo` para que llegue al píxel correcto.
+
+### Candado anti pago doble entre cuentas / bancos (#232, réplica #219 de AUTOREEMBOLSOSjygactivo)
+La idempotencia de cada banco solo vale DENTRO de una cuenta (hgcash: `externalID`; Finpro: `process_id`). Todo camino que mande un retiro
+llama, antes de reclamar el `PendingPayout`, a **`_payoutResendGuard(payout, banco, cuenta, cbuDestino, confirmado)`** (devuelve `null` o
+`{ http, body }` para responder tal cual): (1) salida del banco ya registrada con el id del retiro → `alreadySent`, nunca se paga otra vez;
+(1b, #233) desde que se pidió el retiro salió por FUERA de la app el mismo monto al mismo CBU → `needsConfirm` antes del primer envío;
+(2) desde el envío anterior salió el mismo monto al mismo CBU/CVU sin ligar a otro retiro → `needsConfirm`; (3) reintento por otra cuenta u
+otro banco → `wait` durante `PAYOUT_RESEND_COOLDOWN_MS` (2 min) y después `needsConfirm` si el envío anterior no quedó `rejected`.
+Justo antes del POST al banco: **`_payoutNoteSend(id, banco, cuenta, quién)`**; con la respuesta: **`_payoutNoteResult(id, 'accepted' |
+'rejected' | 'unknown', detalle)`** (`PendingPayout.lastSendAt/Bank/Account/Result` + `sendLog`, últimos 20). En hgcash la cuenta que paga
+se fija al empezar el pedido (`_hgAcctPay` / `_hgTokPay`) y el token viaja explícito (`createCashOut({ token })`, `lookupAlias(alias, token)`,
+`resolveHgcashAccountId({ acct })`): nunca el global. Si un token ve varias cuentas se elige la del CBU (o id) de ESE perfil.
+El panel muestra `wait` / `alreadySent` con un cartel fijo y `needsConfirm` con la confirmación de siempre (`confirmOtherBank`); el cartel
+de confirmación del pago dice **SALE POR: <banco · cuenta>** (`window._payoutBankInfo`).
+Test: `node scripts/test-payout-guard.js` (recorta el bloque entre `const PAYOUT_RESEND_COOLDOWN_MS` y `async function _payPayoutViaFinpro`:
+si se renombran, actualizar el test).
+
+### Pagos por fuera de la app y comprobante Finpro (#233, réplica #220)
+- **Saliente externo:** un `BankMovement` `Outbound` con `outKind:'unknown'` es una transferencia que la app no originó (alguien la cargó
+  en el panel del banco). `_alertUnknownOutbound(movementId)` se dispara al registrarlo (webhook hgcash y `_finproIngestLedger`): espera
+  20/60/120 s por si se vincula a un pago nuestro (`hgTxId`/`hgTransactionId`, `fpCoelsaId`, `BankSweep`), reclama `raw._extAlertAt` (una
+  alerta por movimiento) y avisa por Telegram; si hay un `PendingPayout` de 48 h con mismo monto (±1) y CBU, nota adminOnly en el chat
+  (POSIBLE PAGO DOBLE si está `paying`/`paid`; PAGADO POR FUERA si `pending_review`/`failed`). Log: `[bank-out-externo]`.
+  ⚠️ Trampa: todo saliente NUEVO que origine la app tiene que quedar vinculado (externalID / payoutId / sweepId) o dispara esta alerta.
+  La app AVISA, no impide: frenar un pago hecho en el panel del banco depende de quién tiene acceso para transferir ahí.
+- **Comprobante Finpro:** `maybeSendFinproReceipt(payout, coelsaId)` en la rama DONE de `handlePayoutStatusWebhook` (hgcash sigue con
+  `maybeSendPayoutReceipt`, PDF + foto). Texto por `renderSystemCommand('/sys_payout_receipt_finpro')` (vacío = no se envía), idempotente
+  por `receiptSentAt`.
+
+### Retiro "VERIFICANDO" y cartel del chat (#234, réplica #221)
+- **Estados que ve el operador** (cartel `loadPayoutBanner`, `GET /api/admin/payouts?status=chat`): `pending_review` → RETIRO PENDIENTE;
+  `failed` con `verifyLeftSec>0` → 🛑 VERIFICANDO (sin botones, cuenta regresiva); `paying` → ⏳ EN PROCESO (solo "Consultar estado");
+  `failed` → PAGO FALLADO (botones de siempre). `status=chat` solo trae `paying`/`failed` con `lastSendAt` de las últimas 24 h. El listado
+  agrega `verifyLeftSec` y `sendLabel` (y no manda `sendLog`).
+- **Ventana de verificación (solo hgcash; Finpro ya consulta su lote y queda `paying`):** `PendingPayout.verifyUntil` + `hgSendUnknown`;
+  `PAYOUT_VERIFY_MS` (3 min), `_payoutVerifyLeft/_payoutVerifyBlock` (junto al candado #232). La abre la rama de fallo de `/pay` cuando hgcash
+  no responde claro (red / 5xx / 408 / 429 → 409 `{verifying, wait}`; un 4xx claro sigue siendo 400 "El banco RECHAZÓ el pago"); la cierran
+  `handlePayoutStatusWebhook` (`_wasUnknown`: el banco lo tiene → `paying`/pagado; ERROR → liberado) y el webhook de movimientos (salida
+  `outKind:'payout'` done → DONE). Mientras dura: `/pay` (los dos bancos), `/pay-other-bank`, `/cancel` y `/dismiss` devuelven 409.
+  ⚠️ Trampa: toda ruta nueva que cambie el estado de un `PendingPayout` desde `failed` tiene que llamar a `_payoutVerifyBlock` antes.
+  Límite: hgcash no tiene (que sepamos) consulta por nuestro id sin el id del pedido; en la ventana solo se ESPERA su aviso.
+- **Evento de socket `payout_update`** `{ userId, id, status }` a la sala de admins: refresca el cartel (además se refresca cada 15 s).
+
+### Código COELSA del comprobante (#232)
+La IA devuelve `codigo_coelsa` además de `numero_operacion` (`comprobanteAiService`, `normCoelsa`: 22 alfanuméricos con letras y números) →
+`Comprobante.coelsaCode`. Lo usan `_comprobanteMatchesMovement` (regla 1b: == `BankMovement.coelsaCode`) y `_finproVerifyInputFor` (consulta
+por código; si no confirma, se prueba por monto + fecha y solo se adopta si confirma una única transferencia). Una verificación por MONTO que
+no alcanza para decidir NO pone el comprobante en `needs_review`: sigue matcheable para el aviso del banco que llega después.
+⚠️ En ESTE repo `comprobanteAiService` es la versión simple (prompt con JSON libre, sin salida estructurada): `codigo_coelsa` se pide en el
+`PROMPT` y se valida con `normCoelsa`; en AUTOREEMBOLSOSjygactivo va además en el `OUTPUT_SCHEMA`.
+
+### Rotación: cuenta fuera de la rotación (#232)
+`bankRotation.limits[id].skip === true` (tilde "entra en la rotación" destildado) → nunca es destino de `_bankRotate` y, si está en uso,
+`_bankRotationTick` no hace nada con ella. Sigue recibiendo cargas.
 
 ### Cuenta en uso: cambio manual y registro (#231)
 Cualquier rol del panel menos `comunidad` cambia la cuenta que ve el cliente con el botón fijo "🏦" (`bankQuickChip`, `admin.js`) →
