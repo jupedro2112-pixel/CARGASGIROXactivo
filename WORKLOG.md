@@ -14,6 +14,22 @@
 > completo en el WORKLOG de AUTOREEMBOLSOSjygactivo (#219). Los comentarios del código traído llevan la numeración de ACÁ (#232/#233/#234),
 > porque #219–#221 de este repo son otra cosa (Finpro).
 
+### 235. 👀 Webhooks salientes: evento nuevo "visita" (el jugador abrió la página / la app)
+Pedido de un publicista (23/11): recibir las visitas (PageView) de cada persona, identificada igual que en los demás eventos, para tener
+la actividad de último ingreso.
+- **Qué manda:** evento `visita`, OPCIONAL por destino (casilla "Visitas a la página" en Comandos → 🔗 Webhooks salientes; apagado por
+  defecto, los destinos que ya existen no reciben nada nuevo). Mismo body y mismas cabeceras/firma que el resto: `user.id` identifica al
+  jugador (el username sigue sin viajar, #344), `occurred_at` = momento del ingreso, `visit.installed` (app instalada o navegador),
+  `amount`/`transaction_id` en null. Respeta el alcance por publicista del destino y los datos extra tildados.
+- **Cuándo:** cuando un jugador CON SESIÓN INICIADA abre la página o la app: `_notifyVisit(req.user)` en `/api/auth/verify` y en
+  `/api/activity/ping` (antes del corte de Datos IA, así sale aunque esté apagado). **A lo sumo una cada 30 minutos por jugador**
+  (`outboundWebhook.VISIT_GAP_MS`): reclamo atómico sobre `User.lastVisitWebhookAt` (campo nuevo), sirve con varias instancias.
+  Si ningún destino lo pidió, no se toca la base (`outboundWebhook.wants('visita')`). Solo rol `user`.
+- **Lo que NO cubre:** visitantes anónimos (sin sesión no hay a quién identificar; eso ya lo ve el pixel de Meta).
+- **Archivos:** `outboundWebhookService.js`, `server.js`, `User.js`, panel (index.html / admin.js, admin-sw v69), test nuevo
+  `scripts/test-webhook-visit.js` (7). **Validado:** `node --check`, `check-tdz`, test en frío. **NO probado** con un receptor real.
+- **Pendiente:** replicarlo en los demás repos cuando el owner confirme que anda acá.
+
 ### 234. 🛑 Retiro "VERIFICANDO" cuando el banco no responde + el cartel del chat muestra EN PROCESO / FALLADO — admin-sw v68 (réplica #221)
 - **Problema:** el cartel del retiro en el chat solo pedía `pending_review`: apenas un pago fallaba (o quedaba en proceso) el cartel
   desaparecía y el operador se quedaba con un toast de error y sin botón → el único camino era pagarlo a mano en el banco. Y "rechazado"

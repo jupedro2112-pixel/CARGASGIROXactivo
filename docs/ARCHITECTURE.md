@@ -1219,6 +1219,10 @@ puente rotan) y se saltean el `cors()` estricto global — ver el middleware ant
   la cabecera (modal "🎁 Regalos con código": fichas para RECLAMAR + canje + ℹ️) y desde
   el modal "🎁 Reclamar Bono con Código" del menú ☰ (los estados pending/used/credited
   del welcome code muestran un input extra para códigos de lote).
+- **Webhook saliente `visita` (#235):** opcional por destino (`events.visita`). `_notifyVisit(req.user, {installed})` se llama desde
+  `/api/auth/verify` y `/api/activity/ping`; reclama `User.lastVisitWebhookAt` (una cada 30 min por jugador, atómico) y recién ahí hace
+  `outboundWebhook.notify('visita', …)` con `eventKey` `visita_<userId>_<ms>`. Body igual al resto + `visit: { installed }`. Solo rol
+  `user` y con sesión; si ningún destino lo pidió no toca la base. Un punto nuevo de "el jugador abrió la app" llama a `_notifyVisit`.
 - **Webhooks SALIENTES a publicistas (#197, réplica del #334/#346 del gemelo):**
   `src/services/outboundWebhookService.js` (configurado desde server.js con
   `getDestinations` = `_getOutboundWebhooks()`, `resolveScope` =
