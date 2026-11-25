@@ -100,7 +100,7 @@ const reset = (o) => { calls.length = 0; anomalies.length = 0; Object.assign(sta
   reset({ bonusLocked: 5000 }); mode = 'bonus0';
   r = await girox.creditUserBalance('jug', 1, 'vip-rf-5', { giftFlow: 'refund', description: 'Reembolso diario (2026-11-25)' });
   assert.ok(r.success); assert.deepStrictEqual(posts(), ['deposit']); assert.strictEqual(r.creditedAs, 'deposit');
-  assert.ok(/contar como BONO.*Reembolso diario.*limitacion de la API/.test(calls.filter((c) => c.m === 'post')[0].data.description));
+  assert.ok(/contar como BONO.*Reembolso diario.*limitación de la API/.test(calls.filter((c) => c.m === 'post')[0].data.description));
   ok('único caso que sigue yendo a depósito: monto fuera de lo que 1girox acepta como bono (ej. $1) — queda marcado');
 
   reset(); mode = undefined;

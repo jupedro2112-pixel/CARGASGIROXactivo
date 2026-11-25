@@ -290,7 +290,7 @@ async function _applyLevels(u, total, ctx) {
     if (!level) break;
     const ref = `vip-lvl-${u.id}-${idx}`;
     const r = await girox.creditUserBalance(u.username, level.levelUpBonusArs, ref, {
-      description: `Bono por alcanzar el nivel VIP ${level.name}`,
+      description: `BONO — Premio por alcanzar el nivel VIP ${level.name}`,
       giftFlow: 'vip_levelup' // #227: COMANDOS → Tipo de bono puede mandarlo como saldo promocional
     });
     if (!r.success) {

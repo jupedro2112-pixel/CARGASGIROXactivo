@@ -202,7 +202,7 @@ async function executePayoutsForPeriod(periodKey, options = {}) {
     );
 
     const periodLabel = getPeriodLabel(periodKey);
-    const description = `Ganancias por referidos - ${periodLabel}${isDeltaPayout ? ` (pago #${payoutIndex})` : ''}`;
+    const description = `COMISIÓN de referidos — ganancias por referidos de ${periodLabel}${isDeltaPayout ? ` (pago #${payoutIndex})` : ''}`;
     const payoutCutoffEnd = new Date();
 
     // Per-referred detail for full audit trail — stored inside the payout document so the

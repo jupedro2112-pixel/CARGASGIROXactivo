@@ -617,8 +617,8 @@ async function _wagerAfterDeposit({ user, wg, promoRef, sideRef, sideMult, desc 
       out.transient = bonusKind.isTransientFailure(r);
       if (!out.transient && wg.cfg.fallback === 'normal') {
         try {
-          let f = await girox.creditGift(user.username, total, { reference: sideRef, rolloverX: sideMult, description: desc || 'Bonificación de la carga' });
-          if (!(f && f.success)) f = await girox.creditGift(user.username, total, { reference: sideRef, rolloverX: sideMult, description: desc || 'Bonificación de la carga' });
+          let f = await girox.creditGift(user.username, total, { reference: sideRef, rolloverX: sideMult, description: 'BONO de la carga — ' + (desc || 'bonificación sobre la carga') });
+          if (!(f && f.success)) f = await girox.creditGift(user.username, total, { reference: sideRef, rolloverX: sideMult, description: 'BONO de la carga — ' + (desc || 'bonificación sobre la carga') });
           if (f && f.success) {
             out.fallbackOk = true; out.fallbackTotal = total;
             out.fallbackRollover = f.rolloverApplied != null ? f.rolloverApplied : sideMult;
@@ -9614,7 +9614,7 @@ app.post('/api/cashback/claim', authMiddleware, authLimiter, async (req, res) =>
       // BONO con rollover; si el jugador tiene otro bono activo (o el feat no
       // está), cae a depósito CON multiplier — mismo helper que el fueguito.
       credit = await _creditGiftWithRollover(username, amount,
-        `Reembolso ${st.pct}% de tu pérdida acumulada`, ref, st.rolloverX, 'CASHBACK', 'cashback');
+        `REEMBOLSO EN VIVO — ${st.pct}% de la pérdida acumulada del jugador (regalo automático de la sala)`, ref, st.rolloverX, 'CASHBACK', 'cashback'); // #239
     } catch (e) { credit = { success: false, error: e.message }; }
     if (!credit || !credit.success) {
       // §4.5: fallo definitivo → liberar la reserva para que pueda reintentar
@@ -10041,7 +10041,7 @@ app.post('/api/refunds/claim/daily', authMiddleware, async (req, res) => {
         throw e;
       }
 
-      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund', description: `Reembolso diario (${dateStr})` }); // #227 · #238 con descripción (antes llegaba a 1girox sin texto)
+      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund', description: `REEMBOLSO diario del ${dateStr} — regalo automático de la sala por lo perdido ese día` }); // #227 · #238 con descripción (antes llegaba a 1girox sin texto)
 
       if (!depositResult.success) {
         // No se pudo acreditar → liberar la reserva para permitir reintentar.
@@ -10210,7 +10210,7 @@ app.post('/api/refunds/claim/weekly', authMiddleware, async (req, res) => {
         throw e;
       }
 
-      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund', description: `Reembolso semanal (${fromDateStr} a ${toDateStr})` }); // #227 · #238 con descripción (antes llegaba a 1girox sin texto)
+      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund', description: `REEMBOLSO semanal del ${fromDateStr} al ${toDateStr} — regalo automático de la sala por lo perdido esa semana` }); // #227 · #238 con descripción (antes llegaba a 1girox sin texto)
 
       if (!depositResult.success) {
         // No se pudo acreditar → liberar la reserva para permitir reintentar.
@@ -10379,7 +10379,7 @@ app.post('/api/refunds/claim/monthly', authMiddleware, async (req, res) => {
         throw e;
       }
 
-      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund', description: `Reembolso mensual (${fromDateStr} a ${toDateStr})` }); // #227 · #238 con descripción (antes llegaba a 1girox sin texto)
+      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund', description: `REEMBOLSO mensual del ${fromDateStr} al ${toDateStr} — regalo automático de la sala por lo perdido ese mes` }); // #227 · #238 con descripción (antes llegaba a 1girox sin texto)
 
       if (!depositResult.success) {
         // No se pudo acreditar → liberar la reserva para permitir reintentar.
@@ -10586,7 +10586,7 @@ app.post('/api/vip/rakeback/claim', authMiddleware, async (req, res) => {
       }
 
       const depositResult = await girox.creditUserBalance(username, amount, _rakebackReference(week.fromDateStr, userId), {
-        description: `Rakeback semanal VIP (${week.fromDateStr} a ${week.toDateStr})`,
+        description: `REGALO — Rakeback semanal VIP del ${week.fromDateStr} al ${week.toDateStr}: ${pct}% de $${Math.round(wagered).toLocaleString('es-AR')} apostados`, // #239
         giftFlow: 'rakeback' // #227
       });
 
@@ -11907,7 +11907,7 @@ app.post('/api/admin/bonus', authMiddleware, depositorMiddleware, async (req, re
         giftFlow: 'manual_bonus', // #227
         // Elige un multiplicador VÁLIDO para la plataforma (x1 puede no estarlo).
         multiplier: await getGiroxBonusMultiplier(),
-        description: 'Bonificación otorgada'
+        description: `BONO manual — bonificación otorgada por el agente ${(req.user && req.user.username) || '?'} desde el panel` // #239
       }
     );
 
@@ -14424,7 +14424,7 @@ app.post('/api/community-code/claim', authMiddleware, authLimiter, async (req, r
       const _welcomeRolloverX = await applyGlobalRollover(await getWelcomeCodeRolloverX()); // #184
       const credit = await girox.creditUserBalance(
         user.username, amount, `vip-welcome-${user.id}`,
-        { multiplier: _welcomeRolloverX, description: 'Bono sorpresa — código de bienvenida de la Comunidad', giftFlow: 'welcome_code' }
+        { multiplier: _welcomeRolloverX, description: 'BONO — Bono sorpresa por el código de bienvenida de la Comunidad', giftFlow: 'welcome_code' }
       );
       if (!credit.success) {
         // Restaurar la reserva (guard en 'pending') para que pueda reintentar.
@@ -15116,7 +15116,7 @@ app.post('/api/fire/claim-reward', authMiddleware, async (req, res) => {
     // PISARÍA → cae al depósito con multiplier de antes (mismo candado, figura
     // como Carga). La reference es la MISMA en todas las ramas → idempotencia.
     const _fireMult = await applyGlobalRollover(await getFireRolloverMultiplier()); // #184
-    const bonusResult = await _creditFireReward(username, rewardAmount, rewardDesc, _fireRef, _fireMult, 'FIRE_REWARD', 'fire');
+    const bonusResult = await _creditFireReward(username, rewardAmount, `REGALO — Fueguito (racha diaria): ${rewardDesc}`, _fireRef, _fireMult, 'FIRE_REWARD', 'fire');
 
     if (!bonusResult.success) {
       // La acreditación falló → DEVOLVER el premio a pendiente para que el cliente
@@ -22388,7 +22388,7 @@ app.post('/api/admin/payouts/:id/cancel', authMiddleware, withdrawerMiddleware, 
         if (r && r.success) { chipsOk = true; await mkRefundTx(chipsPart, 'chips', r.data); }
       }
       if (bonusPart > 0) {
-        const r = await girox.creditUserBalance(payout.username, bonusPart, `vip-payoutref-bonus-${payout.id}`, { ignoreGlobalRollover: true }); // #184: devolución, no es bono
+        const r = await girox.creditUserBalance(payout.username, bonusPart, `vip-payoutref-bonus-${payout.id}`, { ignoreGlobalRollover: true, description: 'DEVOLUCIÓN de retiro rechazado — parte del retiro que era bono (no es un regalo nuevo)' }); // #184: devolución, no es bono
         if (r && r.success) { bonusOk = true; await mkRefundTx(bonusPart, 'bonus', r.data); }
       }
     } catch (e) {
@@ -23972,7 +23972,7 @@ app.post('/api/roulette/spin', authMiddleware, async (req, res) => {
     let credit;
     try {
       // #188: BONO con el rollover del premio (el global lo pisa si está encendido).
-      credit = await girox.creditGift(username, prizeARS, { rolloverX: Number(pick.rolloverX) || 0, reference: `vip-roulette-${spinDoc.id}`, description: `Premio ruleta diaria ${pick.label}`, giftFlow: 'roulette_cash' });
+      credit = await girox.creditGift(username, prizeARS, { rolloverX: Number(pick.rolloverX) || 0, reference: `vip-roulette-${spinDoc.id}`, description: `REGALO — Premio de la ruleta diaria: ${pick.label}`, giftFlow: 'roulette_cash' });
     } catch (e) {
       credit = { success: false, error: e.message };
     }
@@ -24124,7 +24124,7 @@ app.post('/api/admin/roulette/:id/retry-credit', authMiddleware, adminMiddleware
     try {
       // MISMA reference que el giro original: si el premio ya se había acreditado y
       // sólo falló el registro local, este reintento no lo paga de nuevo.
-      credit = await girox.creditGift(spin.username, spin.prizeARS, { rolloverX: Number(spin.rolloverX) || 0, reference: `vip-roulette-${spin.id}`, description: `Premio ruleta diaria ${spin.prizeLabel || ''}`, giftFlow: 'roulette_cash' }); // #188 misma reference, mismo rollover
+      credit = await girox.creditGift(spin.username, spin.prizeARS, { rolloverX: Number(spin.rolloverX) || 0, reference: `vip-roulette-${spin.id}`, description: `REGALO — Premio de la ruleta diaria: ${spin.prizeLabel || ''}`, giftFlow: 'roulette_cash' }); // #188 misma reference, mismo rollover
     } catch (e) {
       credit = { success: false, error: e.message };
     }
@@ -25471,7 +25471,7 @@ async function _creditNotifBatchGift(uDoc, batch) {
   const ref = `vip-nbatch-${batch.id}-${uDoc.id}`.slice(0, 100);
   const credit = await girox.creditUserBalance(username, amount, ref, {
     multiplier: _batchRoll, // #184: global si está encendido (creditUserBalance lo aplica igual; acá se fija para los mensajes)
-    description: `Regalo de fichas — lote de notificaciones${batch.name ? ` "${batch.name}"` : ''}`,
+    description: `REGALO — Fichas de regalo del lote de notificaciones${batch.name ? ` "${batch.name}"` : ''}`,
     giftFlow: 'lote_fichas' // #227
   });
   if (!credit.success) {

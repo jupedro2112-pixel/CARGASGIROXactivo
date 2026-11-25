@@ -1364,7 +1364,7 @@ async function creditGift(username, amount, opts = {}) {
 // #238 Texto de un REGALO que no pudo salir como bono y va por depósito: 1girox lo rotula "Carga", así que la
 // descripción dice bien claro que hay que contarlo como BONO (lo lee quien hace el cierre en el panel de 1girox).
 function _giftAsDepositDesc(description) {
-  return ('BONO (contar como BONO, NO como carga): ' + (description || 'Regalo de la sala') + ' — sale como deposito por una limitacion de la API de 1girox').slice(0, 500);
+  return ('BONO (contar como BONO, NO como carga): ' + (description || 'Regalo de la sala') + ' — sale como depósito por una limitación de la API de 1girox').slice(0, 500);
 }
 
 // Regalo directo = bono 0. La reference es la MISMA en las dos ramas.

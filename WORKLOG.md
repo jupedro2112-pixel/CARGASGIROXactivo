@@ -14,6 +14,21 @@
 > completo en el WORKLOG de AUTOREEMBOLSOSjygactivo (#219). Los comentarios del código traído llevan la numeración de ACÁ (#232/#233/#234),
 > porque #219–#221 de este repo son otra cosa (Finpro).
 
+### 239. 🏷️ Descripción detallada en 1girox de TODO bono / regalo / reembolso
+Pedido del owner (25/11): "en todo que marque la descripción detallando todo, ya sea el bonus, regalo, reembolso, etc.".
+Cada acreditación manda a 1girox un texto que empieza con el TIPO en mayúsculas y sigue con el detalle (solo cambia el texto que ve
+quien audita en el panel de 1girox; montos, references, rollover y la descripción de la Transaction local NO cambian):
+- `REEMBOLSO diario del <fecha>` / `semanal del <desde> al <hasta>` / `mensual …` — "regalo automático de la sala por lo perdido …".
+- `REEMBOLSO EN VIVO — N% de la pérdida acumulada del jugador`.
+- `REGALO — Rakeback semanal VIP del … al …: N% de $X apostados`.
+- `REGALO — Fueguito (racha diaria): <premio>` · `REGALO — Premio de la ruleta diaria: <premio>` · `REGALO — Fichas de regalo del lote "<nombre>"`.
+- `BONO manual — bonificación otorgada por el agente <usuario> desde el panel` · `BONO — … código de bienvenida` ·
+  `BONO — Premio por alcanzar el nivel VIP <nivel>` · `BONO de la carga — <detalle>`.
+- `COMISIÓN de referidos — …` · `DEVOLUCIÓN de retiro rechazado — parte del retiro que era bono` (antes iba sin texto).
+- Si además sale por depósito (#238) se le antepone `BONO (contar como BONO, NO como carga): … — sale como depósito por una limitación de la API`.
+- Tests estáticos (`test-bonus-kind`, `test-rollover-multicuenta`) acompañados. Regla: todo flujo nuevo que acredite manda `description`
+  con ese formato. NO probado contra 1girox real (no sé cuántos caracteres muestra su panel; el tipo va primero por eso).
+
 ### 238. 🏷️ Regalo que igual sale por depósito: la descripción en 1girox avisa que es un BONO
 Pedido del owner (25/11): si un bono termina saliendo como depósito, que la descripción diga que hay que sumarlo como BONO y que sale así
 por un problema de la API.
