@@ -1003,6 +1003,11 @@ Responder 2xx. Con 5xx / timeout se reintenta; con 4xx no.</pre>
                                 <div id="brOptions" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
                                 <small id="brHint" style="color:#aaa;font-size:11px;display:block;margin-top:6px;"></small>
                             </div>
+                            <div class="form-group">
+                                <label>Si un regalo NO puede salir como bono con rollover (ej: el jugador ya tiene un bono activo)</label>
+                                <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="brFallback" value="bonus0" style="width:auto;margin-top:3px;"> <span>Darlo como <b>BONO sin rollover</b> — en 1girox figura como Bono y el cierre cuadra (recomendado)</span></label>
+                                <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;margin:4px 0;"><input type="radio" name="brFallback" value="deposit" style="width:auto;margin-top:3px;"> <span>Darlo como <b>depósito con rollover</b> — mantiene el rollover, pero en 1girox figura como <b>Carga</b> (hay que restarlo en el cierre: tarjeta "Regalos que 1girox muestra como Carga" en Transacciones)</span></label>
+                            </div>
                             <button type="button" class="btn-primary" onclick="saveBonusRollover()">💾 Guardar rollover global</button>
                         </div>
 

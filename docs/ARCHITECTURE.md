@@ -536,6 +536,12 @@ reintento manda la misma reference y la plataforma responde `duplicate:true`.
   (`ignoreGlobalRollover:true`). Lo que se le DICE al cliente (fueguito, reembolso en
   vivo, código de bienvenida, lotes) usa `applyGlobalRollover(valorDelFlujo)` para
   coincidir con lo acreditado; el cliente además devuelve `rolloverApplied`.
+- **Regalo que NO puede salir como bono con rollover (#236):** si el guard de bono activo, el multiplicador o un 422 lo impiden,
+  `creditGift` ya NO cae a depósito por defecto: llama a `_creditDirectGift` (bono 0, figura como Bono, misma reference) y devuelve
+  `rolloverApplied:0` + `fallbackReason`. `Config['bonusRolloverGlobal'].fallback` = `'bonus0'` (default) | `'deposit'` (depósito con
+  multiplier, figura como Carga) — resolver `girox.setGiftFallbackResolver`. Todo regalo que igual salga por depósito tiene que quedar
+  con `metadata.creditedAs:'deposit'` en su Transaction (`_giftMeta(result)`): lo suma `summary.giftsAsDeposit` del panel de
+  Transacciones para el cierre. Quien le diga al cliente el rollover de un regalo usa `result.rolloverApplied`, no el del flujo.
 - **`opts.multiplier` EXPLÍCITO** (incluido 0) = `/bonus` ESTRICTO, sin fallback: un
   `bonus_out_of_range` se devuelve como error (botón Bonificación del panel, welcome
   code cash, lotes con regalo). Con multiplier >0 el bono queda bloqueado hasta

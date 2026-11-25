@@ -497,7 +497,18 @@ async function getGlobalBonusRollover() {
     const cfg = await girox.getPlatformConfig();
     allowed = cfg.success && cfg.config && cfg.config.bonus && cfg.config.bonus.multipliers;
   } catch (_) {}
-  return bonusRollover.resolveGlobalRollover(raw, allowed);
+  const out = bonusRollover.resolveGlobalRollover(raw, allowed);
+  out.fallback = _giftFallbackFromCfg(raw); // #236
+  return out;
+}
+// #236 Regalo que NO puede salir como bono con rollover (el jugador ya tiene un bono activo, etc.):
+// 'bonus0' (default) = bono sin rollover, figura como BONO en 1girox · 'deposit' = depósito con rollover, figura como CARGA.
+function _giftFallbackFromCfg(raw) { return raw && raw.fallback === 'deposit' ? 'deposit' : 'bonus0'; }
+girox.setGiftFallbackResolver(async () => _giftFallbackFromCfg(await getConfig('bonusRolloverGlobal', null).catch(() => null)));
+// #236 metadata de la Transaction de un regalo: por qué vía salió en 1girox (solo si NO fue bono normal).
+function _giftMeta(r) {
+  if (!r || (r.creditedAs !== 'wager' && r.creditedAs !== 'deposit')) return {};
+  return { metadata: Object.assign({ creditedAs: r.creditedAs }, r.creditedAs === 'deposit' && r.fallbackReason ? { giftFallback: String(r.fallbackReason).slice(0, 200) } : {}) };
 }
 // Rollover a usar en un flujo (para mensajes/registros): el GLOBAL si está
 // encendido, si no el propio del flujo. Coincide con lo que acredita el cliente.
@@ -9614,7 +9625,7 @@ app.post('/api/cashback/claim', authMiddleware, authLimiter, async (req, res) =>
         `📉 REEMBOLSO EN VIVO: reclamó $${Number(amount).toLocaleString('es-AR')} (${st.pct}% de su pérdida real acumulada de $${Number(st.lossLife).toLocaleString('es-AR')} — regalos y reembolsos anteriores EXCLUIDOS de la base — menos lo ya cobrado)${st.rolloverX ? ` con rollover x${st.rolloverX}` : ''}. Acreditado automático como ${creditedAs === 'wager' ? 'SALDO PROMOCIONAL (bono wager)' : (creditedAs === 'bonus' ? 'BONO' : 'carga con rollover (tenía bono activo)')} — el contador le arranca de 0. Este monto se descuenta de su reembolso diario/semanal/mensual.`);
     } catch (_) {}
     logger.info(`[cashback] ${username} → $${amount} acreditado como ${creditedAs} (pérdida real $${st.lossLife}, seq ${claimDoc.seq}, ref ${ref})`);
-    res.json({ success: true, amount, rolloverX: st.rolloverX, pct: st.pct, creditedAs, transactionId: txId });
+    res.json({ success: true, amount, rolloverX: credit.rolloverApplied != null ? credit.rolloverApplied : st.rolloverX, pct: st.pct, creditedAs, transactionId: txId }); // #236 el rollover realmente aplicado
   } catch (e) {
     logger.error(`[cashback] claim falló: ${e.message}`);
     res.status(500).json({ error: 'Error del servidor' });
@@ -9633,8 +9644,10 @@ app.post('/api/admin/bonus-rollover', authMiddleware, adminMiddleware, async (re
     const x = Math.round(Number(b.x));
     if (!BONUS_ROLLOVER_OPTIONS.includes(x)) return res.status(400).json({ error: `Rollover inválido. Opciones: ${BONUS_ROLLOVER_OPTIONS.map((n) => 'x' + n).join(', ')}` });
     const enabled = b.enabled !== false;
-    await Config.set('bonusRolloverGlobal', { enabled, x }, req.user.username);
-    logger.info(`[bonus-rollover] ${req.user.username}: global ${enabled ? 'ON' : 'OFF'} x${x}`);
+    const prevCfg = await getConfig('bonusRolloverGlobal', null).catch(() => null);
+    const fallback = b.fallback === 'deposit' || b.fallback === 'bonus0' ? b.fallback : _giftFallbackFromCfg(prevCfg); // #236
+    await Config.set('bonusRolloverGlobal', { enabled, x, fallback }, req.user.username);
+    logger.info(`[bonus-rollover] ${req.user.username}: global ${enabled ? 'ON' : 'OFF'} x${x} · regalo sin bono posible → ${fallback === 'deposit' ? 'depósito con rollover (Carga)' : 'bono sin rollover'}`);
     res.json(await getGlobalBonusRollover());
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
@@ -10039,7 +10052,7 @@ app.post('/api/refunds/claim/daily', authMiddleware, async (req, res) => {
         username,
         description: `Reembolso diario (${dateStr})`,
         transactionId: _refundTxId,
-        ...(depositResult && depositResult.creditedAs === 'wager' ? { metadata: { creditedAs: 'wager' } } : {}), // #227 regalo dado como saldo promocional
+        ..._giftMeta(depositResult), // #227 wager · #236 regalo que 1girox muestra como Carga
         timestamp: new Date()
       });
 
@@ -10208,7 +10221,7 @@ app.post('/api/refunds/claim/weekly', authMiddleware, async (req, res) => {
         username,
         description: `Reembolso semanal (${fromDateStr} a ${toDateStr})`,
         transactionId: _refundTxId,
-        ...(depositResult && depositResult.creditedAs === 'wager' ? { metadata: { creditedAs: 'wager' } } : {}), // #227 regalo dado como saldo promocional
+        ..._giftMeta(depositResult), // #227 wager · #236 regalo que 1girox muestra como Carga
         timestamp: new Date()
       });
 
@@ -10377,7 +10390,7 @@ app.post('/api/refunds/claim/monthly', authMiddleware, async (req, res) => {
         username,
         description: `Reembolso mensual (${fromDateStr} a ${toDateStr})`,
         transactionId: _refundTxId,
-        ...(depositResult && depositResult.creditedAs === 'wager' ? { metadata: { creditedAs: 'wager' } } : {}), // #227 regalo dado como saldo promocional
+        ..._giftMeta(depositResult), // #227 wager · #236 regalo que 1girox muestra como Carga
         timestamp: new Date()
       });
 
@@ -10581,7 +10594,7 @@ app.post('/api/vip/rakeback/claim', authMiddleware, async (req, res) => {
         amount,
         description: `Rakeback semanal VIP (${week.fromDateStr} a ${week.toDateStr})`,
         transactionId: txId,
-        ...(depositResult && depositResult.creditedAs === 'wager' ? { metadata: { creditedAs: 'wager' } } : {}), // #227 regalo dado como saldo promocional
+        ..._giftMeta(depositResult), // #227 wager · #236 regalo que 1girox muestra como Carga
         timestamp: new Date()
       }).catch(() => {});
 
@@ -11912,7 +11925,7 @@ app.post('/api/admin/bonus', authMiddleware, depositorMiddleware, async (req, re
         adminUsername: req.user?.username,
         adminRole: req.user?.role || 'admin',
         transactionId: depositResult.data?.transfer_id || depositResult.data?.transferId,
-        ...(depositResult && depositResult.creditedAs === 'wager' ? { metadata: { creditedAs: 'wager' } } : {}), // #227 regalo dado como saldo promocional
+        ..._giftMeta(depositResult), // #227 wager · #236 regalo que 1girox muestra como Carga
         timestamp: new Date()
       });
 
@@ -15140,8 +15153,9 @@ app.post('/api/fire/claim-reward', authMiddleware, async (req, res) => {
 
     logger.info(`[FIRE_REWARD] claim-reward OK userId=${userId} username=${username} amount=${rewardAmount}`);
 
-    const _rolloverMsg = bonusResult.creditedAs === 'wager' ? await _giftNote(bonusResult, { short: true }) : _fireMult > 0
-      ? ` Para poder RETIRARLOS tenés que apostar $${Math.round(rewardAmount * _fireMult).toLocaleString('es-AR')} (rollover x${_fireMult}). ¡Ya podés jugarlos! Las apuestas en DEPORTES no suman para el rollover.` +
+    const _fireApplied = bonusResult.rolloverApplied != null ? Math.max(0, Number(bonusResult.rolloverApplied) || 0) : _fireMult; // #236 lo que REALMENTE se aplicó (puede ser 0 si salió como bono sin rollover)
+    const _rolloverMsg = bonusResult.creditedAs === 'wager' ? await _giftNote(bonusResult, { short: true }) : _fireApplied > 0
+      ? ` Para poder RETIRARLOS tenés que apostar $${Math.round(rewardAmount * _fireApplied).toLocaleString('es-AR')} (rollover x${_fireApplied}). ¡Ya podés jugarlos! Las apuestas en DEPORTES no suman para el rollover.` +
         (bonusResult.claimRequired ? ' Cuando completes el objetivo, tocá el regalito 🎁 en el casino para liberarlos.' : '')
       : '';
     res.json({
@@ -17090,6 +17104,15 @@ app.get('/api/admin/transactions', authMiddleware, adminMiddleware, async (req, 
     // Saldo neto = depósitos - retiros (bonos y reembolsos no afectan).
     // `gifts` = TODO lo que no es carga ni retiro (lo que en 1girox va como Bono).
     const gifts = bonuses + refunds + fireRewards + referrals + rakebacks + vipLevelups + roulette + cashback;
+    // #236 Regalos que 1girox anotó como CARGA (salieron por depósito): hay que RESTARLOS de las cargas de 1girox al cerrar.
+    let giftsAsDeposit = 0, giftsAsDepositCount = 0;
+    try {
+      const gd = await Transaction.aggregate([
+        { $match: Object.assign({}, baseQuery, { 'metadata.creditedAs': 'deposit' }) },
+        { $match: { type: { $nin: ['deposit', 'withdrawal'] } } },
+        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }]);
+      if (gd[0]) { giftsAsDeposit = gd[0].total || 0; giftsAsDepositCount = gd[0].count || 0; }
+    } catch (_) {}
     const summary = {
       deposits,
       withdrawals,
@@ -17102,6 +17125,7 @@ app.get('/api/admin/transactions', authMiddleware, adminMiddleware, async (req, 
       roulette,
       cashback,
       gifts,
+      giftsAsDeposit, giftsAsDepositCount, // #236
       wagers, // #226 informativo (plata ficticia de la casa; no entra en gifts ni en el saldo neto)
       netBalance: deposits - withdrawals,
       totalTransactions: totalAll

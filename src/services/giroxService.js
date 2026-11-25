@@ -454,6 +454,14 @@ function _normalizeAmount(amount) {
 // `ignoreGlobalRollover:true` (comisiones de referidos, devoluciones de retiro).
 let _rolloverResolver = null;
 function setRolloverResolver(fn) { _rolloverResolver = typeof fn === 'function' ? fn : null; }
+// #236 Qué hacer con un REGALO que no puede salir como bono con rollover (el jugador ya tiene un bono activo, la
+// plataforma no permite ese multiplicador, etc.): 'bonus0' (default) = bono SIN rollover → en 1girox figura como
+// BONO; 'deposit' = depósito con rollover (lo de antes) → en 1girox figura como CARGA y descuadra el cierre.
+let _giftFallbackResolver = null;
+function setGiftFallbackResolver(fn) { _giftFallbackResolver = typeof fn === 'function' ? fn : null; }
+async function _giftFallbackMode() {
+  try { return (_giftFallbackResolver && (await _giftFallbackResolver())) === 'deposit' ? 'deposit' : 'bonus0'; } catch (_) { return 'bonus0'; }
+}
 async function _globalRollover() {
   if (!_rolloverResolver) return null;
   try {
@@ -1302,6 +1310,14 @@ async function creditGift(username, amount, opts = {}) {
       return r; // transitorio: no cambiar de vía (un timeout puede haber acreditado)
     }
   }
+  // #236: por defecto NO se manda como depósito (1girox lo muestra como Carga y descuadra el cierre): sale como
+  // bono SIN rollover (regalo directo: figura como Bono y no pisa el bono en curso). Misma reference.
+  if ((await _giftFallbackMode()) !== 'deposit') {
+    logger.warn(`[girox] regalo a ${username} $${amt}: no puede salir como bono x${roll} → va como BONO SIN rollover (figura como Bono) — ${why}`);
+    const g = await _creditDirectGift(username, amt, reference, description);
+    if (g && g.success) { g.rolloverApplied = 0; g.fallbackReason = why; if (!g.via) g.via = g.creditedAs === 'deposit' ? 'deposit' : 'bonus'; }
+    return g;
+  }
   logger.warn(`[girox] regalo a ${username} $${amt} (x${roll}) va por DEPÓSITO con rollover (figura como Carga) — ${why}`);
   const r = await depositToUser(username, amt, description, reference, { multiplier: roll });
   if (r && r.success) { r.creditedAs = 'deposit'; r.via = 'deposit'; r.fallbackReason = why; r.rolloverApplied = roll; }
@@ -1828,6 +1844,7 @@ module.exports = {
   setGiftKindResolver, // #227 regalos sin carga como wager
   /** #184: resolver del rollover GLOBAL (server.js): devuelve el efectivo o null si está apagado. */
   setRolloverResolver,
+  setGiftFallbackResolver, // #236
   withdrawFromUser,
   creditUserBalance,
   // saldo

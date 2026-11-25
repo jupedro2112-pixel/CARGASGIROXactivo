@@ -14,6 +14,31 @@
 > completo en el WORKLOG de AUTOREEMBOLSOSjygactivo (#219). Los comentarios del código traído llevan la numeración de ACÁ (#232/#233/#234),
 > porque #219–#221 de este repo son otra cosa (Finpro).
 
+### 236. 🎁 Regalos que 1girox anotaba como CARGA (descuadre del cierre) → ahora salen como BONO
+Reporte de un encargado de cierres (25/11): en la auditoría del 23/11 aparecieron 58 regalos por $478.299 (reembolsos semanales y diarios,
+rakeback, ruleta) anotados en 1girox como "Carga" → faltante en el cierre.
+- **Causa (en el código, NO confirmada con los logs de producción):** con el rollover GLOBAL encendido, `giroxService.creditGift` manda el
+  regalo como bono con rollover; si no puede (el caso típico: **el jugador ya tiene un bono activo** de más de $50 — otorgarle otro bono lo
+  PISA; también multiplicador no permitido o rechazo de la plataforma) caía a **depósito con rollover**, que 1girox muestra como Carga.
+  Como casi todo regalo deja un bono activo, el siguiente regalo del mismo jugador caía ahí. El log de cada caso es
+  `[girox] regalo a X … va por DEPÓSITO con rollover (figura como Carga) — <motivo>`.
+- **Qué se hizo:**
+  1. En ese caso el regalo sale ahora como **BONO SIN rollover** (bono 0 "regalo directo": figura como Bono, no pisa el bono en curso,
+     misma reference). `_giftFallbackMode()` / `setGiftFallbackResolver` en `giroxService`; `Config['bonusRolloverGlobal'].fallback`
+     = `'bonus0'` (DEFAULT) | `'deposit'` (lo de antes), elegible en la card "🎯 Rollover GLOBAL de bonos" (solo admin general).
+     ⚠️ Costo: ese regalo puntual queda SIN rollover (retirable). Decisión tomada por el asistente a pedido de "solucionarlo"; el owner
+     puede volver a "depósito con rollover" desde el panel.
+  2. Los reembolsos (diario/semanal/mensual) y el rakeback ahora guardan `metadata.creditedAs:'deposit'` + `giftFallback` (motivo) cuando
+     salen por depósito (`_giftMeta`), como ya hacían ruleta, fueguito y reembolso en vivo.
+  3. Transacciones: tarjeta roja **"Regalos que 1girox muestra como Carga"** (`summary.giftsAsDeposit`): lo que hay que restar de las cargas
+     de 1girox al cerrar. Solo aparece si hay alguno en el período.
+  4. Los mensajes al cliente del fueguito y del reembolso en vivo usan el rollover REALMENTE aplicado (`rolloverApplied`).
+- **Único caso que sigue yendo a depósito:** monto fuera de lo que 1girox acepta como bono (`fixed_min/fixed_max`, ej. un reembolso de $1)
+  o bono suelto apagado en la plataforma. Queda marcado y sale en la tarjeta.
+- **No arregla hacia atrás:** lo ya anotado como Carga en 1girox queda así; los regalos viejos de reembolso/rakeback no tienen la marca.
+- **Validado:** `node --check`, `check-tdz`, test nuevo `scripts/test-gift-fallback.js` (7, API simulada) y el resto de los tests.
+  **NO probado** contra 1girox real. admin-sw v70.
+
 ### 235. 👀 Webhooks salientes: evento nuevo "visita" (el jugador abrió la página / la app)
 Pedido de un publicista (23/11): recibir las visitas (PageView) de cada persona, identificada igual que en los demás eventos, para tener
 la actividad de último ingreso.
