@@ -1937,6 +1937,21 @@ de confirmación del pago dice **SALE POR: <banco · cuenta>** (`window._payoutB
 Test: `node scripts/test-payout-guard.js` (recorta el bloque entre `const PAYOUT_RESEND_COOLDOWN_MS` y `async function _payPayoutViaFinpro`:
 si se renombran, actualizar el test).
 
+### De qué cuenta sale cada retiro (#240, réplica #223 de AUTOREEMBOLSOSjygactivo)
+`_payoutPickSource(body, monto)` → `{ provider, key }` (key `null` = la cuenta en uso de ese banco) | `{ error }`. Prioridad:
+`body.source` (cuenta elegida para ESE retiro, botón "🏦 Elegir cuenta", id `hgcash:<key>` / `finpro:<key>`) > `body.provider` (#230) >
+`Config['payoutSource'] = { mode, fixed }` (`getPayoutSource`): `active` (default) · `fixed` · `richest` (mayor saldo entre `_paySlots()`,
+las cuentas de los dos bancos que pueden pagar; saldos por `_paySlotInfo`, caché 20 s). La ruta `/pay` lo deja en `req._paySrc` y los
+dos caminos pagan con esa cuenta (hgcash: `_hgKeyPay` / `_hgAcctPay`; Finpro: `_srcKey` en `_payPayoutViaFinpro`); si la cuenta elegida
+ya no existe responde 400, nunca cae sola a otra. El candado #232 recibe la cuenta real y el pago guarda `hgAccountKey` / `fpAccountKey`.
+En hgcash, la cuenta REAL que debita un perfil la decide `_hgPickApiAccount` (fijada a mano `payAccountId` > única > CBU > titular >
+id guardado > adivinar `how:'guess'`, que no se guarda): un token puede ver varias cuentas. `_hgLastApiPick` recuerda lo último resuelto
+(lo usa `_hgDebitNote` para la nota interna). Endpoints: `GET/POST /api/admin/payout-sources`,
+`POST /api/admin/hgcash/accounts/:key/pay-account`; el listado de pagos suma `payFrom` / `paySources` / `payFromReady`.
+**Trampas:** la rotación automática y "USAR ESTA" no cambian de dónde salen los retiros si el modo es `fixed` / `richest`; las bajadas
+siguen por la cuenta en uso; un flujo nuevo que pague dentro de `/pay` no debe leer `_hgActiveKey` / `_fpActiveAccount()` directo (usar
+`req._paySrc`). Test: `node scripts/test-payout-source.js` (recorta el bloque `const _hgLastApiPick` … `_payoutSourcesPayload` de server.js).
+
 ### Pagos por fuera de la app y comprobante Finpro (#233, réplica #220)
 - **Saliente externo:** un `BankMovement` `Outbound` con `outKind:'unknown'` es una transferencia que la app no originó (alguien la cargó
   en el panel del banco). `_alertUnknownOutbound(movementId)` se dispara al registrarlo (webhook hgcash y `_finproIngestLedger`): espera
