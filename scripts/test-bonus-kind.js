@@ -84,7 +84,7 @@ check('respaldo normal solo ante rechazo NO transitorio', /if \(!out\.transient 
 const flowsWired = { refund: /giftFlow: 'refund'/, cashback: /'CASHBACK', 'cashback'\)/, roulette_cash: /giftFlow: 'roulette_cash'/, fire: /'FIRE_REWARD', 'fire'\)/, rakeback: /giftFlow: 'rakeback'/, lote_fichas: /giftFlow: 'lote_fichas'/, welcome_code: /giftFlow: 'welcome_code'/, manual_bonus: /giftFlow: 'manual_bonus'/ };
 check('regalos sin carga cableados en server.js', Object.keys(flowsWired).filter((f) => !flowsWired[f].test(server)), []);
 check('nivel VIP cableado en vipLevelService', /giftFlow: 'vip_levelup'/.test(vip), true);
-check('reembolsos: los 3 períodos pasan giftFlow', (server.match(/\{ giftFlow: 'refund' \}/g) || []).length, 3);
+check('reembolsos: los 3 períodos pasan giftFlow', (server.match(/\{ giftFlow: 'refund', description: `Reembolso (diario|semanal|mensual) /g) || []).length, 3); // #238: ahora llevan descripción
 check('referidos y devolución de retiro NO pasan giftFlow', /vip-payoutref-bonus-\$\{payout\.id\}`, \{ ignoreGlobalRollover: true \}\)/.test(server), true);
 check('resumen de Transacciones: wager fuera de gifts', /case 'wager_bonus': wagers = g\.total; break;/.test(server) && !/const gifts = [^;]*wagers/.test(server), true);
 check('endpoints GET/POST /api/admin/bonus-kind', /app\.get\('\/api\/admin\/bonus-kind'/.test(server) && /app\.post\('\/api\/admin\/bonus-kind'/.test(server), true);
