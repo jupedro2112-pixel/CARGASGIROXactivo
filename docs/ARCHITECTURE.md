@@ -1948,6 +1948,14 @@ En hgcash, la cuenta REAL que debita un perfil la decide `_hgPickApiAccount` (fi
 id guardado > adivinar `how:'guess'`, que no se guarda): un token puede ver varias cuentas. `_hgLastApiPick` recuerda lo último resuelto
 (lo usa `_hgDebitNote` para la nota interna). Endpoints: `GET/POST /api/admin/payout-sources`,
 `POST /api/admin/hgcash/accounts/:key/pay-account`; el listado de pagos suma `payFrom` / `paySources` / `payFromReady`.
+**Candado por cuenta REAL (#240c, réplica #223c):** el envío guarda `PendingPayout.lastSendAccountId` (id de la cuenta del banco;
+`_payoutNoteSend(…, realAccountId)`) y `_payoutResendGuard(…, realAccountId)` trata como "otra ruta" al mismo perfil con otra cuenta
+real (Finpro pasa `null`). `resolveHgcashAccountId({ acct })` (pago) no usa el respaldo "último movimiento" (las bajadas sí).
+`_payoutPickSource(body, monto, prev)`: `richest` en un reintento no rechazado vuelve por la misma cuenta (`why:'retry-same'`); una
+cuenta hgcash sin secreto propio no se elige sola si otro perfil tiene secreto (`_paySlotNoWebhook`, el payload la marca `noWebhook`).
+Titulares: `_hgNameKey` (compacto, igualdad) y `_hgNameContains` (palabras enteras, nunca la etiqueta); `_normName` es OTRA cosa
+(identidad bancaria / anti-multicuenta). Alta de perfil con token que ve varias: `_hgIdForNewToken` (CBU / titular, o `null`).
+La respuesta de `/pay` trae `paidFrom`.
 **Trampas:** la rotación automática y "USAR ESTA" no cambian de dónde salen los retiros si el modo es `fixed` / `richest`; las bajadas
 siguen por la cuenta en uso; un flujo nuevo que pague dentro de `/pay` no debe leer `_hgActiveKey` / `_fpActiveAccount()` directo (usar
 `req._paySrc`). Test: `node scripts/test-payout-source.js` (recorta el bloque `const _hgLastApiPick` … `_payoutSourcesPayload` de server.js).

@@ -62,8 +62,47 @@ ESTA" y la rotación automática ya no cambian de dónde salen los retiros.
 con `JWT_SECRET=x` (los 9 de antes pasaban y siguen pasando; nuevo: `test-payout-source.js`, 29 casos).
 **NO probado en este repo:** contra hgcash ni Finpro reales, ni el panel en un navegador (acá no hay `node_modules`). La forma exacta
 de `GET /accounts` cuando el token ve varias cuentas se asume (que trae `name`): lo primero a mirar tras el deploy es el bloque nuevo
-del panel, que muestra qué cuenta real debita cada perfil. El endpoint viejo `POST /api/admin/hgcash/credentials` (una sola cuenta)
-sigue guardando `apiAccountId` como antes: el pago igual resuelve por CBU/titular antes que por ese id.
+del panel, que muestra qué cuenta real debita cada perfil. ~~El endpoint viejo `POST /api/admin/hgcash/credentials` (una sola cuenta)
+sigue guardando `apiAccountId` como antes~~ → corregido en #240c (abajo).
+
+**#240c — correcciones de las DOS auditorías independientes del cambio (2026-11-25, admin-sw v73).** Réplica del **#223c de
+AUTOREEMBOLSOSjygactivo** (sus commits `0f22895` y `c01b064`). Con el modo por defecto (`active`) y un perfil que ve una sola cuenta,
+todo sale como antes.
+- *Titulares (`_hgPickApiAccount`):* fijada > única > CBU > titular IGUAL (forma compacta `_hgNameKey`: "S.A." = "SA"; vale titular,
+  `accountName` y etiqueta) > titular CONTENIDO por PALABRAS ENTERAS (`_hgNameWords` / `_hgNameContains`; solo titular y `accountName`,
+  nunca la etiqueta) > id guardado > adivinar. Antes un nombre matcheaba por un pedazo de palabra de otro, y un titular exacto perdía
+  si otra cuenta lo contenía (dos coincidencias = ninguna). `_hgDebitNote` usa el mismo criterio.
+- *Alta/edición de perfil:* `_hgValidateCreds` conserva `cbu` / `cvu` / `accountNumber` / `holderName` / `alias` de cada cuenta que
+  ve el token, así se identifica por CBU al cargarlo: `_hgIdForNewToken(perfil, v)` (la única, o la que sale por CBU/titular; si no,
+  `null` + aviso). La ruta vieja `POST /api/admin/hgcash/credentials` tampoco toma ya "la primera": limpia `payAccountId`, usa
+  `_hgIdForNewToken` y deja `Config['hgcash'].accountId` en `null` si el token ve varias.
+- *Pago doble (lo más importante):*
+  1. `resolveHgcashAccountId({ acct })` — un PAGO (perfil fijado) ya no usa el respaldo "la cuenta del último movimiento" si hgcash no
+     responde y el perfil no tiene id guardado: podía ser OTRA cuenta y el `externalID` no deduplica entre cuentas → sin cuenta
+     cierta el pago responde 400 y no sale. Las bajadas (sin `acct`) conservan ese respaldo, como antes.
+  2. El envío anota la cuenta REAL del banco: `PendingPayout.lastSendAccountId` (campo nuevo) y `sendLog[].accountId`, vía
+     `_payoutNoteSend(id, bank, account, by, realAccountId)`. `_payoutResendGuard(…, realAccountId)` solo considera "misma ruta" si
+     además coincide esa cuenta (`sameReal`): mismo perfil con OTRA cuenta real = espera de 2 min + confirmación. El reintento por
+     403 dentro del mismo pedido actualiza `lastSendAccountId`. Finpro no pasa cuenta real (queda `null`: su perfil ES la cuenta).
+  3. `_payoutPickSource(body, monto, prev)`: en modo `richest`, un REINTENTO de un retiro cuyo envío anterior no quedó `rejected`
+     vuelve por la MISMA cuenta (`why:'retry-same'`) si sigue existiendo; cambiar de cuenta en un reintento solo lo hace una persona
+     con "🏦 Elegir cuenta" (y ahí aplica el candado). `/pay` le pasa `lastSendBank lastSendAccount lastSendResult` del retiro.
+  4. `_paySlotNoWebhook(s)`: un perfil de hgcash SIN secreto propio no avisa sus salidas → queda fuera de `richest`, pero SOLO si
+     otro perfil sí tiene secreto (si ninguno tiene, los avisos entran con el de AWS y todas participan). El panel lo marca.
+- *Otros:* alcanza con que la cuenta ELEGIDA tenga token (`hgcashPay.isEnabled()` miraba solo la cuenta en uso); la respuesta del pago
+  trae `paidFrom` (hgcash y Finpro) y el aviso dice "SALIÓ POR …" (escapado); el selector de cuenta a fijar muestra moneda y estado.
+- **Ya estaba en este repo:** el freno 400 si la cuenta elegida dejó de existir (#240) y `_hgNameKey` sin pisar a `_normName` (`21dbbfc`).
+- **Queda SIN hacer:** no hay alarma de "posible pago doble" entre dos cuentas del MISMO banco pagadas por la app (la de #233 es para
+  salidas hechas por fuera); un retiro fallado ANTES de este deploy no tiene `lastSendAccountId` → el candado lo trata como antes
+  (mirarlo en el banco antes de reintentar); los perfiles con id guardado de antes que no matcheen por CBU/titular siguen con ese id
+  → revisarlos UNA vez en el panel ("¿De qué CUENTA salen los retiros?" muestra qué cuenta real debita cada uno).
+- **Validación:** `node --check` de lo tocado, `check-tdz`, los 10 `scripts/test-*.js` con `JWT_SECRET=x` antes y después (todos pasaban
+  y pasan): `test-payout-source.js` 30 → 47 casos (incluye "ninguna función declarada dos veces en server.js"), `test-payout-guard.js`
+  12 → 14. Chequeo de funciones duplicadas en server.js y admin.js: vacío antes y después.
+- **NO probado:** contra hgcash ni Finpro reales, ni el panel en un navegador. Sigue sin conocerse la forma exacta de `GET /accounts`
+  cuando el token ve varias cuentas (se asume `name` / `holderName` / `alias` y `cbu` / `cvu` / `accountNumber`): si no trae CBU ni
+  un nombre reconocible, el perfil queda sin cuenta y hay que fijarla a mano en el panel (el pago avisa, no adivina en silencio…
+  salvo el caso `guess` de siempre, que sigue pagando con aviso en la nota interna).
 
 ## Sesión 2026-11-22
 
