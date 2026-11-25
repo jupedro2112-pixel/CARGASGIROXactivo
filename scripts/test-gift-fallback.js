@@ -68,6 +68,7 @@ const reset = (o) => { calls.length = 0; anomalies.length = 0; Object.assign(sta
   reset({ bonusLocked: 5000, claimable: 300 }); mode = undefined;
   r = await girox.creditUserBalance('jug', 1000, 'vip-rf-2c', { giftFlow: 'refund' });
   assert.deepStrictEqual(posts(), ['deposit:x3']); assert.strictEqual(r.creditedAs, 'deposit');
+  assert.ok(/^BONO \(contar como BONO, NO como carga\): /.test(calls.filter((c) => c.m === 'post')[0].data.description), '#238 la descripción avisa que es un bono');
   ok('tiene un bono cumplido sin reclamar: no se unifica → depósito con rollover (queda marcado)');
 
   reset({ bonusLocked: 499500 }); mode = undefined;
@@ -97,8 +98,9 @@ const reset = (o) => { calls.length = 0; anomalies.length = 0; Object.assign(sta
   ok('la plataforma rechaza el bono con rollover: reintenta como bono sin rollover con la MISMA reference');
 
   reset({ bonusLocked: 5000 }); mode = 'bonus0';
-  r = await girox.creditUserBalance('jug', 1, 'vip-rf-5', { giftFlow: 'refund' });
+  r = await girox.creditUserBalance('jug', 1, 'vip-rf-5', { giftFlow: 'refund', description: 'Reembolso diario (2026-11-25)' });
   assert.ok(r.success); assert.deepStrictEqual(posts(), ['deposit']); assert.strictEqual(r.creditedAs, 'deposit');
+  assert.ok(/contar como BONO.*Reembolso diario.*limitacion de la API/.test(calls.filter((c) => c.m === 'post')[0].data.description));
   ok('único caso que sigue yendo a depósito: monto fuera de lo que 1girox acepta como bono (ej. $1) — queda marcado');
 
   reset(); mode = undefined;

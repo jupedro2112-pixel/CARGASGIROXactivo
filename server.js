@@ -10041,7 +10041,7 @@ app.post('/api/refunds/claim/daily', authMiddleware, async (req, res) => {
         throw e;
       }
 
-      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund' }); // #227
+      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund', description: `Reembolso diario (${dateStr})` }); // #227 · #238 con descripción (antes llegaba a 1girox sin texto)
 
       if (!depositResult.success) {
         // No se pudo acreditar → liberar la reserva para permitir reintentar.
@@ -10210,7 +10210,7 @@ app.post('/api/refunds/claim/weekly', authMiddleware, async (req, res) => {
         throw e;
       }
 
-      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund' }); // #227
+      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund', description: `Reembolso semanal (${fromDateStr} a ${toDateStr})` }); // #227 · #238 con descripción (antes llegaba a 1girox sin texto)
 
       if (!depositResult.success) {
         // No se pudo acreditar → liberar la reserva para permitir reintentar.
@@ -10379,7 +10379,7 @@ app.post('/api/refunds/claim/monthly', authMiddleware, async (req, res) => {
         throw e;
       }
 
-      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund' }); // #227
+      const depositResult = await girox.creditUserBalance(username, refundAmount, _refundReference(_refundPeriodKey, userId), { giftFlow: 'refund', description: `Reembolso mensual (${fromDateStr} a ${toDateStr})` }); // #227 · #238 con descripción (antes llegaba a 1girox sin texto)
 
       if (!depositResult.success) {
         // No se pudo acreditar → liberar la reserva para permitir reintentar.

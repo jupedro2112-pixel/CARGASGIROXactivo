@@ -14,6 +14,17 @@
 > completo en el WORKLOG de AUTOREEMBOLSOSjygactivo (#219). Los comentarios del código traído llevan la numeración de ACÁ (#232/#233/#234),
 > porque #219–#221 de este repo son otra cosa (Finpro).
 
+### 238. 🏷️ Regalo que igual sale por depósito: la descripción en 1girox avisa que es un BONO
+Pedido del owner (25/11): si un bono termina saliendo como depósito, que la descripción diga que hay que sumarlo como BONO y que sale así
+por un problema de la API.
+- `giroxService._giftAsDepositDesc`: todo regalo que cae a `/deposit` (los dos caminos: con rollover y depósito libre) viaja con
+  `BONO (contar como BONO, NO como carga): <qué regalo es> — sale como deposito por una limitacion de la API de 1girox`.
+- Los reembolsos diario / semanal / mensual ahora mandan su descripción a 1girox (antes llegaban sin texto y el panel mostraba
+  "Partner … ref vip-rf-…").
+- Casos que hoy caen ahí (con "Unificar" activo): regalo de $1, bono cumplido sin reclamar, total sobre el máximo de bono, rechazo de la
+  plataforma, no poder leer al jugador. Siguen sumando en la tarjeta roja de Transacciones.
+- Validado: `node --check`, `test-gift-fallback` (12). NO probado contra 1girox real (no sé cuántos caracteres muestra su panel).
+
 ### 237. 🔗 Regalo a un jugador con bono activo → se UNIFICA con el bono anterior (un solo bono, con el rollover nuevo)
 Pedido del owner (25/11) tras el #236: "si tiene un bono activo con rollover pendiente, que el viejo se sume al nuevo bono y se le asigne
 el rollover nuevo; no quiero darle un bono sin rollover".

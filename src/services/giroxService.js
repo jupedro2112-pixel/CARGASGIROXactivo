@@ -1356,9 +1356,15 @@ async function creditGift(username, amount, opts = {}) {
     return g;
   }
   logger.warn(`[girox] regalo a ${username} $${amt} (x${roll}) va por DEPÓSITO con rollover (figura como Carga) — ${why}`);
-  const r = await depositToUser(username, amt, description, reference, { multiplier: roll });
+  const r = await depositToUser(username, amt, _giftAsDepositDesc(description), reference, { multiplier: roll }); // #238
   if (r && r.success) { r.creditedAs = 'deposit'; r.via = 'deposit'; r.fallbackReason = why; r.rolloverApplied = roll; }
   return r;
+}
+
+// #238 Texto de un REGALO que no pudo salir como bono y va por depósito: 1girox lo rotula "Carga", así que la
+// descripción dice bien claro que hay que contarlo como BONO (lo lee quien hace el cierre en el panel de 1girox).
+function _giftAsDepositDesc(description) {
+  return ('BONO (contar como BONO, NO como carga): ' + (description || 'Regalo de la sala') + ' — sale como deposito por una limitacion de la API de 1girox').slice(0, 500);
 }
 
 // Regalo directo = bono 0. La reference es la MISMA en las dos ramas.
@@ -1398,7 +1404,7 @@ async function _creditDirectGift(username, amt, reference, description) {
   }
 
   // Depósito libre (fallback / kill switch)
-  const out = await depositToUser(username, amt, description, ref);
+  const out = await depositToUser(username, amt, _giftAsDepositDesc(description), ref); // #238
   if (out && out.success) { out.creditedAs = 'deposit'; out.via = 'deposit'; }
   return out;
 }
