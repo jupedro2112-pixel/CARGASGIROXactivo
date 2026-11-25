@@ -1,5 +1,5 @@
-// #236 Regalo que no puede salir como bono con rollover: por defecto va como BONO sin rollover (nunca como depósito,
-// que 1girox muestra como Carga). En frío: se simula la API de 1girox.   node scripts/test-gift-fallback.js
+// #236/#237 Regalo con rollover a un jugador que ya tiene un bono activo: por defecto se UNIFICA (un bono nuevo por
+// viejo + regalo, con rollover) — nunca como depósito, que 1girox muestra como Carga. En frío: se simula la API de 1girox.   node scripts/test-gift-fallback.js
 const assert = require('assert');
 const path = require('path');
 const Module = require('module');
@@ -13,10 +13,12 @@ Module._load = function (req, parent, ...rest) {
       const p = url.replace(process.env.GIROX_API_URL, ''); const m = String(method).toLowerCase();
       calls.push({ m, p, data });
       if (m === 'get' && p === '/config') return { status: 200, data: state.cfg };
-      if (m === 'get' && /^\/players\/[^/]+$/.test(p)) return { status: 200, data: { player: { username: 'jug', balance: 1000, wagering: { available: 1000, locked: state.bonusLocked, bonus_locked: state.bonusLocked, claimable_total: 0 } } } };
+      if (m === 'get' && /^\/players\/[^/]+$/.test(p)) return { status: 200, data: { player: { username: 'jug', balance: 1000, wagering: { available: 1000, locked: state.bonusLocked, bonus_locked: state.bonusLocked, claimable_total: state.claimable || 0 } } } };
       if (m === 'post' && /\/bonus$/.test(p)) {
         if (state.bonusFail && data.multiplier > 0) { const e = new Error('422'); e.response = { status: 422, data: { error: { code: state.bonusFail, message: 'x' }, code: state.bonusFail } }; throw e; }
-        return { status: 200, data: { operation: { ledger_id: 77, reference: data.reference, type: 'bonus' } } };
+        // saldo antes = 1000. Con multiplier > 0, 1girox debita el resto del bono viejo y acredita el nuevo.
+        const after = data.multiplier > 0 ? 1000 - (state.noDebit ? 0 : state.bonusLocked) + data.amount : 1000 + data.amount;
+        return { status: 200, data: { balance: after, operation: { ledger_id: 77, reference: data.reference, type: 'bonus' } } };
       }
       if (m === 'post' && /\/deposit$/.test(p)) return { status: 200, data: { operation: { ledger_id: 88, reference: data.reference, type: 'deposit' } } };
       return { status: 200, data: {} };
@@ -29,8 +31,10 @@ const girox = require(path.join(__dirname, '..', 'src/services/giroxService'));
 let mode = undefined;
 girox.setRolloverResolver(async () => 3);          // rollover GLOBAL x3 encendido
 girox.setGiftFallbackResolver(async () => mode);
+const anomalies = [];
+girox.setGiftMergeAnomalyHook((a) => anomalies.push(a));
 const posts = () => calls.filter((c) => c.m === 'post').map((c) => c.p.split('/').pop() + (c.data.multiplier != null ? ':x' + c.data.multiplier : ''));
-const reset = (o) => { calls.length = 0; Object.assign(state, { bonusLocked: 0, bonusFail: null }, o || {}); };
+const reset = (o) => { calls.length = 0; anomalies.length = 0; Object.assign(state, { bonusLocked: 0, bonusFail: null, claimable: 0, noDebit: false }, o || {}); };
 
 (async () => {
   let n = 0; const ok = (t) => { n++; console.log('  ✅ ' + t); };
@@ -40,29 +44,59 @@ const reset = (o) => { calls.length = 0; Object.assign(state, { bonusLocked: 0, 
   assert.ok(r.success); assert.deepStrictEqual(posts(), ['bonus:x3']); assert.strictEqual(r.creditedAs, 'bonus'); assert.strictEqual(r.rolloverApplied, 3);
   ok('sin bono activo: sale como bono con el rollover global (igual que antes)');
 
+  // ---- #237 UNIFICAR (default) ----
   reset({ bonusLocked: 5000 }); mode = undefined;
   r = await girox.creditUserBalance('jug', 1000, 'vip-rf-2', { giftFlow: 'refund' });
-  assert.ok(r.success); assert.deepStrictEqual(posts(), ['bonus:x0'], 'no tiene que ir a /deposit');
-  assert.strictEqual(r.creditedAs, 'bonus'); assert.strictEqual(r.rolloverApplied, 0); assert.ok(/bono activo/.test(r.fallbackReason));
-  ok('jugador CON bono activo: sale como BONO sin rollover — nunca como depósito');
+  assert.ok(r.success); assert.deepStrictEqual(posts(), ['bonus:x3'], 'un solo bono, nunca /deposit');
+  let b = calls.filter((c) => c.m === 'post')[0].data;
+  assert.strictEqual(b.amount, 6000, 'bono nuevo = resto del viejo (5000) + regalo (1000)'); assert.strictEqual(b.reference, 'vip-rf-2');
+  assert.strictEqual(r.creditedAs, 'bonus'); assert.strictEqual(r.rolloverApplied, 3); assert.strictEqual(r.mergedOld, 5000); assert.strictEqual(r.mergedTotal, 6000);
+  assert.strictEqual(anomalies.length, 0);
+  ok('jugador CON bono activo: se UNIFICA — bono nuevo por viejo + regalo, con rollover, sin depósito');
+
+  reset({ bonusLocked: 5000 }); mode = 'merge';
+  r = await girox.creditGift('jug', 500, { rolloverX: 5, reference: 'vip-roulette-1', description: 'Premio ruleta' });
+  b = calls.filter((c) => c.m === 'post')[0].data;
+  assert.deepStrictEqual(posts(), ['bonus:x3']); assert.strictEqual(b.amount, 5500); assert.ok(/bono anterior/.test(b.description));
+  ok('ruleta / fueguito (creditGift) con bono activo: también unifica');
+
+  reset({ bonusLocked: 5000, noDebit: true }); mode = undefined;
+  r = await girox.creditUserBalance('jug', 1000, 'vip-rf-2b', { giftFlow: 'refund' });
+  assert.ok(r.success); assert.strictEqual(anomalies.length, 1); assert.strictEqual(anomalies[0].gained, 6000); assert.strictEqual(anomalies[0].old, 5000);
+  ok('control: si 1girox NO debita el bono viejo (el saldo sube de más) → avisa para apagar la unificación');
+
+  reset({ bonusLocked: 5000, claimable: 300 }); mode = undefined;
+  r = await girox.creditUserBalance('jug', 1000, 'vip-rf-2c', { giftFlow: 'refund' });
+  assert.deepStrictEqual(posts(), ['deposit:x3']); assert.strictEqual(r.creditedAs, 'deposit');
+  ok('tiene un bono cumplido sin reclamar: no se unifica → depósito con rollover (queda marcado)');
+
+  reset({ bonusLocked: 499500 }); mode = undefined;
+  r = await girox.creditUserBalance('jug', 1000, 'vip-rf-2d', { giftFlow: 'refund' });
+  assert.deepStrictEqual(posts(), ['deposit:x3']);
+  ok('unificado superaría el máximo de bono de la plataforma: depósito con rollover');
+
+  reset({ bonusLocked: 40 }); mode = undefined;
+  r = await girox.creditUserBalance('jug', 1000, 'vip-rf-2e', { giftFlow: 'refund' });
+  assert.deepStrictEqual(posts(), ['bonus:x3']); assert.strictEqual(calls.filter((c) => c.m === 'post')[0].data.amount, 1000); assert.strictEqual(r.mergedOld, undefined);
+  ok('resto de bono mínimo (hasta $50): bono normal, como siempre');
 
   reset({ bonusLocked: 5000 }); mode = 'bonus0';
-  r = await girox.creditGift('jug', 500, { rolloverX: 5, reference: 'vip-roulette-1', description: 'Premio ruleta' });
-  assert.deepStrictEqual(posts(), ['bonus:x0']); assert.strictEqual(r.creditedAs, 'bonus');
-  ok('ruleta / fueguito (creditGift) con bono activo: también bono sin rollover');
+  r = await girox.creditUserBalance('jug', 1000, 'vip-rf-2f', { giftFlow: 'refund' });
+  assert.deepStrictEqual(posts(), ['bonus:x0']); assert.strictEqual(r.rolloverApplied, 0);
+  ok('opción del panel "bono sin rollover": sale como bono 0');
 
   reset({ bonusLocked: 5000 }); mode = 'deposit';
   r = await girox.creditUserBalance('jug', 1000, 'vip-rf-3', { giftFlow: 'refund' });
   assert.ok(r.success); assert.deepStrictEqual(posts(), ['deposit:x3']); assert.strictEqual(r.creditedAs, 'deposit'); assert.strictEqual(r.rolloverApplied, 3); assert.ok(r.fallbackReason);
   ok('opción del panel "depósito con rollover": se comporta como antes y avisa que fue depósito');
 
-  reset({ bonusFail: 'bonus_out_of_range' }); mode = undefined;
+  reset({ bonusFail: 'bonus_out_of_range' }); mode = 'bonus0';
   r = await girox.creditUserBalance('jug', 1000, 'vip-rf-4', { giftFlow: 'refund' });
   assert.ok(r.success); assert.deepStrictEqual(posts(), ['bonus:x3', 'bonus:x0']); assert.strictEqual(r.creditedAs, 'bonus');
   assert.strictEqual(calls.filter((c) => c.m === 'post')[0].data.reference, calls.filter((c) => c.m === 'post')[1].data.reference, 'misma reference en los dos intentos');
   ok('la plataforma rechaza el bono con rollover: reintenta como bono sin rollover con la MISMA reference');
 
-  reset({ bonusLocked: 5000 }); mode = undefined;
+  reset({ bonusLocked: 5000 }); mode = 'bonus0';
   r = await girox.creditUserBalance('jug', 1, 'vip-rf-5', { giftFlow: 'refund' });
   assert.ok(r.success); assert.deepStrictEqual(posts(), ['deposit']); assert.strictEqual(r.creditedAs, 'deposit');
   ok('único caso que sigue yendo a depósito: monto fuera de lo que 1girox acepta como bono (ej. $1) — queda marcado');

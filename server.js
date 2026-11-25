@@ -501,12 +501,25 @@ async function getGlobalBonusRollover() {
   out.fallback = _giftFallbackFromCfg(raw); // #236
   return out;
 }
-// #236 Regalo que NO puede salir como bono con rollover (el jugador ya tiene un bono activo, etc.):
-// 'bonus0' (default) = bono sin rollover, figura como BONO en 1girox · 'deposit' = depósito con rollover, figura como CARGA.
-function _giftFallbackFromCfg(raw) { return raw && raw.fallback === 'deposit' ? 'deposit' : 'bonus0'; }
+// #236/#237 Regalo con rollover a un jugador que YA tiene un bono activo: 'merge' (default) = se UNIFICA (un bono nuevo por
+// resto del viejo + regalo, con el rollover nuevo; figura como BONO) · 'deposit' = depósito con rollover (figura como CARGA) ·
+// 'bonus0' = bono sin rollover. Detalle en giroxService (`_giftFallbackMode`).
+function _giftFallbackFromCfg(raw) { return raw && (raw.fallback === 'deposit' || raw.fallback === 'bonus0') ? raw.fallback : 'merge'; }
+// #237 Si una unificación deja al jugador con MÁS de lo esperado (1girox no debitó el bono viejo), se apaga sola
+// (vuelve a 'deposit') y se avisa: es plata, no se sigue a ciegas.
+girox.setGiftMergeAnomalyHook(async (a) => {
+  try {
+    const raw = (await getConfig('bonusRolloverGlobal', null).catch(() => null)) || {};
+    await Config.set('bonusRolloverGlobal', Object.assign({ enabled: raw.enabled !== false, x: raw.x != null ? raw.x : 3 }, { fallback: 'deposit', mergeOffAt: new Date().toISOString(), mergeOffWhy: `saldo de ${a.username} subió $${a.gained} con un regalo de $${a.gift} (bono viejo $${a.old})` }), 'sistema');
+    const msg = `🛑 UNIFICACIÓN DE BONOS APAGADA — ${a.username}: el saldo subió $${a.gained} y el regalo era $${a.gift} (bono anterior $${a.old}, ref ${a.reference || '-'}). 1girox no habría debitado el bono viejo. Los regalos vuelven a salir por depósito con rollover hasta revisarlo (Comandos → Rollover GLOBAL).`;
+    logger.error('[gift-merge] ' + msg);
+    try { if (telegramAlert.isEnabled()) await telegramAlert.send(telegramAlert.esc(msg)); } catch (_) {}
+  } catch (e) { try { logger.error('[gift-merge] no se pudo apagar: ' + e.message); } catch (_) {} }
+});
 girox.setGiftFallbackResolver(async () => _giftFallbackFromCfg(await getConfig('bonusRolloverGlobal', null).catch(() => null)));
 // #236 metadata de la Transaction de un regalo: por qué vía salió en 1girox (solo si NO fue bono normal).
 function _giftMeta(r) {
+  if (r && r.mergedOld) return { metadata: { creditedAs: 'bonus', mergedBonus: Number(r.mergedOld) } }; // #237 unificado con el bono anterior
   if (!r || (r.creditedAs !== 'wager' && r.creditedAs !== 'deposit')) return {};
   return { metadata: Object.assign({ creditedAs: r.creditedAs }, r.creditedAs === 'deposit' && r.fallbackReason ? { giftFallback: String(r.fallbackReason).slice(0, 200) } : {}) };
 }
@@ -9617,7 +9630,7 @@ app.post('/api/cashback/claim', authMiddleware, authLimiter, async (req, res) =>
       id: uuidv4(), type: 'bonus', userId, username, amount,
       description: `Reembolso en vivo ${st.pct}% (pérdida real acumulada)`,
       transactionId: txId,
-      metadata: { source: 'instant_cashback', dateKey: st.dateKey, seq: claimDoc.seq, creditedAs, duplicate: !!credit.duplicate },
+      metadata: { source: 'instant_cashback', dateKey: st.dateKey, seq: claimDoc.seq, creditedAs, duplicate: !!credit.duplicate, ...(credit.mergedOld ? { mergedBonus: Number(credit.mergedOld) } : {}) },
       timestamp: new Date()
     }).catch((e) => logger.warn(`[cashback] no se pudo guardar la Transaction de ${username}: ${e.message}`));
     try {
@@ -9645,9 +9658,9 @@ app.post('/api/admin/bonus-rollover', authMiddleware, adminMiddleware, async (re
     if (!BONUS_ROLLOVER_OPTIONS.includes(x)) return res.status(400).json({ error: `Rollover inválido. Opciones: ${BONUS_ROLLOVER_OPTIONS.map((n) => 'x' + n).join(', ')}` });
     const enabled = b.enabled !== false;
     const prevCfg = await getConfig('bonusRolloverGlobal', null).catch(() => null);
-    const fallback = b.fallback === 'deposit' || b.fallback === 'bonus0' ? b.fallback : _giftFallbackFromCfg(prevCfg); // #236
+    const fallback = ['merge', 'deposit', 'bonus0'].includes(b.fallback) ? b.fallback : _giftFallbackFromCfg(prevCfg); // #236/#237
     await Config.set('bonusRolloverGlobal', { enabled, x, fallback }, req.user.username);
-    logger.info(`[bonus-rollover] ${req.user.username}: global ${enabled ? 'ON' : 'OFF'} x${x} · regalo sin bono posible → ${fallback === 'deposit' ? 'depósito con rollover (Carga)' : 'bono sin rollover'}`);
+    logger.info(`[bonus-rollover] ${req.user.username}: global ${enabled ? 'ON' : 'OFF'} x${x} · jugador con bono activo → ${fallback === 'deposit' ? 'depósito con rollover (Carga)' : fallback === 'bonus0' ? 'bono sin rollover' : 'unificar bonos'}`);
     res.json(await getGlobalBonusRollover());
   } catch (e) { res.status(500).json({ error: 'Error del servidor' }); }
 });
@@ -15144,7 +15157,7 @@ app.post('/api/fire/claim-reward', authMiddleware, async (req, res) => {
         amount: rewardAmount,
         description: `Fueguito - ${rewardDesc}`,
         transactionId: bonusResult.data?.transfer_id || bonusResult.data?.transferId || null,
-        metadata: { source: 'fire_reward', creditedAs: bonusResult.creditedAs || null, rollover: _fireMult },
+        metadata: { source: 'fire_reward', creditedAs: bonusResult.creditedAs || null, rollover: _fireMult, ...(bonusResult.mergedOld ? { mergedBonus: Number(bonusResult.mergedOld) } : {}) },
         timestamp: new Date()
       });
     } catch (txErr) {
@@ -15155,7 +15168,7 @@ app.post('/api/fire/claim-reward', authMiddleware, async (req, res) => {
 
     const _fireApplied = bonusResult.rolloverApplied != null ? Math.max(0, Number(bonusResult.rolloverApplied) || 0) : _fireMult; // #236 lo que REALMENTE se aplicó (puede ser 0 si salió como bono sin rollover)
     const _rolloverMsg = bonusResult.creditedAs === 'wager' ? await _giftNote(bonusResult, { short: true }) : _fireApplied > 0
-      ? ` Para poder RETIRARLOS tenés que apostar $${Math.round(rewardAmount * _fireApplied).toLocaleString('es-AR')} (rollover x${_fireApplied}). ¡Ya podés jugarlos! Las apuestas en DEPORTES no suman para el rollover.` +
+      ? (bonusResult.mergedTotal ? ` Se sumaron a tu bono anterior: ahora tenés un solo bono de $${Math.round(bonusResult.mergedTotal).toLocaleString('es-AR')}.` : '') + ` Para poder RETIRARLOS tenés que apostar $${Math.round((bonusResult.mergedTotal || rewardAmount) * _fireApplied).toLocaleString('es-AR')} (rollover x${_fireApplied}). ¡Ya podés jugarlos! Las apuestas en DEPORTES no suman para el rollover.` +
         (bonusResult.claimRequired ? ' Cuando completes el objetivo, tocá el regalito 🎁 en el casino para liberarlos.' : '')
       : '';
     res.json({
@@ -17113,6 +17126,14 @@ app.get('/api/admin/transactions', authMiddleware, adminMiddleware, async (req, 
         { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }]);
       if (gd[0]) { giftsAsDeposit = gd[0].total || 0; giftsAsDepositCount = gd[0].count || 0; }
     } catch (_) {}
+    // #237 Bonos anteriores re-emitidos al UNIFICAR: en 1girox el Bono figura por (viejo + regalo) y hay una "Cancelación de bono" por el viejo.
+    let mergedBonus = 0, mergedBonusCount = 0;
+    try {
+      const mb = await Transaction.aggregate([
+        { $match: Object.assign({}, baseQuery, { 'metadata.mergedBonus': { $gt: 0 } }) },
+        { $group: { _id: null, total: { $sum: '$metadata.mergedBonus' }, count: { $sum: 1 } } }]);
+      if (mb[0]) { mergedBonus = mb[0].total || 0; mergedBonusCount = mb[0].count || 0; }
+    } catch (_) {}
     const summary = {
       deposits,
       withdrawals,
@@ -17126,6 +17147,7 @@ app.get('/api/admin/transactions', authMiddleware, adminMiddleware, async (req, 
       cashback,
       gifts,
       giftsAsDeposit, giftsAsDepositCount, // #236
+      mergedBonus, mergedBonusCount, // #237
       wagers, // #226 informativo (plata ficticia de la casa; no entra en gifts ni en el saldo neto)
       netBalance: deposits - withdrawals,
       totalTransactions: totalAll
@@ -23382,7 +23404,7 @@ async function _recordRouletteTransaction(spinId, userId, username, prizeARS, la
       description: `Ruleta diaria — premio en saldo${label ? ` (${label})` : ''}`,
       adminUsername: 'auto-roulette', adminRole: 'system',
       transactionId: txId || null,
-      metadata: { source: 'daily_roulette', spinId, creditedAs: (credit && credit.creditedAs) || null },
+      metadata: { source: 'daily_roulette', spinId, creditedAs: (credit && credit.creditedAs) || null, ...(credit && credit.mergedOld ? { mergedBonus: Number(credit.mergedOld) } : {}) },
       timestamp: new Date()
     });
   } catch (e) {

@@ -536,6 +536,11 @@ reintento manda la misma reference y la plataforma responde `duplicate:true`.
   (`ignoreGlobalRollover:true`). Lo que se le DICE al cliente (fueguito, reembolso en
   vivo, código de bienvenida, lotes) usa `applyGlobalRollover(valorDelFlujo)` para
   coincidir con lo acreditado; el cliente además devuelve `rolloverApplied`.
+- **Regalo a un jugador con bono activo = UNIFICAR (#237, default):** `creditGift` con `fallback:'merge'` otorga `/bonus` por
+  `bonus_locked + regalo` con el rollover vigente (1girox cancela el resto del viejo). Devuelve `mergedOld`, `mergedTotal`, `giftAmount`;
+  el caller sigue registrando SOLO el regalo y agrega `metadata.mergedBonus` (`_giftMeta` o a mano). Control por saldo de la respuesta →
+  `setGiftMergeAnomalyHook` apaga el modo. Un mensaje al cliente con el objetivo de apuesta usa `mergedTotal || monto`.
+  Lo que sigue (#236) describe los otros dos modos.
 - **Regalo que NO puede salir como bono con rollover (#236):** si el guard de bono activo, el multiplicador o un 422 lo impiden,
   `creditGift` ya NO cae a depósito por defecto: llama a `_creditDirectGift` (bono 0, figura como Bono, misma reference) y devuelve
   `rolloverApplied:0` + `fallbackReason`. `Config['bonusRolloverGlobal'].fallback` = `'bonus0'` (default) | `'deposit'` (depósito con

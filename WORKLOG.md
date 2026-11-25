@@ -14,6 +14,29 @@
 > completo en el WORKLOG de AUTOREEMBOLSOSjygactivo (#219). Los comentarios del código traído llevan la numeración de ACÁ (#232/#233/#234),
 > porque #219–#221 de este repo son otra cosa (Finpro).
 
+### 237. 🔗 Regalo a un jugador con bono activo → se UNIFICA con el bono anterior (un solo bono, con el rollover nuevo)
+Pedido del owner (25/11) tras el #236: "si tiene un bono activo con rollover pendiente, que el viejo se sume al nuevo bono y se le asigne
+el rollover nuevo; no quiero darle un bono sin rollover".
+- **Causa confirmada con los logs de AWS** (dos instancias, ~9–25/11): 312 regalos fueron por depósito con rollover (= "Carga" en 1girox);
+  **239 porque el jugador ya tenía un bono activo** (ninguno con algo "a reclamar"; resto de bono viejo: mediana ~$1.000, máx ~$44.000),
+  63 por monto de $1 (fuera del mínimo de bono), 6 por no poder leer al jugador, 4 `insufficient_funds`. 55 el 23/11.
+- **Cómo se unifica** (manual Partner API §2.8 "bono sobre bono": otorgar un bono a quien ya tiene uno debita lo que le queda del viejo
+  — "Cancelación de bono" — y rige la config del nuevo): `creditGift` otorga UN bono por **resto del viejo (`bonus_locked`) + regalo** con
+  el rollover vigente y la misma reference. El jugador gana solo el regalo; todo queda bajo rollover (viejo + regalo) × x, barra desde 0.
+- **Modo** en `Config['bonusRolloverGlobal'].fallback`: `'merge'` (DEFAULT nuevo) | `'deposit'` | `'bonus0'` (default del #236, que el
+  owner rechazó). Radios en la card "🎯 Rollover GLOBAL de bonos".
+- **No se unifica (va por depósito con rollover, marcado):** bono cumplido sin reclamar (`claimable_total > 0`), total sobre el máximo de
+  bono de la plataforma, monto fuera de rango, rechazo de la plataforma. Resto de bono ≤ $50: bono normal como siempre.
+- **Control de plata:** la respuesta de `/bonus` trae el saldo; si subió bastante más que el regalo (1girox no debitó el viejo) →
+  `setGiftMergeAnomalyHook`: la unificación SE APAGA sola (vuelve a `'deposit'`), log `[gift-merge]` y Telegram.
+- **Para el cierre:** en 1girox el Bono figura por (viejo + regalo) y hay una "Cancelación de bono" por el viejo. La Transaction local
+  guarda el regalo + `metadata.mergedBonus` (resto unificado); tarjeta "Bonos anteriores unificados" en Transacciones.
+- **NO probado contra 1girox real.** Sin verificar en vivo: (a) que lo debitado sea exactamente `bonus_locked`, (b) que la cancelación
+  le devuelva esa plata al saldo del AGENTE (si no, cada unificación le cuesta al cajero el resto del bono viejo), (c) cómo queda escrito
+  en el panel de 1girox. Hay una ventana de milisegundos entre leer el bono y otorgar el nuevo: si el jugador apuesta justo ahí, la
+  diferencia queda a favor o en contra de él. **Mirar el primer caso real** (log `[girox] unificación de X: saldo A → B`).
+- Validado: `node --check`, `check-tdz`, `test-gift-fallback` (12) y el resto. admin-sw v71.
+
 ### 236. 🎁 Regalos que 1girox anotaba como CARGA (descuadre del cierre) → ahora salen como BONO
 Reporte de un encargado de cierres (25/11): en la auditoría del 23/11 aparecieron 58 regalos por $478.299 (reembolsos semanales y diarios,
 rakeback, ruleta) anotados en 1girox como "Carga" → faltante en el cierre.
